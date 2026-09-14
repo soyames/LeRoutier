@@ -1,76 +1,40 @@
 # LeRoutier
 
-LeRoutier is a transport platform designed around the real journeys of passengers, drivers and transport operators, starting with Benin.
+LeRoutier is a Bénin-focused interurban mobility platform built around one shared transport domain: ordered stops, segment-aware seat capacity, reservations, boarding, live operations and offline fallbacks.
 
-The project is structured as a monorepo so passenger/driver experiences, operations, backend services, shared domain logic and infrastructure evolve together without duplicating core transport rules.
+## Frontend applications
 
-## Product surfaces
+- `apps/passenger-web` — passenger PWA-style React interface: search, segment-aware availability, tickets, stations, trip tracking and account.
+- `apps/driver-web` — driver/chef de bord interface: active route, passenger manifest, boarding scanner, offline validation, incidents and driver documents.
+- `apps/ops-web` — regulation interface: fleet telemetry, corridor capacity, station load, incident handling and recovery.
 
-- **Passenger PWA** — search, trip discovery, booking, payment, trip tracking and alerts.
-- **Driver PWA** — assigned trips, passenger/boarding operations, capacity, incidents and trip execution.
-- **Operations/Admin** — network, stops, routes, vehicles, drivers, fares, incidents, payments and reporting.
-- **API** — authoritative transport, booking, capacity, payment, location and operational business logic.
-- **USSD integration** — accessibility path for users without a smartphone/data-heavy experience.
+All three applications use the shared LeRoutier design system from `packages/ui`, based on the supplied Stitch interfaces and LeRoutier brand identity.
 
-## Repository structure
+## Technical stack
 
-```text
-apps/
-  passenger-web/       Passenger PWA
-  driver-web/          Driver PWA
-  ops-web/             Operations/admin web app
-services/
-  api/                  Core backend/API
-  worker/               Background jobs and async processing
-  ussd/                 USSD integration service
-packages/
-  domain/               Shared transport-domain types/rules
-  database/             PostgreSQL/Neon schema and migrations
-  ui/                   Shared UI primitives
-  config/               Shared configuration
-  geo/                  Mapping/geospatial abstractions
-  notifications/        Notification/audio contracts
-infra/
-  docker/               Local container configuration
-  deployment/           Deployment definitions
-  monitoring/           Observability configuration
-docs/
-  product/              Vision, scope and user journeys
-  architecture/         Technical decisions and diagrams
-  domain/               Transport-domain documentation
-  api/                  API contracts
-  operations/           Operational procedures
-  security/             Security/privacy documentation
-  research/             Market/geographic research
-scripts/                 Development/maintenance scripts
-tests/
-  e2e/                  Cross-application end-to-end tests
-  fixtures/             Shared test fixtures
-.github/
-  workflows/            CI workflows
-  ISSUE_TEMPLATE/       Issue templates
+- React.js 19 + Vite
+- pnpm workspaces
+- Vercel deployment
+- Neon PostgreSQL for the shared backend database
+- API-first architecture: PWA, driver tools, operations and USSD must call the same booking/capacity logic
+
+## Local development
+
+```bash
+pnpm install
+pnpm --filter @leroutier/passenger-web dev
+pnpm --filter @leroutier/driver-web dev
+pnpm --filter @leroutier/ops-web dev
 ```
 
-## Core principles
+To build everything:
 
-1. Model real transport journeys, including intermediate stops and segments—not only origin/destination pairs.
-2. Capacity is segment-aware: a seat becoming free at an intermediate stop can be sold for the remaining journey.
-3. Passenger and driver state must stay synchronized through one authoritative backend.
-4. Support low-connectivity environments and progressive enhancement.
-5. Geography, fares, operators and payment providers are configuration/data—not hard-coded UI assumptions.
-6. Safety, incident handling and passenger recovery are first-class workflows.
-7. Build auditable payment and operational records from the beginning.
+```bash
+pnpm build
+```
 
-## Initial technical direction
+## Core product rule
 
-- Progressive Web Apps for passenger and driver experiences.
-- PostgreSQL, with Neon as the intended managed database platform.
-- OpenStreetMap-compatible mapping stack; Leaflet is suitable for web map rendering.
-- API-first backend with explicit domain services.
-- CI, automated tests and environment validation from the first implementation.
+Capacity is computed per segment, not per whole route. A seat occupied from Cotonou to Bohicon may be sold again from Bohicon onward after the passenger has alighted. Web, driver, operations and USSD clients must never implement separate capacity rules.
 
-See `docs/product/PRODUCT_VISION.md`, `docs/architecture/ARCHITECTURE.md`, and `docs/domain/TRANSPORT_MODEL.md` before implementing product behavior.
-
-## Status
-
-Repository foundation initialized. Product implementation follows the documented domain model and architecture decisions.
+See `docs/UI_IMPLEMENTATION.md` for the UI architecture and coherence corrections.
