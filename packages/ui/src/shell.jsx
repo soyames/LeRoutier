@@ -1,7 +1,11 @@
-import React from 'react';
 import { Bell, Wifi, WifiOff } from 'lucide-react';
 import { Logo } from './logo.jsx';
 
+/**
+ * @typedef {import('react').ReactNode} ReactNode
+ * @typedef {import('lucide-react').LucideIcon} Icon
+ * @param {{ role: string, title: string, subtitle?: string, nav?: { id: string, label: string, icon: Icon }[], active?: string, onNavigate?: (id: string) => void, children: ReactNode, online?: boolean, actions?: ReactNode }} props
+ */
 export function AppShell({ role, title, subtitle, nav = [], active, onNavigate, children, online = true, actions }) {
   return <div className="lr-app">
     <header className="lr-header">
@@ -16,8 +20,13 @@ export function AppShell({ role, title, subtitle, nav = [], active, onNavigate, 
   </div>;
 }
 
+/** @param {{ children: ReactNode, className?: string, tone?: string }} props */
 export function Card({ children, className = '', tone = 'default' }) { return <section className={`card card-${tone} ${className}`}>{children}</section>; }
+/** @param {{ children: ReactNode, tone?: string }} props */
 export function Badge({ children, tone = 'neutral' }) { return <span className={`badge badge-${tone}`}>{children}</span>; }
+/** @param {{ label: string, value: ReactNode, hint?: string, icon?: Icon, tone?: string }} props */
 export function StatCard({ label, value, hint, icon: Icon, tone = 'default' }) { return <Card className="stat-card"><div className={`stat-icon stat-${tone}`}>{Icon && <Icon size={18}/>}</div><span>{label}</span><strong>{value}</strong>{hint && <small>{hint}</small>}</Card>; }
+/** @param {{ icon?: Icon, title: string, trailing?: ReactNode }} props */
 export function SectionTitle({ icon: Icon, title, trailing }) { return <div className="section-title"><div>{Icon && <Icon size={20}/>}<h2>{title}</h2></div>{trailing}</div>; }
+/** @param {{ icon?: Icon, title: string, text: string, action?: ReactNode }} props */
 export function EmptyState({ icon: Icon, title, text, action }) { return <Card className="empty"><div className="empty-icon">{Icon && <Icon size={26}/>}</div><strong>{title}</strong><p>{text}</p>{action}</Card>; }

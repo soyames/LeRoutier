@@ -27,8 +27,9 @@ Create three Vercel projects from the same repository if deploying independently
 - `apps/driver-web`
 - `apps/ops-web`
 
-Build command: `pnpm build`
+Each app's `vercel.json` defines the Vite framework, build and install commands,
+`dist` output and SPA fallback. Keep source files outside the app Root Directory
+included so the workspace and shared UI are available.
 
-Output directory: `dist`
-
-Install command: `pnpm install --frozen-lockfile=false`
+See [the deployment runbook](operations/VERCEL.md) for the complete settings and
+validation commands. Installation uses the committed root lockfile in frozen mode.
