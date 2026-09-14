@@ -12,6 +12,13 @@
     "react-dom": "^19.1.1"
   },
   "dependencies": {
-    "lucide-react": "^0.468.0"
-  }
+    "lucide-react": "catalog:"
+  },
+  "devDependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "sideEffects": [
+    "**/*.css"
+  ]
 }

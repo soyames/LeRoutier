@@ -14,19 +14,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile=false
+        run: pnpm install --frozen-lockfile
       - name: Lint
-        run: pnpm lint --if-present
+        run: pnpm lint
       - name: Typecheck
-        run: pnpm typecheck --if-present
-      - name: Test
-        run: pnpm test --if-present
+        run: pnpm typecheck
       - name: Build
-        run: pnpm build --if-present
+        run: pnpm build
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Test production apps
+        run: pnpm test
+
+  app-root-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [passenger-web, driver-web, ops-web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: Run the Vercel install command from the app directory
+        working-directory: apps/${{ matrix.app }}
+        run: node -e "require('node:child_process').execSync(require('./vercel.json').installCommand, {stdio:'inherit'})"
+      - name: Run the Vercel build command from the app directory
+        working-directory: apps/${{ matrix.app }}
+        run: node -e "require('node:child_process').execSync(require('./vercel.json').buildCommand, {stdio:'inherit'})"

@@ -1,0 +1,7 @@
+{
+  "extends": "../../jsconfig.json",
+  "include": [
+    "src",
+    "vite.config.js"
+  ]
+}

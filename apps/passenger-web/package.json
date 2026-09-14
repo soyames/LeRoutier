@@ -6,18 +6,19 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "echo lint-passenger",
-    "test": "echo test-passenger",
-    "typecheck": "echo typecheck-passenger"
+    "preview": "vite preview",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --project jsconfig.json"
   },
   "dependencies": {
-    "@leroutier/ui": "file:../../packages/ui",
-    "lucide-react": "^0.468.0",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "@leroutier/ui": "workspace:*",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-router": "catalog:"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.0.5"
+    "@vitejs/plugin-react": "catalog:",
+    "vite": "catalog:"
   }
 }
