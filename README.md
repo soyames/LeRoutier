@@ -20,6 +20,9 @@ All three applications use the shared LeRoutier design system from `packages/ui`
 
 ## Local development
 
+Use Node.js 22.13+ (Node 22 LTS in CI) and the pnpm version pinned in
+`package.json`. Enable the pnpm command with `corepack enable` first.
+
 ```bash
 pnpm install
 pnpm --filter @leroutier/passenger-web dev
@@ -32,6 +35,30 @@ To build everything:
 ```bash
 pnpm build
 ```
+
+The apps run on ports 3000 (Passenger), 3001 (Driver) and 3002 (Regulation).
+Build an individual app with `pnpm --filter @leroutier/passenger-web build`
+(or the corresponding Driver/Ops name), or run `pnpm build` inside its directory.
+
+Dependencies are installed once at the repository root. Keep `pnpm-lock.yaml`
+committed and use `pnpm install --frozen-lockfile` in CI. Shared dependency versions
+live in the `pnpm-workspace.yaml` catalog; local packages use `workspace:*`.
+Do not use app-local npm installs or replace workspace dependencies with `file:`.
+
+Validation:
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm build
+pnpm exec playwright install chromium
+pnpm test
+```
+
+The browser tests serve the production bundles and exercise direct URLs, reloads,
+navigation/history and the shared UI on desktop and mobile. See
+[Vercel deployment](docs/operations/VERCEL.md) for app Root Directory settings,
+SPA routing and backend environment boundaries.
 
 ## Core product rule
 

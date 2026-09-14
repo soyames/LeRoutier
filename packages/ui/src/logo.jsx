@@ -1,4 +1,3 @@
-import React from 'react';
 
 export function Logo({ compact = false, className = '' }) {
   if (compact) {
