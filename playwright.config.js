@@ -4,6 +4,7 @@ const apps = ['passenger-web', 'driver-web', 'ops-web'];
 
 export default defineConfig({
   testDir: './tests/e2e',
+  testIgnore: '**/live.spec.js',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

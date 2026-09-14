@@ -15,7 +15,8 @@
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "react-router": "catalog:"
+    "react-router": "catalog:",
+    "@leroutier/config": "workspace:*"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "catalog:",

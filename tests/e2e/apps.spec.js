@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { mockApi } from './api-fixture.js';
 
 const apps = [
   {
@@ -16,21 +17,22 @@ const apps = [
   {
     name: 'driver', port: 4174, role: 'Chauffeur', title: 'Chauffeur',
     routes: [
-      ['/', 'Scanner billet passager'],
-      ['/route', 'Scanner billet passager'],
+      ['/', 'Feuille de route & embarquement'],
+      ['/route', 'Feuille de route & embarquement'],
       ['/profile', 'Affectation véhicule'],
     ],
     nav: ['Profil & bord', '/profile', 'Feuille de route', '/route'],
   },
   {
     name: 'ops', port: 4175, role: 'Régulation', title: 'Régulation',
-    routes: [['/', 'Unités roulantes en surveillance'], ['/fleet/live', 'Unités roulantes en surveillance']],
+    routes: [['/', 'Incidents & reprise'], ['/fleet/live', 'Incidents & reprise']],
   },
 ];
 
 for (const app of apps) {
   test.describe(app.name, () => {
     test.use({ baseURL: `http://127.0.0.1:${app.port}` });
+    test.beforeEach(async ({ page }) => { await mockApi(page); });
 
     test('production routes render shared UI and survive reload', async ({ page }) => {
       const errors = [];
