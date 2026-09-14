@@ -8,8 +8,17 @@
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
     "lint": "eslint . --max-warnings 0",
-    "test": "playwright test",
-    "typecheck": "tsc --project jsconfig.json"
+    "test": "pnpm test:unit && pnpm test:api && pnpm test:frontend",
+    "typecheck": "tsc --project jsconfig.json",
+    "test:unit": "node --test packages/domain/tests/*.test.js packages/geo/tests/*.test.js",
+    "test:database": "node --env-file=.env.local --test --test-concurrency=1 packages/database/tests/*.test.js",
+    "test:api": "pnpm --filter @leroutier/api test",
+    "test:frontend": "playwright test",
+    "db:migrate": "node --env-file=.env.local packages/database/scripts/migrate.js",
+    "db:seed": "node --env-file=.env.local packages/database/scripts/seed.js",
+    "db:validate": "node --env-file=.env.local packages/database/scripts/validate.js",
+    "secrets:check": "node scripts/check-secrets.mjs",
+    "test:live": "node --env-file=.env.local scripts/test-live.mjs"
   },
   "engines": {
     "node": ">=22.13.0"
@@ -24,6 +33,7 @@
     "eslint": "^10.10.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^16.5.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@types/pg": "^8.15.5"
   }
 }

@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
@@ -9,7 +13,20 @@
     "checkJs": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["apps/*/src", "apps/*/vite.config.js", "packages/*/src", "tests/**/*.js", "playwright.config.js"]
+  "include": [
+    "apps/*/src",
+    "apps/*/vite.config.js",
+    "packages/*/src",
+    "tests/**/*.js",
+    "playwright.config.js",
+    "services/*/src",
+    "services/*/api",
+    "services/*/tests",
+    "packages/*/tests",
+    "packages/*/scripts"
+  ]
 }

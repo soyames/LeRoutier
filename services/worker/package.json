@@ -1,0 +1,5 @@
+{
+  "name": "@leroutier/worker", "version": "0.1.0", "private": true, "type": "module",
+  "scripts": { "expire": "node --env-file=../../.env.local src/expire.js" },
+  "dependencies": { "@leroutier/database": "workspace:*" }
+}

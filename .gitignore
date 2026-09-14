@@ -16,6 +16,8 @@ test-results/
 !.env.example
 *.pem
 *.key
+# Credential exports must never enter this repository.
+leroutier-db.txt
 
 # local databases / caches
 *.sqlite
