@@ -1,0 +1,39 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+.next/
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+
+# environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# local databases / caches
+*.sqlite
+*.sqlite3
+.cache/
+.tmp/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# deployment
+.vercel/
+.wrangler/
