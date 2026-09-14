@@ -1,0 +1,8 @@
+import React from 'react';
+
+export function Logo({ compact = false, className = '' }) {
+  if (compact) {
+    return <svg className={className} viewBox="0 0 56 56" role="img" aria-label="LeRoutier"><defs><linearGradient id="lr-compact" x1="0" x2="1" y1="0" y2="1"><stop stopColor="#F59E0B"/><stop offset="1" stopColor="#D97706"/></linearGradient></defs><rect x="2" y="2" width="52" height="52" rx="15" fill="url(#lr-compact)"/><path d="M16 39 28 17h13L29 39H16Z" fill="#0F172A"/><path d="M24 39 36 17h6L30 39h-6Z" fill="#fff" opacity=".92"/><circle cx="30" cy="24" r="3.5" fill="#059669"/></svg>;
+  }
+  return <svg className={className} viewBox="0 0 240 60" role="img" aria-label="LeRoutier Bénin Mobilité"><defs><linearGradient id="lr-brand" x1="0" x2="1" y1="0" y2="1"><stop stopColor="#F59E0B"/><stop offset="1" stopColor="#D97706"/></linearGradient></defs><rect x="4" y="8" width="44" height="44" rx="12" fill="url(#lr-brand)"/><path d="M16 36 26 18h10L26 36H16Z" fill="#0F172A"/><path d="M22 36 32 18h5L27 36h-5Z" fill="#fff" opacity=".92"/><circle cx="28" cy="24" r="3" fill="#059669"/><text x="58" y="38" fontFamily="Plus Jakarta Sans, sans-serif" fontSize="24" fontWeight="800" fill="#0F172A" letterSpacing="-.5">Le<tspan fill="#D97706">Routier</tspan></text><text x="59" y="50" fontFamily="Plus Jakarta Sans, sans-serif" fontSize="8.5" fontWeight="700" fill="#64748B" letterSpacing="1.45">BÉNIN MOBILITÉ</text></svg>;
+}
