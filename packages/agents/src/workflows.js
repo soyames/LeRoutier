@@ -49,21 +49,25 @@ export function createWorkflows({ actions }) {
       ],
     },
     'delay-management': {
-      trigger: 'service.position', description: 'Evaluate a position update against open delay incidents and surface affected passengers to Ops.',
+      trigger: 'service.position', description: 'Evaluate a position update against open delay incidents, notify affected passengers and surface Ops.',
       steps: [
         { name: 'evaluate', run: async (ctx, executor) => {
           const open = await executor.db.transaction(async tx => (await tx.query(`SELECT id FROM incidents WHERE service_id=$1 AND kind='delay' AND status<>'resolved' ORDER BY created_at DESC LIMIT 1`, [ctx.serviceId])).rows);
           return { delayed: open.length > 0, incidentId: open[0]?.id ?? null };
         } },
-        { name: 'surface', run: async (ctx, executor) => {
-          if (!ctx.evaluate.delayed) return { flagged: false };
-          await actions['alert.create'].run(executor, { kind: 'delay', serviceId: ctx.serviceId, message: 'Retard détecté sur le service; les passagers concernés sont à notifier.' });
+        { name: 'notify', when: ctx => ctx.evaluate.delayed, run: async (ctx, executor) => {
+          const passengers = await executor.db.transaction(async tx => (await tx.query(`SELECT DISTINCT passenger_id FROM bookings WHERE service_id=$1 AND status IN ('held','confirmed','boarded')`, [ctx.serviceId])).rows);
+          if (!passengers.length) return { notified: 0 };
+          return actions['notification.send'].run(executor, { recipients: passengers.map(p => p.passenger_id), template: 'service_delayed', data: { serviceId: ctx.serviceId } });
+        } },
+        { name: 'surface', when: ctx => ctx.evaluate.delayed, run: async (ctx, executor) => {
+          await actions['alert.create'].run(executor, { kind: 'delay', serviceId: ctx.serviceId, message: 'Retard détecté sur le service; les passagers concernés ont été notifiés.' });
           return { flagged: true };
         } },
       ],
     },
     'parcel-delay': {
-      trigger: 'service.position', description: 'Detect parcels on a delayed service, record parcel.delay events and surface an Ops alert.',
+      trigger: 'service.position', description: 'Detect parcels on a delayed service, record parcel.delay events, notify receivers and surface an Ops alert.',
       steps: [
         { name: 'detect', run: async (ctx, executor) => {
           const open = await executor.db.transaction(async tx => (await tx.query(`SELECT id FROM incidents WHERE service_id=$1 AND kind='delay' AND status<>'resolved' ORDER BY created_at DESC LIMIT 1`, [ctx.serviceId])).rows);
@@ -77,8 +81,35 @@ export function createWorkflows({ actions }) {
           for (const parcel of ctx.detect.parcels) {
             await actions['parcel.delay_notice'].run(executor, { parcelId: parcel.id, reason: 'Retard signalé sur le service de transport.' });
           }
-          await actions['alert.create'].run(executor, { kind: 'delay', serviceId: ctx.serviceId, message: `Colis retardés : ${ctx.detect.parcels.length} expédition(s) affectée(s).` });
           return { marked: ctx.detect.parcels.length };
+        } },
+        { name: 'notify', when: ctx => !ctx.detect.skip, run: async (ctx, executor) => {
+          for (const parcel of ctx.detect.parcels) {
+            await actions['parcel.notify'].run(executor, { parcelId: parcel.id, party: 'receiver' });
+          }
+          await actions['alert.create'].run(executor, { kind: 'delay', serviceId: ctx.serviceId, message: `Colis retardés : ${ctx.detect.parcels.length} expédition(s) affectée(s).` });
+          return { notified: ctx.detect.parcels.length };
+        } },
+      ],
+    },
+    'payout-anomaly': {
+      trigger: 'payout.anomaly', description: 'A payout event could not be reconciled automatically; surface it for Ops review.',
+      steps: [
+        { name: 'surface', run: async (ctx, executor) => {
+          await actions['alert.create'].run(executor, { kind: 'payout', serviceId: null, message: 'Anomalie de versement détectée — à examiner dans les versements conducteurs.' });
+          return { flagged: true };
+        } },
+      ],
+    },
+    'parcel-exception': {
+      trigger: 'parcel.exception', description: 'A parcel exception was recorded; surface it and notify the receiver when the parcel is damaged, lost or held.',
+      steps: [
+        { name: 'surface', run: async (ctx, executor) => {
+          if (['damaged', 'lost', 'held', 'return_requested'].includes(ctx.kind)) {
+            await actions['parcel.notify'].run(executor, { parcelId: ctx.parcelId, party: 'receiver' });
+          }
+          await actions['alert.create'].run(executor, { kind: 'parcel', serviceId: null, message: `Exception colis ${ctx.kind} : ${ctx.trackingNumber}` });
+          return { flagged: true };
         } },
       ],
     },

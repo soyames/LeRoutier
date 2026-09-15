@@ -14,15 +14,14 @@ export function serverConfig(env = process.env) {
     // Server-only payment configuration. FEDAPAY_ENVIRONMENT must be 'sandbox' or 'live';
     // production never falls back to sandbox. Payout credentials are modelled separately:
     // payouts stay unavailable when FEDAPAY_PAYOUT_SECRET_KEY is absent instead of reusing the
-    // collection key. FEDAPAY_PUBLIC_KEY is only needed by client-side Checkout.js integrations
-    // and is not required for the server-side redirect flow LeRoutier uses.
+    // collection key. FEDAPAY_PUBLIC_KEY is NOT required: LeRoutier uses the server-side
+    // redirect flow (transaction + token), never the client-side Checkout.js integration.
     paymentProvider:env.PAYMENT_PROVIDER,
     fedapay:{
       environment:env.FEDAPAY_ENVIRONMENT,
       secretKey:env.FEDAPAY_SECRET_KEY,
       payoutSecretKey:env.FEDAPAY_PAYOUT_SECRET_KEY,
       webhookSecret:env.FEDAPAY_WEBHOOK_SECRET,
-      publicKey:env.FEDAPAY_PUBLIC_KEY,
       webhookUrl:env.FEDAPAY_WEBHOOK_URL,
     },
     // Driver payout withdrawals default to requiring Ops approval; set PAYOUT_APPROVAL_REQUIRED=false
