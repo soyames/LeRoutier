@@ -136,7 +136,11 @@ export function createWorkflows({ actions }) {
   };
 }
 
-export function createWorkflowEngine({ db, actions }) {
+// onEvent is an optional per-event hook used by notification dispatch. It runs
+// in its own transaction inside the same outbox drain, so a notification
+// failure can never roll back the business transaction that produced the event
+// and never blocks workflow processing.
+export function createWorkflowEngine({ db, actions, onEvent = null }) {
   const definitions = createWorkflows({ actions });
   const one = async (tx, sql, args = []) => (await tx.query(sql, args)).rows[0];
   const stepKey = step => step.action ?? step.name;
@@ -273,6 +277,12 @@ export function createWorkflowEngine({ db, actions }) {
             return one(tx, "SELECT * FROM workflow_runs WHERE workflow=$1 AND aggregate_id=$2 AND trigger_event=$3 AND status IN ('running','awaiting_approval')", [name, event.aggregate_id, event.event_type]);
           });
           if (run) await executeRun(run.id);
+        }
+        // Notification dispatch is isolated: an unavailable channel or a
+        // malformed policy must not stop the drain or lose the event.
+        if (onEvent) {
+          try { await db.transaction(tx => onEvent(tx, event)); }
+          catch { /* delivery problems are recorded per channel, never fatal */ }
         }
         await db.transaction(async tx => one(tx, 'UPDATE outbox SET delivered_at=now() WHERE id=$1 AND delivered_at IS NULL', [event.id]));
         processed++;

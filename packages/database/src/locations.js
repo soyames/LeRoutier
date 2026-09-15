@@ -77,7 +77,9 @@ export function locations(db) {
           invariant(row.status === 'proposed', 'INVALID_TRANSITION', 'Only proposed locations can be rejected.', 409);
         }
         const updated = await one(tx, 'UPDATE boarding_points SET status=$2,verified_by=$3,updated_at=now() WHERE id=$1 RETURNING *', [row.id, decision, actor.id]);
-        await audit(tx, actor.id, 'location.moderated', row.id, null, { from: row.status, to: decision });
+        // audit() also publishes 'location.moderated' to the outbox, which is
+        // what tells the proposer the outcome — no second emit here.
+        await audit(tx, actor.id, 'location.moderated', row.id, null, { from: row.status, decision });
         return publicPoint(updated);
       });
     },
