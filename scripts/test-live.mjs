@@ -12,6 +12,10 @@ const config={...serverConfig(),schema:'lr_test_'+randomUUID().replaceAll('-',''
 const db=createDatabase(config),server=createServer(nodeHandler(createApi(db,config)));
 try {
   await migrate(db);await seed(db);
+  // Reclaim preview ports leaked by previous interrupted runs (Windows).
+  if (process.platform === 'win32') {
+    spawnSync('powershell', ['-NoProfile', '-Command', "Get-NetTCPConnection -LocalPort 4000,4173,4174,4175 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }"], { stdio: 'ignore' });
+  }
   // The preview servers serve prebuilt bundles; rebuild with the local API URL baked in.
   const built=spawnSync('pnpm',['--filter','@leroutier/passenger-web','--filter','@leroutier/driver-web','--filter','@leroutier/ops-web','build'],
     {stdio:'inherit',shell:process.platform==='win32',env:{...process.env,VITE_API_URL:'http://127.0.0.1:4000'}});
