@@ -20,7 +20,8 @@ async function operatorScope(tx,actor,id){
   return id;
 }
 async function provisionUser(tx,actor,input,role,issuer){
-  only(input,role==='driver'?['subject','displayName','operatorId','licenseReference']:['subject','displayName','operatorId']);
+  const fields=role==='driver'?['subject','displayName','operatorId','licenseReference']:['subject','displayName','operatorId'];
+  only(input,fields);
   invariant(issuer,'AUTH_UNAVAILABLE','Configure the identity issuer before provisioning.',503);
   const subject=text(input.subject,'Identity subject',255),name=text(input.displayName,'Name');
   const operatorId=await operatorScope(tx,actor,input.operatorId);
@@ -40,6 +41,8 @@ async function provisionUser(tx,actor,input,role,issuer){
   }
   if(role==='driver')await tx.query(`INSERT INTO driver_profiles(user_id,operator_id,license_reference,active) VALUES($1,$2,$3,true)
     ON CONFLICT(user_id) DO UPDATE SET license_reference=EXCLUDED.license_reference`,[user.id,operatorId,input.licenseReference.trim()]);
+  if(role==='convoyeur')await tx.query(`INSERT INTO convoyeur_profiles(user_id,operator_id,active) VALUES($1,$2,true)
+    ON CONFLICT(user_id) DO UPDATE SET active=true`,[user.id,operatorId]);
   await audit(tx,actor.id,'identity.role_assigned',user.id,operatorId,{role});
   return user;
 }
@@ -62,8 +65,9 @@ export function provisioning(db,{issuer}={issuer:undefined}) {
       const current=await opsActor(tx,actor),scope=[current.operator_id];
       return {
         operators:(await tx.query('SELECT id,name,active FROM operators WHERE ($1::uuid IS NULL OR id=$1) ORDER BY name',scope)).rows,
-        users:(await tx.query(`SELECT u.id,u.display_name,u.role,u.operator_id,u.active,d.license_reference,d.active AS driver_active FROM users u
-          LEFT JOIN driver_profiles d ON d.user_id=u.id WHERE u.role IN ('ops','driver') AND ($1::uuid IS NULL OR u.operator_id=$1) ORDER BY u.display_name`,scope)).rows,
+        users:(await tx.query(`SELECT u.id,u.display_name,u.role,u.operator_id,u.active,d.license_reference,d.active AS driver_active,c.active AS convoyeur_active FROM users u
+          LEFT JOIN driver_profiles d ON d.user_id=u.id LEFT JOIN convoyeur_profiles c ON c.user_id=u.id
+          WHERE u.role IN ('ops','driver','convoyeur') AND ($1::uuid IS NULL OR u.operator_id=$1) ORDER BY u.display_name`,scope)).rows,
         routes:(await tx.query('SELECT id,name,operator_id FROM routes WHERE ($1::uuid IS NULL OR operator_id=$1) ORDER BY name',scope)).rows,
         vehicles:(await tx.query('SELECT * FROM vehicles WHERE ($1::uuid IS NULL OR operator_id=$1) ORDER BY registration',scope)).rows,
         places:(await tx.query('SELECT id,name FROM places ORDER BY name LIMIT 500')).rows,
@@ -74,10 +78,13 @@ export function provisioning(db,{issuer}={issuer:undefined}) {
       only(input,['name','key']);invariant(!current.operator_id,'FORBIDDEN','Only platform operations can create operators.',403);
       const name=text(input.name,'Operator name'),provisioningKey=text(input.key,'Operator key',60);
       invariant(/^[a-z0-9-]+$/.test(provisioningKey),'INVALID_INPUT','Use a lowercase operator key.');
-      const operator=await row(tx,'INSERT INTO operators(name,provisioning_key) VALUES($1,$2) RETURNING id,name,active',[name,provisioningKey]);
+      // Platform provisioning is a reviewed human action: the operator starts
+      // verified. Self-service onboarding starts pending_verification instead.
+      const operator=await row(tx,"INSERT INTO operators(name,provisioning_key,verification_status) VALUES($1,$2,'verified') RETURNING id,name,active",[name,provisioningKey]);
       await audit(tx,current.id,'operator.created',operator.id,operator.id);return operator;
     });},
     driver:(actor,input,key)=>mutate(actor,'driver',input,key,(tx,current)=>provisionUser(tx,current,input,'driver',issuer)),
+    convoyeur:(actor,input,key)=>mutate(actor,'convoyeur',input,key,(tx,current)=>provisionUser(tx,current,input,'convoyeur',issuer)),
     opsUser:(actor,input,key)=>mutate(actor,'ops-user',input,key,(tx,current)=>provisionUser(tx,current,input,'ops',issuer)),
     userStatus(actor,id,input,key){return mutate(actor,'user-status:'+id,input,key,async(tx,current)=>{
       only(input,['active']);uuid(id);invariant(typeof input.active==='boolean','INVALID_INPUT','Active must be boolean.');
@@ -124,24 +131,46 @@ export function provisioning(db,{issuer}={issuer:undefined}) {
       await audit(tx,current.id,'route.created',route.id,operatorId,{stopCount:ids.length});return route;
     });},
     service(actor,input,key){return mutate(actor,'service',input,key,async(tx,current)=>{
-      only(input,['routeId','vehicleId','driverId','departureAt']);uuid(input.routeId);uuid(input.vehicleId);uuid(input.driverId);
+      only(input,['routeId','vehicleId','driverId','departureAt','convoyeurId','departurePointId','arrivalPointId']);
+      uuid(input.routeId);uuid(input.vehicleId);uuid(input.driverId);
+      if(input.convoyeurId)uuid(input.convoyeurId);
+      if(input.departurePointId)uuid(input.departurePointId);
+      if(input.arrivalPointId)uuid(input.arrivalPointId);
       const departure=Date.parse(input.departureAt);invariant(Number.isFinite(departure) && departure>Date.now(),'INVALID_DEPARTURE','Departure must be in the future.');
       const route=await row(tx,'SELECT * FROM routes WHERE id=$1 AND active=true FOR SHARE',[input.routeId]);
       invariant(route,'NOT_FOUND','Route not found.',404);await operatorScope(tx,current,route.operator_id);
+      // Operational safety: only verified operators run services.
+      const verOp=await row(tx,'SELECT verification_status FROM operators WHERE id=$1',[route.operator_id]);
+      invariant(verOp && verOp.verification_status==='verified','OPERATOR_NOT_VERIFIED','Operator verification is required before running services.',403);
       const vehicle=await row(tx,"SELECT * FROM vehicles WHERE id=$1 AND status='active' FOR UPDATE",[input.vehicleId]);
       invariant(vehicle && vehicle.operator_id===route.operator_id,'FORBIDDEN','Vehicle does not belong to this operator.',403);
       const driver=await row(tx,`SELECT d.* FROM driver_profiles d JOIN users u ON u.id=d.user_id WHERE d.user_id=$1 AND d.active=true
         AND u.active=true AND u.role='driver' AND u.operator_id=d.operator_id FOR UPDATE OF d,u`,[input.driverId]);
       invariant(driver && driver.operator_id===route.operator_id,'FORBIDDEN','Driver is not active for this operator.',403);
+      let convoyeur=null;
+      if(input.convoyeurId){
+        convoyeur=await row(tx,`SELECT c.* FROM convoyeur_profiles c JOIN users u ON u.id=c.user_id WHERE c.user_id=$1 AND c.active=true
+          AND u.active=true AND u.role='convoyeur' AND u.operator_id=c.operator_id FOR UPDATE OF c,u`,[input.convoyeurId]);
+        invariant(convoyeur && convoyeur.operator_id===route.operator_id,'FORBIDDEN','Convoyeur is not active for this operator.',403);
+      }
+      if(input.departurePointId){
+        const point=await row(tx,"SELECT * FROM boarding_points WHERE id=$1 AND status='verified'",[input.departurePointId]);
+        invariant(point,'INVALID_POINT','Boarding point is not a verified location.',409);
+      }
+      if(input.arrivalPointId){
+        const point=await row(tx,"SELECT * FROM boarding_points WHERE id=$1 AND status='verified'",[input.arrivalPointId]);
+        invariant(point,'INVALID_POINT','Arrival point is not a verified location.',409);
+      }
       const stops=(await tx.query('SELECT * FROM route_stops WHERE route_id=$1 ORDER BY sequence',[route.id])).rows;
       invariant(stops.length>=2 && stops.every((s,i)=>s.sequence===i),'INVALID_JOURNEY','Route order is incomplete.');
       invariant(!await row(tx,'SELECT id FROM service_assignments WHERE ended_at IS NULL AND (vehicle_id=$1 OR driver_id=$2)',[vehicle.id,driver.user_id]),'ASSIGNMENT_CONFLICT','Vehicle or driver already has an open assignment.',409);
-      const service=await row(tx,'INSERT INTO services(route_id,operator_id,departure_at,capacity) VALUES($1,$2,$3,$4) RETURNING *',[route.id,route.operator_id,new Date(departure),vehicle.capacity]);
+      const service=await row(tx,'INSERT INTO services(route_id,operator_id,departure_at,capacity,departure_point_id,arrival_point_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
+        [route.id,route.operator_id,new Date(departure),vehicle.capacity,input.departurePointId??null,input.arrivalPointId??null]);
       await tx.query('INSERT INTO service_stops(service_id,sequence,stop_id) SELECT $1,sequence,stop_id FROM route_stops WHERE route_id=$2',[service.id,route.id]);
       await tx.query('INSERT INTO service_segments(service_id,sequence,fare_minor) SELECT $1,sequence,fare_to_next FROM route_stops WHERE route_id=$2 AND sequence<$3',[service.id,route.id,stops.length-1]);
       await tx.query('INSERT INTO service_seats(service_id,seat_number) SELECT $1,generate_series(1,$2::integer)',[service.id,vehicle.capacity]);
-      await tx.query('INSERT INTO service_assignments(service_id,vehicle_id,driver_id) VALUES($1,$2,$3)',[service.id,vehicle.id,driver.user_id]);
-      await audit(tx,current.id,'service.provisioned',service.id,route.operator_id);return service;
+      await tx.query('INSERT INTO service_assignments(service_id,vehicle_id,driver_id,convoyeur_id) VALUES($1,$2,$3,$4)',[service.id,vehicle.id,driver.user_id,convoyeur?.user_id??null]);
+      await audit(tx,current.id,'service.provisioned',service.id,route.operator_id,{convoyeurId:convoyeur?.user_id??null});return service;
     });},
   };
 }
@@ -158,7 +187,9 @@ export async function bootstrap(db,input){
     const prior=await row(tx,'SELECT * FROM bootstrap_receipt');
     if(prior){invariant(prior.fingerprint===fingerprint,'BOOTSTRAP_CONFLICT','Bootstrap already completed with different inputs.',409);return {operatorId:prior.operator_id,opsUserId:prior.ops_user_id};}
     invariant(!await row(tx,"SELECT id FROM users WHERE role='ops' AND is_demo=false"),'BOOTSTRAP_CLOSED','Privileged users already exist; use authorized provisioning.',409);
-    const operator=await row(tx,'INSERT INTO operators(name,provisioning_key) VALUES($1,$2) RETURNING id',[operatorName,operatorKey]);
+    // The one-time bootstrap is a reviewed human action: the operator starts
+    // verified. Self-service onboarding starts pending_verification instead.
+    const operator=await row(tx,"INSERT INTO operators(name,provisioning_key,verification_status) VALUES($1,$2,'verified') RETURNING id",[operatorName,operatorKey]);
     let user=await row(tx,'SELECT * FROM users WHERE auth_subject=$1 FOR UPDATE',[opsSubject]);
     if(user)invariant(user.auth_issuer===issuer && user.role==='passenger' && user.active,'IDENTITY_CONFLICT','Bootstrap identity is not eligible.',409);
     const operatorId=input.platformOps?null:operator.id;
