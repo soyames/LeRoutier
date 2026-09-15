@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
 import { Card, Badge, SectionTitle, ApiState, ProfileForm } from '@leroutier/ui';
-import { Armchair, Ticket, Building2, Navigation, UserRound, Route } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
+import { Armchair, Ticket, Building2, Navigation, UserRound, Route, CreditCard } from 'lucide-react';
 
 export function Trips() {
   const routes=useApi('/routes'),{user,request,online}=useSession(),navigate=useNavigate();
@@ -40,15 +41,67 @@ export function Trips() {
 
 export function Tickets() {
   const {user,request,online}=useSession(),bookings=useApi(user?'/me/bookings':null);
-  const [error,setError]=useState(''),[busy,setBusy]=useState('');
+  const paymentsConfig=useApi('/payments/config');
+  const [error,setError]=useState(''),[busy,setBusy]=useState(''),[tickets,setTickets]=useState({}),[payStates,setPayStates]=useState({});
+  const onlinePayments=paymentsConfig.data?.available===true;
+  // After a FedaPay redirect the passenger returns to the app: poll the trusted
+  // server state — the booking only becomes confirmed after reconciliation.
+  const dataRef=useRef(bookings.data),reloadRef=useRef(bookings.reload);
+  useEffect(()=>{dataRef.current=bookings.data;reloadRef.current=bookings.reload;});
+  const heldKey=(bookings.data||[]).filter(b=>b.status==='held').map(b=>b.id).sort().join(',');
+  useEffect(()=>{
+    if(!user || !heldKey) return;
+    let cancelled=false;
+    const timer=setInterval(async()=>{
+      try{
+        for(const b of (dataRef.current||[]).filter(x=>x.status==='held')){
+          const payments=await request(`/bookings/${b.id}/payment-status`);
+          const state=payments.some(p=>p.status==='succeeded')?'succeeded'
+            :payments.some(p=>p.status==='pending')?'pending'
+            :payments.some(p=>p.status==='failed'||p.status==='cancelled')?'failed':'none';
+          if(!cancelled) setPayStates(prev=>({...prev,[b.id]:state}));
+        }
+        reloadRef.current();
+      }catch{/* transient polling failures stay silent */}
+    },5000);
+    return()=>{cancelled=true;clearInterval(timer);};
+  },[user,heldKey,request]);
   async function action(id,verb){setBusy(id);setError('');try{await request(`/bookings/${id}/${verb}`,{method:'POST'});bookings.reload();}catch(e){setError(e.message);}finally{setBusy('');}}
+  async function pay(id){setBusy(id);setError('');
+    try{
+      const intent=await request(`/bookings/${id}/payment-intents`,{method:'POST',key:'pay-'+id,body:{}});
+      setPayStates(prev=>({...prev,[id]:'pending'}));
+      // Redirect to the hosted FedaPay page. Return URLs are UX only: only the
+      // verified provider webhook can confirm the booking.
+      if(intent.checkoutUrl) window.location.assign(intent.checkoutUrl);
+      else setError('Le lien de paiement est indisponible. Réessayez.');
+    }catch(e){if(e.code==='PAYMENT_UNAVAILABLE')setError('Le paiement en ligne n’est pas disponible pour le moment.');else setError(e.message);}
+    finally{setBusy('');}}
+  async function issue(id){setBusy(id);setError('');
+    try{const t=await request(`/bookings/${id}/ticket`,{method:'POST',body:{}});setTickets(prev=>({...prev,[id]:t}));}
+    catch(e){setError(e.message);}finally{setBusy('');}}
   const labels={held:'Option en attente de paiement',confirmed:'Confirmé',boarded:'À bord',completed:'Terminé',cancelled:'Annulé',expired:'Option expirée'};
   return <><SectionTitle icon={Ticket} title="Mes billets"/>{error && <p role="alert">{error}</p>}
     {!user || bookings.loading || bookings.error || !bookings.data?.length ? <ApiState resource={bookings} empty={user?'Aucune réservation.':'Connectez-vous pour retrouver vos billets.'}/> : bookings.data.map(b=><Card key={b.id} className="ticket">
       <div className="ticket-head between"><h2>{b.route_name}</h2><Badge>{labels[b.status]}</Badge></div><div className="ticket-body stack">
         <div className="between"><span>{new Date(b.departure_at).toLocaleString('fr-FR')}</span><strong>Siège {b.seat_number}</strong></div>
         <span className="small">Référence : {b.id}</span><div className="price">{b.amount_minor.toLocaleString('fr-FR')} FCFA</div>
-        {b.status==='held' && <><p className="small">Option jusqu’au {new Date(b.expires_at).toLocaleTimeString('fr-FR')}. Le paiement doit être enregistré par un agent autorisé avant confirmation.</p><button className="btn btn-primary" disabled={!!busy || !online} onClick={()=>action(b.id,'confirm')}>Vérifier le paiement et confirmer</button></>}
+        {b.status==='held' && <div className="payment-box stack">
+          <div className="between"><Badge tone={payStates[b.id]==='pending'?'neutral':'danger'}><CreditCard size={13}/>{payStates[b.id]==='pending'?'Paiement en attente…':payStates[b.id]==='failed'?'Paiement refusé ou annulé':payStates[b.id]==='succeeded'?'Paiement vérifié':'Paiement requis'}</Badge>
+          <span className="small muted">Option jusqu’au {new Date(b.expires_at).toLocaleTimeString('fr-FR')}</span></div>
+          {payStates[b.id]==='succeeded'
+            ? <button className="btn btn-primary" disabled={!!busy || !online} onClick={()=>action(b.id,'confirm')}>Confirmer la réservation</button>
+            : onlinePayments
+              ? <button className="btn btn-primary" disabled={!!busy || !online} onClick={()=>pay(b.id)}>{busy===b.id?'Connexion au paiement…':payStates[b.id]==='failed'?'Réessayer le paiement':'Payer en ligne'}</button>
+              : <p role="status">Le paiement en ligne n’est pas disponible pour le moment. Votre option expirera automatiquement — aucun billet ne peut être émis sans paiement vérifié.</p>}
+          {payStates[b.id]==='pending' && <p className="small muted">Paiement en cours chez FedaPay. La confirmation apparaît dès réception du paiement — actualisation automatique.</p>}
+        </div>}
+        {['confirmed','boarded'].includes(b.status) && !tickets[b.id] && <button className="btn btn-primary" disabled={!!busy || !online} onClick={()=>issue(b.id)}>Obtenir mon billet (QR)</button>}
+        {tickets[b.id] && <div className="qr-box stack"><div className="between"><h3>Billet valide</h3><Badge tone="success">Version {tickets[b.id].version}</Badge></div>
+          <div className="qr-canvas"><QRCodeSVG value={tickets[b.id].token} size={168} marginSize={1}/></div>
+          <span className="small muted">Code manuel : <strong>{tickets[b.id].manualCode}</strong></span>
+          <span className="small">Valable jusqu’au {new Date(tickets[b.id].expiresAt).toLocaleString('fr-FR')}. Présentez ce QR au contrôleur à l’embarquement.</span>
+          <span className="small muted">Récupérer à nouveau remplace l’ancien code.</span></div>}
         {['held','confirmed'].includes(b.status) && <button className="btn btn-soft" disabled={!!busy || !online} onClick={()=>action(b.id,'cancel')}>Annuler la réservation</button>}
       </div></Card>)}
   </>;

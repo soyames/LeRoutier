@@ -1,0 +1,14 @@
+{
+  "name": "@leroutier/agents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@leroutier/domain": "workspace:*",
+    "@leroutier/database": "workspace:*",
+    "@leroutier/notifications": "workspace:*"
+  }
+}

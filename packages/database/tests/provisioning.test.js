@@ -35,53 +35,53 @@ test('bootstrap is idempotent and closes against different inputs',async()=>{
   await assert.rejects(bootstrap(db,{...bootstrapInput,opsSubject:'another-person'}),{code:'BOOTSTRAP_CONFLICT'});
 });
 test('first login is idempotent and ignores JWT privilege claims',async()=>{
-  const results=await Promise.all([call('new-passenger','/me','GET',undefined,{role:'ops'}),call('new-passenger','/me')]);
+  const results=await Promise.all([call('new-passenger','/api/v1/me','GET',undefined,{role:'ops'}),call('new-passenger','/api/v1/me')]);
   assert.equal(results[0].data.id,results[1].data.id);passenger=results[0].data;
   assert.equal(passenger.role,'passenger');assert.equal(passenger.operator_id,null);assert.equal(passenger.needs_profile,true);
-  otherPassenger=(await call('other-passenger','/me')).data;
+  otherPassenger=(await call('other-passenger','/api/v1/me')).data;
 });
 test('passenger completes own profile without privilege fields',async()=>{
-  const result=await call('new-passenger','/me','PATCH',{displayName:'Passenger Test',phone:'+229 0100000000'});
+  const result=await call('new-passenger','/api/v1/me','PATCH',{displayName:'Passenger Test',phone:'+229 0100000000'});
   assert.equal(result.status,200);assert.equal(result.data.needs_profile,false);
 });
 
 test('profile updates preserve omitted phone and accept explicit empty optional phone',async()=>{
-  const update=await call('new-passenger','/me','PATCH',{displayName:'Passenger Test'});
+  const update=await call('new-passenger','/api/v1/me','PATCH',{displayName:'Passenger Test'});
   assert.equal(update.status,200);assert.equal(update.data.phone,'+229 0100000000');
-  assert.equal((await call('new-passenger','/me','PATCH',{displayName:'Passenger Test',phone:null})).data.phone,null);
+  assert.equal((await call('new-passenger','/api/v1/me','PATCH',{displayName:'Passenger Test',phone:null})).data.phone,null);
 });
 
 for(const [name,claims] of [['expired',{exp:1}],['wrong issuer',{iss:'https://wrong.example.invalid'}],['wrong audience',{aud:'wrong-api'}]]){
   test(`API rejects ${name} JWT before identity creation`,async()=>{
-    assert.equal((await call('must-not-exist','/me','GET',undefined,claims)).status,401);
+    assert.equal((await call('must-not-exist','/api/v1/me','GET',undefined,claims)).status,401);
     const count=await db.transaction(async tx=>(await tx.query("SELECT count(*)::integer AS n FROM users WHERE auth_subject='must-not-exist'")).rows[0].n);
     assert.equal(count,0);
   });
 }
 test('API rejects malformed JWT and invalid signature',async()=>{
   const other=await jwtFixture();
-  for(const jwt of ['invalid.jwt.input',await other.sign('must-not-exist')])assert.equal((await api(new Request('http://localhost/me',{headers:{authorization:'Bearer '+jwt}}))).status,401);
+  for(const jwt of ['invalid.jwt.input',await other.sign('must-not-exist')])assert.equal((await api(new Request('http://localhost/api/v1/me',{headers:{authorization:'Bearer '+jwt}}))).status,401);
 });
 
 test('inactive operator disables its identities',async()=>{
   await db.transaction(tx=>tx.query('UPDATE operators SET active=false WHERE id=$1',[operatorB]));
-  assert.equal((await call('beta-ops','/ops/fleet')).status,403);
-  assert.equal((await call('beta-driver','/driver/service')).status,403);
+  assert.equal((await call('beta-ops','/api/v1/ops/fleet')).status,403);
+  assert.equal((await call('beta-driver','/api/v1/driver/service')).status,403);
   await db.transaction(tx=>tx.query('UPDATE operators SET active=true WHERE id=$1',[operatorB]));
 });
 test('self-promotion and operator spoofing are rejected',async()=>{
   for(const field of [{role:'ops'},{role:'driver'},{operatorId:operatorA},{active:true},{auth_subject:'alpha-ops'}]) {
-    assert.equal((await call('new-passenger','/me','PATCH',{displayName:'Passenger Test',...field})).status,400);
+    assert.equal((await call('new-passenger','/api/v1/me','PATCH',{displayName:'Passenger Test',...field})).status,400);
   }
-  assert.equal((await call('new-passenger','/me')).data.role,'passenger');
+  assert.equal((await call('new-passenger','/api/v1/me')).data.role,'passenger');
 });
 test('passenger cannot access ops or driver endpoints',async()=>{
-  assert.equal((await call('new-passenger','/ops/fleet')).status,403);
-  assert.equal((await call('new-passenger','/driver/service')).status,403);
-  assert.equal((await call('new-passenger','/ops/ops-users','POST',{subject:'attacker',displayName:'Attacker',operatorId:operatorA})).status,403);
+  assert.equal((await call('new-passenger','/api/v1/ops/fleet')).status,403);
+  assert.equal((await call('new-passenger','/api/v1/driver/service')).status,403);
+  assert.equal((await call('new-passenger','/api/v1/ops/ops-users','POST',{subject:'attacker',displayName:'Attacker',operatorId:operatorA})).status,403);
 });
 test('driver cannot invoke privileged provisioning',async()=>{
-  assert.equal((await call('alpha-driver','/ops/vehicles','POST',{operatorId:operatorA,registration:'NOPE',capacity:12})).status,403);
+  assert.equal((await call('alpha-driver','/api/v1/ops/vehicles','POST',{operatorId:operatorA,registration:'NOPE',capacity:12})).status,403);
 });
 test('operator ops cannot create another operator or grant platform privileges',async()=>{
   await assert.rejects(provision.operator(alphaOps,{key:'not-permitted',name:'Not permitted'},randomUUID()),{code:'FORBIDDEN'});
@@ -94,16 +94,16 @@ test('cross-operator staff provisioning and activation are rejected',async()=>{
 });
 test('disabled identities and inactive driver profiles fail closed',async()=>{
   await provision.userStatus(betaOps,betaDriver.id,{active:false},randomUUID());
-  assert.equal((await call('beta-driver','/me')).status,403);
+  assert.equal((await call('beta-driver','/api/v1/me')).status,403);
   await provision.userStatus(betaOps,betaDriver.id,{active:true},randomUUID());
   await db.transaction(tx=>tx.query('UPDATE driver_profiles SET active=false WHERE user_id=$1',[betaDriver.id]));
-  assert.equal((await call('beta-driver','/driver/service')).status,403);
+  assert.equal((await call('beta-driver','/api/v1/driver/service')).status,403);
   await db.transaction(tx=>tx.query('UPDATE driver_profiles SET active=true WHERE user_id=$1',[betaDriver.id]));
 });
 test('known subject cannot be rebound to a different issuer',async()=>{
   const otherApi=createApi(db,{...serverConfig(),...fixture.config,issuer:'https://other.example.invalid',demoLogin:false},fixture.resolver);
   const jwt=await fixture.sign('alpha-ops',{iss:'https://other.example.invalid'});
-  assert.equal((await otherApi(new Request('http://localhost/me',{headers:{authorization:'Bearer '+jwt}}))).status,401);
+  assert.equal((await otherApi(new Request('http://localhost/api/v1/me',{headers:{authorization:'Bearer '+jwt}}))).status,401);
 });
 test('ops provisions stops, ordered route, fares, vehicle and service atomically',async()=>{
   const place1=await provision.place(alphaOps,{name:'Cotonou test'},randomUUID()),place2=await provision.place(alphaOps,{name:'Bohicon test'},randomUUID());
@@ -119,7 +119,7 @@ test('ops provisions stops, ordered route, fares, vehicle and service atomically
   await assert.rejects(provision.service(alphaOps,{...serviceInput,driverId:betaDriver.id},randomUUID()),{code:'FORBIDDEN'});
   service=await provision.service(alphaOps,serviceInput,randomUUID());
   assert.equal(service.capacity,12);assert.equal(service.is_demo,false);
-  assert.equal((await call('new-passenger',`/services/${service.id}/availability?origin=0&destination=1`)).data.fare.amountMinor,2500);
+  assert.equal((await call('new-passenger',`/api/v1/services/${service.id}/availability?origin=0&destination=1`)).data.fare.amountMinor,2500);
 });
 test('assignments prevent duplicate scheduling and disabling an assigned driver',async()=>{
   const assignment=await db.transaction(async tx=>(await tx.query('SELECT * FROM service_assignments WHERE service_id=$1',[service.id])).rows[0]);
@@ -127,13 +127,13 @@ test('assignments prevent duplicate scheduling and disabling an assigned driver'
   await assert.rejects(provision.userStatus(alphaOps,alphaDriver.id,{active:false},randomUUID()),{code:'DRIVER_ASSIGNED'});
 });
 test('cross-operator manifests, service actions and fleet access are scoped',async()=>{
-  assert.equal((await call('beta-driver',`/services/${service.id}/manifest`)).status,403);
-  assert.equal((await call('beta-ops',`/services/${service.id}/status`,'POST',{status:'active'})).status,403);
-  assert.ok(!(await call('beta-ops','/ops/fleet')).data.services.some(s=>s.id===service.id));
+  assert.equal((await call('beta-driver',`/api/v1/services/${service.id}/manifest`)).status,403);
+  assert.equal((await call('beta-ops',`/api/v1/services/${service.id}/status`,'POST',{status:'active'})).status,403);
+  assert.ok(!(await call('beta-ops','/api/v1/ops/fleet')).data.services.some(s=>s.id===service.id));
 });
 test('passengers cannot retrieve another passengers booking',async()=>{
-  const booked=await call('new-passenger','/bookings','POST',{serviceId:service.id,origin:0,destination:1});assert.equal(booked.status,200);
-  assert.equal((await call('other-passenger',`/bookings/${booked.data.id}`)).status,403);
+  const booked=await call('new-passenger','/api/v1/bookings','POST',{serviceId:service.id,origin:0,destination:1});assert.equal(booked.status,200);
+  assert.equal((await call('other-passenger',`/api/v1/bookings/${booked.data.id}`)).status,403);
   assert.notEqual(passenger.id,otherPassenger.id);
 });
 test('provisioning and role assignments append audit and outbox records',async()=>{
