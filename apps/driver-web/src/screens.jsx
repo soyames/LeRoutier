@@ -3,7 +3,7 @@ import { useApi, useSession } from '@leroutier/config/client';
 import { Card, Badge, StatCard, SectionTitle, ApiState } from '@leroutier/ui';
 import { createSyncQueue } from '@leroutier/config/offline';
 import QrScanner from 'qr-scanner';
-import { Users, Route, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw } from 'lucide-react';
+import { Users, Route, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw, Package } from 'lucide-react';
 
 // Board/alight/incident actions flow through the offline queue: the server
 // deduplicates by Idempotency-Key, so retries are always safe.
@@ -14,7 +14,11 @@ function useDriverQueue(userId, request) {
   const sync=useCallback(async()=>{
     if(!queue.current || running.current) return;
     running.current=true;
-    try { await queue.current.sync(row=>request('/driver/actions',{method:'POST',key:row.id,body:{type:row.type,payload:row.payload}})); }
+    try {
+      await queue.current.sync(row=>row.type==='parcel'
+        ? request(`/parcels/${row.payload.parcelId}/scan`,{method:'POST',key:row.id,body:{kind:row.payload.kind}})
+        : request('/driver/actions',{method:'POST',key:row.id,body:{type:row.type,payload:row.payload}}));
+    }
     finally { running.current=false;refresh(); }
   },[request]);
   useEffect(()=>{
@@ -31,9 +35,16 @@ function useDriverQueue(userId, request) {
   return {rows,sync,enqueue,retry,discard};
 }
 
+const parcelLabels={created:'Créé',accepted:'Accepté',manifested:'Affecté',loaded:'Chargé',in_transit:'En transit',arrived:'Arrivé',
+  ready_for_pickup:'Prêt au retrait',collected:'Retiré',cancelled:'Annulé',rejected:'Refusé',held:'Retenu',damaged:'Endommagé',
+  lost:'Perdu',return_requested:'Retour demandé',returned:'Retourné'};
+const parcelTones={created:'neutral',accepted:'neutral',manifested:'neutral',loaded:'neutral',in_transit:'neutral',arrived:'neutral',
+  ready_for_pickup:'warning',collected:'success',cancelled:'neutral',rejected:'danger',held:'warning',damaged:'danger',lost:'danger',
+  return_requested:'warning',returned:'neutral'};
+
 export function RouteScreen(){
   const {user,request,online}=useSession(),service=useApi(user?'/driver/service':null);
-  const s=service.data,manifest=useApi(s?`/services/${s.id}/manifest`:null);
+  const s=service.data,manifest=useApi(s?`/services/${s.id}/manifest`:null),cargo=useApi(s?'/driver/parcels':null);
   const queue=useDriverQueue(user?.id,request);
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[description,setDescription]=useState(''),[notice,setNotice]=useState(''),[code,setCode]=useState(''),[scanning,setScanning]=useState(false);
   const scanner=useRef(null);
@@ -41,15 +52,23 @@ export function RouteScreen(){
   async function act(type,payload){
     setBusy(true);setError('');setNotice('');
     try{
-      // Manual ticket code: verify online for a clear answer; offline, queue the
-      // code itself — the server verifies it during synchronization.
-      if(type==='board' && payload.code){
-        if(navigator.onLine){
-          const result=await request('/tickets/verify',{method:'POST',body:{code:payload.code,serviceId:payload.serviceId,stopSequence:payload.stopSequence}});
-          payload={bookingId:result.bookingId,serviceId:payload.serviceId,stopSequence:payload.stopSequence};
+      // Parcel damage reports are online-only for v1; scans stay queueable offline.
+      if(type==='parcel-problem'){
+        const description=window.prompt('Décrivez le problème constaté sur le colis :');
+        if(!description || !description.trim()) return;
+        await request(`/parcels/${payload.id}/exceptions`,{method:'POST',body:{kind:'damaged',description:description.trim()}});
+        setNotice('Problème signalé à la régulation.');cargo.reload();
+      } else {
+        // Manual ticket code: verify online for a clear answer; offline, queue the
+        // code itself — the server verifies it during synchronization.
+        if(type==='board' && payload.code){
+          if(navigator.onLine){
+            const result=await request('/tickets/verify',{method:'POST',body:{code:payload.code,serviceId:payload.serviceId,stopSequence:payload.stopSequence}});
+            payload={bookingId:result.bookingId,serviceId:payload.serviceId,stopSequence:payload.stopSequence};
+          }
         }
+        queue.enqueue(type,payload);setNotice('Action enregistrée et synchronisée.');
       }
-      queue.enqueue(type,payload);setNotice('Action enregistrée et synchronisée.');
     }catch(e){setError(e.message);}
     finally{setBusy(false);manifest.reload();service.reload();}
   }
@@ -88,6 +107,15 @@ export function RouteScreen(){
       {b.status==='confirmed' && b.origin_sequence===s.current_sequence && <button className="btn btn-primary" disabled={busy} onClick={()=>act('board',{bookingId:b.id,serviceId:s.id,stopSequence:s.current_sequence})}>Embarquer</button>}
       {b.status==='boarded' && b.destination_sequence===s.current_sequence && <button className="btn btn-soft" disabled={busy} onClick={()=>act('alight',{bookingId:b.id,serviceId:s.id,stopSequence:s.current_sequence})}>Débarquer</button>}
     </div>)}
+    <SectionTitle icon={Package} title="Fret & colis" trailing={cargo.data?.length?<Badge>{cargo.data.length} colis</Badge>:null}/>
+    {cargo.loading || cargo.error || !cargo.data?.length ? <ApiState resource={cargo} empty="Aucun colis affecté à ce service."/> : cargo.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.trackingNumber}</h3><Badge tone={parcelTones[p.status]}>{parcelLabels[p.status]}</Badge></div>
+      <span className="small muted">{p.category} · {p.quantity} pièce(s){p.weightG?` · ${p.weightG}g`:''} · destination {p.destinationCity}</span></div>
+      <div className="controls">
+        {p.status==='manifested' && <button className="btn btn-primary" disabled={busy} onClick={()=>queue.enqueue('parcel',{serviceId:s.id,parcelId:p.id,kind:'loaded'})}>Scanner le chargement</button>}
+        {p.status==='loaded' && <button className="btn btn-primary" disabled={busy} onClick={()=>queue.enqueue('parcel',{serviceId:s.id,parcelId:p.id,kind:'departed'})}>Scanner le départ</button>}
+        {p.status==='in_transit' && <button className="btn btn-primary" disabled={busy} onClick={()=>queue.enqueue('parcel',{serviceId:s.id,parcelId:p.id,kind:'arrived'})}>Scanner l’arrivée</button>}
+        {(p.status==='loaded'||p.status==='in_transit') && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>act('parcel-problem',p)}>Signaler un problème</button>}
+      </div></Card>)}
     <Card className="stack"><span className="eyebrow">Actions terrain</span>{s.current_sequence<s.stops.length-1 && <button className="btn btn-primary" disabled={busy} onClick={()=>{setBusy(true);request(`/services/${s.id}/advance`,{method:'POST',body:{sequence:s.current_sequence+1}}).then(()=>{setNotice('Arrêt suivant enregistré.');service.reload();}).catch(e=>setError(e.message)).finally(()=>setBusy(false));}}>Arrivée à l’arrêt suivant</button>}
       <button className="btn btn-soft" disabled={busy} onClick={()=>navigator.geolocation? navigator.geolocation.getCurrentPosition(p=>request(`/services/${s.id}/positions`,{method:'POST',body:{latitude:p.coords.latitude,longitude:p.coords.longitude,observedAt:new Date(p.timestamp).toISOString()}}).then(()=>setNotice('Position partagée.')).catch(e=>setError(e.message)),()=>setError('Position indisponible ou autorisation refusée.')):setError('Géolocalisation indisponible.')}>Partager ma position</button>
     </Card>
