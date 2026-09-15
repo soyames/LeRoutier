@@ -75,9 +75,12 @@ global edit/delete endpoint. Services and staff remain operator scoped.
 
 ## First production operator
 
-Run migrations before deploying the new API. `pnpm db:migrate` and
-`pnpm db:validate` load the existing ignored root .env.local. To select a different
-reviewed environment file, invoke the same scripts with Node's --env-file option.
+Run migrations before deploying the new API. `pnpm db:status`, `pnpm db:migrate`
+and `pnpm db:validate` load the existing ignored root .env.local. To select a different
+reviewed environment file, invoke the same scripts with Node's --env-file option —
+and set `DATABASE_SCHEMA` in that file too, because .env.local pins the development
+schema. `db:status` is read-only and names neither host nor credential; run it first
+to confirm which database is selected.
 Never paste credentials into a command, terminal output or documentation.
 
 Obtain the initial person's **verified subject** from the chosen provider. In an

@@ -32,7 +32,28 @@ flow (transaction + token), not the client-side Checkout.js integration.
 Verify live state without touching secrets:
 `GET /api/v1/payments/config` → `{available:true, payouts:{available:true}}`.
 
-## 1. Auth provider setup
+## 1. Database schema
+
+Migrations are never applied automatically on deploy, and nothing below works
+until the production schema is current. `DATABASE_URL` is a **Sensitive**
+Vercel variable, so it cannot be pulled with the CLI — copy it from the Vercel
+or Neon dashboard into a git-ignored `.env.production.local` alongside
+`DATABASE_SCHEMA=leroutier`. See "Data routes return 503 after a deploy" in
+`RUNBOOKS.md` for the exact commands and the schema pitfall.
+
+- [ ] `status.js` against production reports `No demo identities` (never run a
+  migration against a target that reports demo identities — that is the
+  development database).
+- [ ] `migrate.js` reports "Migrations validated: 8".
+- [ ] `status.js` reports `8/8 applied; 0 declared table(s) absent`.
+- [ ] `pnpm smoke:prod` passes 10/10.
+- [ ] Delete `.env.production.local`.
+
+Applying migrations creates empty tables only. No operator, route, service,
+vehicle, driver, passenger or parcel is seeded — every row below is created
+through the real onboarding and Ops flows.
+
+## 2. Auth provider setup
 
 - [ ] Configure the OIDC provider (issuer, JWKS URL, audience).
 - [ ] Register one public PKCE client per app (Passenger/Driver/Ops).
@@ -40,7 +61,7 @@ Verify live state without touching secrets:
 - [ ] Set `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_AUDIENCE`, `OIDC_CLIENT_ID`, `OIDC_REDIRECT_URIS` on `le-routier-api`.
 - [ ] `GET /api/v1/auth/config` returns an OIDC block and `demoLogin:false`.
 
-## 2. Bootstrap the first operator
+## 3. Bootstrap the first operator
 
 Use the one-time CLI (`packages/database/scripts/bootstrap.js`) with an
 ignored env file on your machine. Required values: `BOOTSTRAP_CONFIRM=provision-first-operator`,
@@ -56,7 +77,7 @@ ignored env file on your machine. Required values: `BOOTSTRAP_CONFIRM=provision-
 
 Then sign in to the Ops app with the bootstrapped identity.
 
-## 3. Pilot network (all through the Ops console)
+## 4. Pilot network (all through the Ops console)
 
 - [ ] Create places (cities) and stops along the corridor.
 - [ ] Create the route with ordered stops and segment fares.
@@ -67,7 +88,7 @@ Then sign in to the Ops app with the bootstrapped identity.
 - [ ] Create a parcel rate rule (`/api/v1/ops/parcel-rate-rules`) — parcels
   cannot be created without an explicit rule (fail-closed pricing).
 
-## 4. Payments
+## 5. Payments
 
 - [ ] Confirm `GET /api/v1/payments/config` shows collections available.
 - [ ] FedaPay dashboard: webhook #8590 enabled, URL
@@ -79,7 +100,7 @@ Then sign in to the Ops app with the bootstrapped identity.
   account; `FEDAPAY_PAYOUT_SECRET_KEY` set; `PAYOUT_APPROVAL_REQUIRED=true`.
   No real payout is sent during validation.
 
-## 5. First real pilot runs (one at a time, watched)
+## 6. First real pilot runs (one at a time, watched)
 
 - [ ] One passenger booking: search → hold → FedaPay checkout → webhook
   confirms → boarding QR issued.
@@ -93,7 +114,7 @@ Then sign in to the Ops app with the bootstrapped identity.
 - [ ] One withdrawal request from the driver; approve only after confirming
   FedaPay Payouts works in sandbox for the account.
 
-## 6. Observability during the pilot
+## 7. Observability during the pilot
 
 - [ ] Ops console → Diagnostics: check failed payments, anomalies, workflow
   failures, stale vehicle tracking, uncollected parcels.

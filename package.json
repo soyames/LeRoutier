@@ -16,6 +16,7 @@
     "test:frontend": "playwright test",
     "db:migrate": "node --env-file=.env.local packages/database/scripts/migrate.js",
     "db:seed": "node --env-file=.env.local packages/database/scripts/seed.js",
+    "db:status": "node --env-file=.env.local packages/database/scripts/status.js",
     "db:validate": "node --env-file=.env.local packages/database/scripts/validate.js",
     "db:bootstrap": "node --env-file=.env.local packages/database/scripts/bootstrap.js",
     "secrets:check": "node scripts/check-secrets.mjs",

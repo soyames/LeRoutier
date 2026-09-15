@@ -86,20 +86,46 @@ reconciliation or an Ops-privileged, audited action.
 1. `GET /api/v1/health` still passes (it only probes connectivity) while data
    routes 503 — this usually means the production database is missing recent
    migrations. Migrations are **not** applied automatically on deploy.
-2. Apply them against the production database (use the same connection
-   string as Vercel's `DATABASE_URL`; the value is never shared):
+2. Obtain the production connection string. `DATABASE_URL` is marked
+   **Sensitive** on the Vercel project, so it is write-only: `vercel env pull`
+   and the REST API return `[SENSITIVE]`, never the value. Copy it from the
+   Vercel or Neon dashboard. Never guess it, and never assume the local value
+   is production.
+3. Put it in a reviewed, git-ignored file — `.env.production.local` — holding
+   **only** these two names:
 
-   PowerShell: `$env:DATABASE_URL="<production value>"; node --env-file=.env.local packages/database/scripts/migrate.js`
+   ```
+   DATABASE_URL=<production value>
+   DATABASE_SCHEMA=leroutier
+   ```
 
-   Git Bash: `DATABASE_URL="<production value>" node --env-file=.env.local packages/database/scripts/migrate.js`
+   Do **not** reuse `--env-file=.env.local` with a shell override. A shell
+   variable does win over `--env-file`, but `.env.local` also sets
+   `DATABASE_SCHEMA=leroutier_dev`; overriding only `DATABASE_URL` would apply
+   the migrations to a `leroutier_dev` schema **on the production database**,
+   leaving the API (which reads `leroutier`) still broken. Production sets no
+   `DATABASE_SCHEMA`, so it uses the `leroutier` default.
+4. Confirm the target before writing anything. `db:status` is read-only and
+   prints no connection string, host or credential:
 
-3. The runner reports "Migrations validated: N" and is replay-safe: reruns
-   are no-ops. Then re-run `pnpm smoke:prod`. **Verify the target first**:
-   the local `.env.local` database is the development Neon (it contains demo
-   data) — always copy the connection string from Vercel's `DATABASE_URL`
-   itself, never assume the local value is production. Current migrations:
-   001–008.
-4. New deployments must come from git pushes (`main`). Manual dashboard
+   `node --env-file=.env.production.local packages/database/scripts/status.js`
+
+   Production must report `No demo identities` and list 005–008 as `Pending`.
+   If it reports `Demo identities present`, it is the development database —
+   stop.
+5. Apply, then re-check:
+
+   `node --env-file=.env.production.local packages/database/scripts/migrate.js`
+
+   The runner reports "Migrations validated: N", takes an advisory lock, runs
+   in one transaction, verifies checksums of applied files and is replay-safe:
+   reruns are no-ops. Re-run the `status.js` command; it must report `8/8
+   applied; 0 declared table(s) absent`. Then `pnpm smoke:prod` (10/10).
+6. Delete `.env.production.local` when finished.
+7. Current migrations: 001–008. Applying them creates empty tables only —
+   production business data is created solely through the real onboarding and
+   Ops flows, never by a seed.
+8. New deployments must come from git pushes (`main`). Manual dashboard
    deploys of the API project can ship stale source.
 
 ## Auth outage (OIDC unavailable)
