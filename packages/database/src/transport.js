@@ -22,9 +22,19 @@ export function transport(db) {
   }
   async function crew(tx, actor, service) {
     if (actor?.role === 'ops') return ops(actor, service);
-    invariant(actor?.role === 'driver' && await one(tx,
-      'SELECT id FROM service_assignments WHERE service_id=$1 AND driver_id=$2 AND ended_at IS NULL', [service.id, actor.id]),
-    'FORBIDDEN', 'This service is not assigned to you.', 403);
+    if (actor?.role === 'driver') {
+      invariant(await one(tx,
+        'SELECT id FROM service_assignments WHERE service_id=$1 AND driver_id=$2 AND ended_at IS NULL', [service.id, actor.id]),
+      'FORBIDDEN', 'This service is not assigned to you.', 403);
+      return;
+    }
+    if (actor?.role === 'convoyeur') {
+      invariant(await one(tx,
+        'SELECT id FROM service_assignments WHERE service_id=$1 AND convoyeur_id=$2 AND ended_at IS NULL', [service.id, actor.id]),
+      'FORBIDDEN', 'This service is not assigned to you.', 403);
+      return;
+    }
+    invariant(false, 'FORBIDDEN', 'Crew access required.', 403);
   }
   async function getBooking(tx, id, actor) {
     const b = await one(tx, 'SELECT * FROM bookings WHERE id=$1', [uuid(id)]);
@@ -49,43 +59,78 @@ export function transport(db) {
       capacity: service.capacity, segments: segments.map(s => ({...s, available: service.capacity - s.occupied})), stops,
       fare: { amountMinor: affected.reduce((sum, seq) => sum + segments[seq].fare_minor, 0), currency: 'XOF' } };
   }
+  async function txHold(tx, actor, input, key) {
+    invariant(actor?.role === 'passenger', 'FORBIDDEN', 'Passenger access required.', 403);
+    const { serviceId, origin, destination } = input;
+    idempotencyKey(key);
+    const hash = fingerprint([serviceId, origin, destination]);
+    // Lock idempotency identity before the service: identical requests on different services serialize too.
+    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [actor.id + ':' + key]);
+    const service = await serviceLock(tx, serviceId);
+    const prior = await one(tx, 'SELECT * FROM bookings WHERE passenger_id=$1 AND idempotency_key=$2', [actor.id, key]);
+    if (prior) {
+      invariant(prior.request_fingerprint === hash, 'IDEMPOTENCY_CONFLICT', 'The key was used for a different request.', 409);
+      return prior;
+    }
+    invariant(['scheduled','active'].includes(service.status) && origin >= service.current_sequence,
+      'SERVICE_UNAVAILABLE', 'This journey is no longer open.', 409);
+    invariant(service.status === 'active' || new Date(service.departure_at).getTime() > Date.now(),
+      'SERVICE_UNAVAILABLE', 'Departure has passed.', 409);
+    const quote = await availability(tx, service, origin, destination);
+    invariant(quote.available > 0, 'SOLD_OUT', 'No seat is available on every requested segment.', 409);
+    const seat = await one(tx, `SELECT seat_number FROM service_seats seats WHERE service_id=$1 AND NOT EXISTS
+      (SELECT 1 FROM booking_segments bs WHERE bs.service_id=seats.service_id AND bs.seat_number=seats.seat_number AND bs.sequence >=$2 AND bs.sequence<$3)
+      ORDER BY seat_number LIMIT 1`, [serviceId, origin, destination]);
+    const booking = await one(tx, `INSERT INTO bookings(service_id,passenger_id,origin_sequence,destination_sequence,seat_number,status,amount_minor,expires_at,idempotency_key,request_fingerprint)
+      VALUES($1,$2,$3,$4,$5,'held',$6,now()+interval '10 minutes',$7,$8) RETURNING *`,
+    [serviceId, actor.id, origin, destination, seat.seat_number, quote.fare.amountMinor, key, hash]);
+    await tx.query('INSERT INTO booking_passengers(booking_id,passenger_id) VALUES($1,$2)', [booking.id, actor.id]);
+    await tx.query(`INSERT INTO booking_segments(booking_id,service_id,seat_number,sequence)
+      SELECT $1,$2,$3,generate_series($4::integer,$5::integer-1)`, [booking.id, serviceId, seat.seat_number, origin, destination]);
+    await emit(tx, 'booking.held', booking.id, { serviceId });
+    return booking;
+  }
+  async function txTransition(tx, actor, id, action, stopSequence = undefined) {
+    const { booking: b, service } = await getBooking(tx, id, actor);
+    invariant(actor?.role !== 'driver' || ['board','alight'].includes(action), 'FORBIDDEN', 'Operation is not permitted.', 403);
+    if (['board','alight'].includes(action)) {
+      await crew(tx, actor, service);
+      invariant(service.status === 'active', 'SERVICE_UNAVAILABLE', 'Service must be active.', 409);
+      invariant(stopSequence === service.current_sequence && stopSequence === (action === 'board' ? b.origin_sequence : b.destination_sequence),
+        'WRONG_STOP', 'This action must happen at the booked stop.', 409);
+    }
+    const target = { confirm:'confirmed',cancel:'cancelled',board:'boarded',alight:'completed' }[action];
+    invariant(target, 'INVALID_ACTION', 'Unknown booking action.');
+    if (b.status === target) return b;
+    const next = validateTransition(b.status, action);
+    if (action === 'confirm') {
+      invariant(['scheduled','active'].includes(service.status) && b.origin_sequence>=service.current_sequence &&
+        (service.status==='active' || new Date(service.departure_at)>new Date()),'SERVICE_UNAVAILABLE','Service is no longer open for confirmation.',409);
+      const paid = await one(tx, "SELECT coalesce(sum(amount_minor),0)::integer AS amount FROM payments WHERE booking_id=$1 AND status='succeeded'", [id]);
+      invariant(paid.amount === b.amount_minor, 'PAYMENT_REQUIRED', 'A verified payment record is required.', 409);
+    }
+    if (action === 'cancel' || action === 'alight') await tx.query('DELETE FROM booking_segments WHERE booking_id=$1', [id]);
+    if (action === 'board' || action === 'alight') {
+      const table = action === 'board' ? 'boarding_events' : 'alighting_events';
+      await tx.query(`INSERT INTO ${table}(booking_id,actor_id,stop_sequence) VALUES($1,$2,$3)`, [id, actor.id, stopSequence]);
+    }
+    const result = await one(tx, 'UPDATE bookings SET status=$2,updated_at=now() WHERE id=$1 RETURNING *', [id, next]);
+    await emit(tx, 'booking.' + next, id);
+    if (action === 'cancel') await emit(tx, 'payment.refund_review', id);
+    return result;
+  }
   return {
     async availability(id, origin, destination) {
       return db.transaction(async tx => availability(tx, await serviceLock(tx, id), origin, destination));
     },
     async hold(actor, input, key) {
-      invariant(actor?.role === 'passenger', 'FORBIDDEN', 'Passenger access required.', 403);
-      const { serviceId, origin, destination } = input;
-      idempotencyKey(key);
-      const hash = fingerprint([serviceId, origin, destination]);
-      return db.transaction(async tx => {
-        // Lock idempotency identity before the service: identical requests on different services serialize too.
-        await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [actor.id + ':' + key]);
-        const service = await serviceLock(tx, serviceId);
-        const prior = await one(tx, 'SELECT * FROM bookings WHERE passenger_id=$1 AND idempotency_key=$2', [actor.id, key]);
-        if (prior) {
-          invariant(prior.request_fingerprint === hash, 'IDEMPOTENCY_CONFLICT', 'The key was used for a different request.', 409);
-          return prior;
-        }
-        invariant(['scheduled','active'].includes(service.status) && origin >= service.current_sequence,
-          'SERVICE_UNAVAILABLE', 'This journey is no longer open.', 409);
-        invariant(service.status === 'active' || new Date(service.departure_at).getTime() > Date.now(),
-          'SERVICE_UNAVAILABLE', 'Departure has passed.', 409);
-        const quote = await availability(tx, service, origin, destination);
-        invariant(quote.available > 0, 'SOLD_OUT', 'No seat is available on every requested segment.', 409);
-        const seat = await one(tx, `SELECT seat_number FROM service_seats seats WHERE service_id=$1 AND NOT EXISTS
-          (SELECT 1 FROM booking_segments bs WHERE bs.service_id=seats.service_id AND bs.seat_number=seats.seat_number AND bs.sequence >=$2 AND bs.sequence<$3)
-          ORDER BY seat_number LIMIT 1`, [serviceId, origin, destination]);
-        const booking = await one(tx, `INSERT INTO bookings(service_id,passenger_id,origin_sequence,destination_sequence,seat_number,status,amount_minor,expires_at,idempotency_key,request_fingerprint)
-          VALUES($1,$2,$3,$4,$5,'held',$6,now()+interval '10 minutes',$7,$8) RETURNING *`,
-        [serviceId, actor.id, origin, destination, seat.seat_number, quote.fare.amountMinor, key, hash]);
-        await tx.query('INSERT INTO booking_passengers(booking_id,passenger_id) VALUES($1,$2)', [booking.id, actor.id]);
-        await tx.query(`INSERT INTO booking_segments(booking_id,service_id,seat_number,sequence)
-          SELECT $1,$2,$3,generate_series($4::integer,$5::integer-1)`, [booking.id, serviceId, seat.seat_number, origin, destination]);
-        await emit(tx, 'booking.held', booking.id, { serviceId });
-        return booking;
-      });
+      return db.transaction(async tx => txHold(tx, actor, input, key));
     },
+    // Transaction-level entry points: walk-up sales and other composite
+    // flows reuse the exact same domain logic inside their own transaction
+    // (no nested connection, no self-deadlock).
+    txHold,
+    txTransition,
     async booking(actor, id) { return db.transaction(async tx => (await getBooking(tx, id, actor)).booking); },
     async passengerBookings(actor) {
       invariant(actor?.role === 'passenger', 'FORBIDDEN', 'Passenger access required.', 403);
@@ -93,40 +138,18 @@ export function transport(db) {
       return db.transaction(async tx => {
         const { rows } = await tx.query('SELECT DISTINCT service_id FROM bookings WHERE passenger_id=$1 ORDER BY service_id', [actor.id]);
         for (const row of rows) await serviceLock(tx, row.service_id);
-        return (await tx.query(`SELECT b.*,r.name AS route_name,s.departure_at FROM bookings b JOIN services s ON s.id=b.service_id
-          JOIN routes r ON r.id=s.route_id WHERE passenger_id=$1 ORDER BY b.created_at DESC LIMIT 100`, [actor.id])).rows;
+        return (await tx.query(`SELECT b.*,r.name AS route_name,s.departure_at,s.departure_point_id,s.arrival_point_id,
+          bdp.name AS departure_point_name,bdp.description AS departure_point_landmark,bdp.latitude AS departure_point_latitude,bdp.longitude AS departure_point_longitude,
+          bap.name AS arrival_point_name,bap.description AS arrival_point_landmark,bap.latitude AS arrival_point_latitude,bap.longitude AS arrival_point_longitude,
+          op.name AS departure_city,ap.name AS arrival_city
+          FROM bookings b JOIN services s ON s.id=b.service_id JOIN routes r ON r.id=s.route_id
+          LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN places op ON op.id=bdp.place_id
+          LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id LEFT JOIN places ap ON ap.id=bap.place_id
+          WHERE passenger_id=$1 ORDER BY b.created_at DESC LIMIT 100`, [actor.id])).rows;
       });
     },
     async transition(actor, id, action, stopSequence = undefined) {
-      return db.transaction(async tx => {
-        const { booking: b, service } = await getBooking(tx, id, actor);
-        invariant(actor?.role !== 'driver' || ['board','alight'].includes(action), 'FORBIDDEN', 'Operation is not permitted.', 403);
-        if (['board','alight'].includes(action)) {
-          await crew(tx, actor, service);
-          invariant(service.status === 'active', 'SERVICE_UNAVAILABLE', 'Service must be active.', 409);
-          invariant(stopSequence === service.current_sequence && stopSequence === (action === 'board' ? b.origin_sequence : b.destination_sequence),
-            'WRONG_STOP', 'This action must happen at the booked stop.', 409);
-        }
-        const target = { confirm:'confirmed',cancel:'cancelled',board:'boarded',alight:'completed' }[action];
-        invariant(target, 'INVALID_ACTION', 'Unknown booking action.');
-        if (b.status === target) return b;
-        const next = validateTransition(b.status, action);
-        if (action === 'confirm') {
-          invariant(['scheduled','active'].includes(service.status) && b.origin_sequence>=service.current_sequence &&
-            (service.status==='active' || new Date(service.departure_at)>new Date()),'SERVICE_UNAVAILABLE','Service is no longer open for confirmation.',409);
-          const paid = await one(tx, "SELECT coalesce(sum(amount_minor),0)::integer AS amount FROM payments WHERE booking_id=$1 AND status='succeeded'", [id]);
-          invariant(paid.amount === b.amount_minor, 'PAYMENT_REQUIRED', 'A verified payment record is required.', 409);
-        }
-        if (action === 'cancel' || action === 'alight') await tx.query('DELETE FROM booking_segments WHERE booking_id=$1', [id]);
-        if (action === 'board' || action === 'alight') {
-          const table = action === 'board' ? 'boarding_events' : 'alighting_events';
-          await tx.query(`INSERT INTO ${table}(booking_id,actor_id,stop_sequence) VALUES($1,$2,$3)`, [id, actor.id, stopSequence]);
-        }
-        const result = await one(tx, 'UPDATE bookings SET status=$2,updated_at=now() WHERE id=$1 RETURNING *', [id, next]);
-        await emit(tx, 'booking.' + next, id);
-        if (action === 'cancel') await emit(tx, 'payment.refund_review', id);
-        return result;
-      });
+      return db.transaction(async tx => txTransition(tx, actor, id, action, stopSequence));
     },
     async recordPayment(actor, id, input, key) {
       idempotencyKey(key);
