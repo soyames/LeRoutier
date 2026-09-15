@@ -97,15 +97,15 @@ before applying the SPA fallback. After deployment, open and refresh a deep
 link such as `/tickets` or `/profile`, and check that JavaScript/CSS requests
 return assets. See [Vite on Vercel](https://vercel.com/docs/frameworks/frontend/vite).
 
-## Backend and Neon
+## Backend, Neon and production identity
 
-The API, worker, USSD, database and domain directories currently contain design
-documentation, not executable services. Frontend screens use demonstration
-data; this build repair does not turn them into live booking/payment tools.
+The shared API and PostgreSQL transport domain are implemented in services/api
+and packages/database. Preserve the API project's existing Root Directory and
+deployment settings. DATABASE_URL and CORS_ORIGINS belong on the API project;
+VITE_API_URL belongs on each frontend. Production contains no automatic demo seed.
+Static frontend builds do not need database credentials.
 
-Keep `DATABASE_URL` and payment/provider credentials in the future backend's
-server environment. `.env.example` documents placeholders only. Never prefix
-database credentials with `VITE_`: Vite exposes those variables to the browser.
-When the API is implemented, expose only its public URL as `VITE_API_URL` in
-each frontend project's environment and keep all capacity/payment mutations
-server-authoritative. The current builds do not require an API or Neon connection.
+See [production identity and provisioning](../production-auth.md) for OIDC
+configuration, migration order, first-operator bootstrap and Ops workflows.
+All three apps support /auth/callback through the existing SPA fallback. Provider
+settings must be real registered values; incomplete configuration fails closed.

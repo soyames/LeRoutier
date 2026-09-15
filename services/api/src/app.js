@@ -4,9 +4,12 @@ import { transport } from '@leroutier/database/transport';
 import { validatePosition } from '@leroutier/geo';
 import { enqueue } from '@leroutier/notifications';
 import { authentication } from './auth.js';
+import { publicAuthConfig } from '@leroutier/config';
+import { updateProfile } from '@leroutier/database/identities';
+import { provisioning } from '@leroutier/database/provisioning';
 
-export function createApi(db, config) {
-  const domain=transport(db), auth=authentication(db,config);
+export function createApi(db, config, keyResolver=undefined) {
+  const domain=transport(db), auth=authentication(db,config,keyResolver),provision=provisioning(db,config);
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
   async function limited(subject) {
     await db.transaction(async tx=>{
@@ -26,7 +29,7 @@ export function createApi(db, config) {
       catch { throw new DomainError('INVALID_BODY','Invalid JSON.'); }
     };
     if(method==='GET' && path==='/health') {await list('SELECT 1');return {status:'ok'};}
-    if(method==='GET' && path==='/auth/config') return {demoLogin:config.demoLogin};
+    if(method==='GET' && path==='/auth/config') return publicAuthConfig(config);
     if(method==='POST' && path==='/auth/demo') {invariant(config.demoLogin,'NOT_FOUND','Endpoint not found.',404);await limited('demo-login');return auth.demoSession((await body()).role);}
     if(method==='GET' && path==='/stops') {
       const search=(url.searchParams.get('q') || '').slice(0,100);
@@ -61,7 +64,19 @@ export function createApi(db, config) {
     const actor=await auth.authenticate(request);
     if(method!=='GET') await limited(actor.id);
     if(method==='GET' && path==='/me') return actor;
-    if(method==='POST' && path==='/bookings') return domain.hold(actor,await body(),request.headers.get('idempotency-key'));
+    if(method==='PATCH' && path==='/me') return updateProfile(db,actor,await body());
+    if(method==='GET' && path==='/ops/provisioning') return provision.catalog(actor);
+    const provisionPath=path.match(/^\/ops\/(operators|drivers|ops-users|places|stops|vehicles|routes|services)$/);
+    if(method==='POST' && provisionPath) {
+      const operations={operators:'operator',drivers:'driver','ops-users':'opsUser',places:'place',stops:'stop',vehicles:'vehicle',routes:'route',services:'service'};
+      return provision[operations[provisionPath[1]]](actor,await body(),request.headers.get('idempotency-key'));
+    }
+    const activation=path.match(/^\/ops\/users\/([^/]+)\/status$/);
+    if(method==='PATCH' && activation) return provision.userStatus(actor,uuid(activation[1]),await body(),request.headers.get('idempotency-key'));
+    if(method==='POST' && path==='/bookings') {
+      invariant(!actor.needs_profile,'PROFILE_REQUIRED','Complete your passenger profile before booking.',409);
+      return domain.hold(actor,await body(),request.headers.get('idempotency-key'));
+    }
     if(method==='GET' && path==='/me/bookings') return domain.passengerBookings(actor);
     const booking=path.match(/^\/bookings\/([^/]+)(?:\/(confirm|cancel|board|alight|payments))?$/);
     if(booking) {
