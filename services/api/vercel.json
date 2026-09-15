@@ -3,6 +3,7 @@
   "framework": null,
   "installCommand": "corepack pnpm --dir ../.. install --frozen-lockfile",
   "buildCommand": "corepack pnpm build",
+  "outputDirectory": "dist",
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
   "functions": { "api/index.js": { "maxDuration": 30 } }
 }
