@@ -75,8 +75,12 @@ export function ApiProvider({baseUrl='',role,children}) {
   const updateProfile=useCallback(async body=>{
     const user=await request('/me',{method:'PATCH',body});setSession(s=>s?{...s,user}:s);
   },[request]);
+  // Re-fetch the identity after onboarding/role changes.
+  const refresh=useCallback(async()=>{
+    const user=await request('/me');setSession(s=>s?{...s,user}:s);
+  },[request]);
   const value=useMemo(()=>({request,identity:session?.user,user:session?.user?.role===role?session.user:null,role,online,configured:!!base,
-    demoLogin:auth.demoLogin,authLoading:auth.loading,authError:auth.error,canSignin:!!auth.client,login,loginDemo:demoLogin,logout,updateProfile}),[request,session,role,online,base,auth,login,demoLogin,logout,updateProfile]);
+    demoLogin:auth.demoLogin,authLoading:auth.loading,authError:auth.error,canSignin:!!auth.client,login,loginDemo:demoLogin,logout,updateProfile,refresh}),[request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh]);
   return <Context.Provider value={value}>{callbackPending?<p role="status">Connexion sécurisée en cours…</p>:children}</Context.Provider>;
 }
 export function useSession(){return useContext(Context);}
