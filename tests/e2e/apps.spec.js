@@ -17,15 +17,16 @@ const apps = [
   {
     name: 'driver', port: 4174, role: 'Chauffeur', title: 'Chauffeur',
     routes: [
-      ['/', 'Feuille de route & embarquement'],
-      ['/route', 'Feuille de route & embarquement'],
+      ['/', 'Aujourd’hui'],
+      ['/manifest', 'Manifeste passagers'],
       ['/profile', 'Affectation véhicule'],
     ],
-    nav: ['Profil & bord', '/profile', 'Feuille de route', '/route'],
+    nav: ['Profil', '/profile', 'Manifeste', '/manifest'],
   },
   {
-    name: 'ops', port: 4175, role: 'Régulation', title: 'Régulation',
-    routes: [['/', 'Incidents & reprise'], ['/fleet/live', 'Incidents & reprise']],
+    name: 'ops', port: 4175, role: 'Opérateur', title: 'Régulation',
+    routes: [['/', 'Aujourd’hui'], ['/fleet', 'Flotte & véhicules']],
+    nav: ['Paramètres', '/settings', 'Flotte', '/fleet'],
   },
 ];
 

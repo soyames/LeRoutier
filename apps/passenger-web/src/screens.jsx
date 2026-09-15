@@ -3,16 +3,21 @@ import { useNavigate } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
 import { Card, Badge, SectionTitle, ApiState, ProfileForm } from '@leroutier/ui';
 import { QRCodeSVG } from 'qrcode.react';
-import { Armchair, Ticket, Building2, Navigation, UserRound, Route, CreditCard, Package } from 'lucide-react';
+import { Armchair, Ticket, Building2, Navigation, UserRound, Route, CreditCard, Package, Store } from 'lucide-react';
 
 export function Trips() {
-  const routes=useApi('/routes'),{user,request,online}=useSession(),navigate=useNavigate();
+  const routes=useApi('/routes'),{user,request,online,login,canSignin}=useSession(),navigate=useNavigate();
   const [origin,setOrigin]=useState(''),[destination,setDestination]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState('');
   const keys=useRef(new Map());
   const stops=routes.data?.[0]?.stops || [];
   const from=origin || stops[0]?.stopId,to=destination || stops.at(-1)?.stopId;
   const services=useApi(from && to?`/services?originStopId=${from}&destinationStopId=${to}`:null);
   async function book(service) {
+    // Registration/login appears exactly when an action requires an account.
+    if(!user){
+      if(canSignin){setError('');try{await login();}catch(e){setError(e.message);}return;}
+      setError('La connexion sécurisée n’est pas encore configurée.');return;
+    }
     const quote=service.availability,identity=[service.id,quote.origin,quote.destination].join(':');
     if(!keys.current.has(identity)) keys.current.set(identity,crypto.randomUUID());
     setBusy(service.id);setError('');
@@ -22,18 +27,22 @@ export function Trips() {
     } catch(e){setError(e.message);} finally{setBusy('');services.reload();}
   }
   return <>
-    <Card className="hero stack"><span className="eyebrow">Recherche de trajet</span><h1>Voyagez entre les villes du Bénin, simplement.</h1><p>Disponibilité et prix calculés par tronçon. Les places libérées à un arrêt sont réutilisables pour la suite du trajet.</p></Card>
-    {routes.loading || routes.error || !stops.length ? <ApiState resource={routes} empty="Aucune ligne ouverte actuellement."/> : <Card className="stack"><div className="search-panel">
+    <Card className="hero stack"><span className="eyebrow">Recherche de trajet</span><h1>Voyagez entre les villes du Bénin, simplement.</h1><p>Recherchez librement — le compte n’est demandé qu’au moment de réserver. Prix par tronçon, places réutilisées à chaque arrêt, paiement en ligne sécurisé.</p></Card>
+    {routes.loading || routes.error || !stops.length ? <ApiState resource={routes} empty="Aucune ligne n’est publiée pour le moment. Revenez bientôt — le réseau s’ouvre progressivement."/> : <Card className="stack"><div className="search-panel">
       <label className="search-place">Départ<select className="control" aria-label="Départ" value={from} onChange={e=>setOrigin(e.target.value)}>{stops.map(s=><option key={s.stopId} value={s.stopId}>{s.city} · {s.name}</option>)}</select></label>
       <Route size={20}/><label className="search-place end">Arrivée<select className="control" aria-label="Arrivée" value={to} onChange={e=>setDestination(e.target.value)}>{stops.map(s=><option key={s.stopId} value={s.stopId}>{s.city} · {s.name}</option>)}</select></label>
-    </div><span className="small muted">1 passager par réservation · tarif en FCFA</span></Card>}
+    </div><span className="small muted">1 passager par réservation · tarif en FCFA · paiement en ligne uniquement</span></Card>}
     <SectionTitle title="Départs disponibles"/>
     {error && <p role="alert">{error}</p>}
-    {services.loading || services.error || !services.data?.length ? <ApiState resource={services} empty="Aucun départ pour ce trajet."/> : services.data.map(service=><Card key={service.id} className="route-card">
-      <div className="between"><div><h3>{service.operator_name}</h3><span className="small muted">{service.registration}</span></div><div className="price">{service.availability.fare.amountMinor.toLocaleString('fr-FR')} FCFA</div></div>
-      <div className="route-line"><div><strong>{service.availability.stops[service.availability.origin].city}</strong></div><div className="mid"><span className="small muted">{new Date(service.departure_at).toLocaleString('fr-FR')}</span><div className="track"/></div><strong>{service.availability.stops[service.availability.destination].city}</strong></div>
-      <div className="between wrap"><Badge tone={service.availability.available?'success':'danger'}><Armchair size={13}/>{service.availability.available} places</Badge>
-        <button className="btn btn-primary" disabled={!user || user.needs_profile || !online || !!busy || !service.availability.available} onClick={()=>book(service)}>{busy===service.id?'Réservation…':'Réserver une place'}</button></div>
+    {services.loading || services.error || !services.data?.length ? <ApiState resource={services} empty="Aucun départ n’est publié sur ce trajet pour le moment. Essayez une autre destination ou revenez plus tard."/> : services.data.map(service=><Card key={service.id} className="route-card">
+      <div className="between"><div><h3>{service.operator_name}</h3><span className="small muted">{service.registration}{service.driver_name?` · ${service.driver_name}`:''}</span></div><div className="price">{service.availability.fare.amountMinor.toLocaleString('fr-FR')} FCFA</div></div>
+      <div className="route-line">
+        <div><strong>{service.availability.stops[service.availability.origin].city}</strong><span className="small muted">{service.departure_point_name || service.availability.stops[service.availability.origin].name}{service.departure_point_landmark?` — ${service.departure_point_landmark}`:''}</span></div>
+        <div className="mid"><span className="small muted">{new Date(service.departure_at).toLocaleString('fr-FR')}</span><div className="track"/></div>
+        <div><strong>{service.availability.stops[service.availability.destination].city}</strong><span className="small muted">{service.arrival_point_name || service.availability.stops[service.availability.destination].name}{service.arrival_point_landmark?` — ${service.arrival_point_landmark}`:''}</span></div>
+      </div>
+      <div className="between wrap"><Badge tone={service.availability.available?'success':'danger'}><Armchair size={13}/>{service.availability.available} place{service.availability.available>1?'s':''}</Badge>
+        <button className="btn btn-primary" disabled={user?.needs_profile || !online || !!busy || !service.availability.available} onClick={()=>book(service)}>{busy===service.id?'Réservation…':!user?'Se connecter pour réserver':user.needs_profile?'Complétez votre profil':'Réserver une place'}</button></div>
       {service.is_demo && <span className="small muted">Service de démonstration</span>}
     </Card>)}
   </>;
@@ -82,9 +91,14 @@ export function Tickets() {
     catch(e){setError(e.message);}finally{setBusy('');}}
   const labels={held:'Option en attente de paiement',confirmed:'Confirmé',boarded:'À bord',completed:'Terminé',cancelled:'Annulé',expired:'Option expirée'};
   return <><SectionTitle icon={Ticket} title="Mes billets"/>{error && <p role="alert">{error}</p>}
-    {!user || bookings.loading || bookings.error || !bookings.data?.length ? <ApiState resource={bookings} empty={user?'Aucune réservation.':'Connectez-vous pour retrouver vos billets.'}/> : bookings.data.map(b=><Card key={b.id} className="ticket">
+    {!user || bookings.loading || bookings.error || !bookings.data?.length ? <ApiState resource={bookings} empty={user?'Aucune réservation pour le moment — trouvez un départ dans « Trajets ».':'Connectez-vous pour retrouver vos billets.'}/> : bookings.data.map(b=><Card key={b.id} className="ticket">
       <div className="ticket-head between"><h2>{b.route_name}</h2><Badge>{labels[b.status]}</Badge></div><div className="ticket-body stack">
         <div className="between"><span>{new Date(b.departure_at).toLocaleString('fr-FR')}</span><strong>Siège {b.seat_number}</strong></div>
+        <div className="stack">
+          <span className="small"><strong>Embarquement :</strong> {b.departure_city}{b.departure_point_name?` — ${b.departure_point_name}`:''}{b.departure_point_landmark?` (${b.departure_point_landmark})`:''}</span>
+          <span className="small"><strong>Arrivée :</strong> {b.arrival_city}{b.arrival_point_name?` — ${b.arrival_point_name}`:''}{b.arrival_point_landmark?` (${b.arrival_point_landmark})`:''}</span>
+          {(b.departure_point_latitude!==null || b.arrival_point_latitude!==null) && <span className="small">{b.departure_point_latitude!==null && <a href={`https://www.openstreetmap.org/?mlat=${b.departure_point_latitude}&mlon=${b.departure_point_longitude}#map=16/${b.departure_point_latitude}/${b.departure_point_longitude}`} target="_blank" rel="noreferrer">Voir l’embarquement sur la carte</a>} {b.arrival_point_latitude!==null && <a href={`https://www.openstreetmap.org/?mlat=${b.arrival_point_latitude}&mlon=${b.arrival_point_longitude}#map=16/${b.arrival_point_latitude}/${b.arrival_point_longitude}`} target="_blank" rel="noreferrer">· Voir l’arrivée sur la carte</a>}</span>}
+        </div>
         <span className="small">Référence : {b.id}</span><div className="price">{b.amount_minor.toLocaleString('fr-FR')} FCFA</div>
         {b.status==='held' && <div className="payment-box stack">
           <div className="between"><Badge tone={payStates[b.id]==='pending'?'neutral':'danger'}><CreditCard size={13}/>{payStates[b.id]==='pending'?'Paiement en attente…':payStates[b.id]==='failed'?'Paiement refusé ou annulé':payStates[b.id]==='succeeded'?'Paiement vérifié':'Paiement requis'}</Badge>
@@ -100,6 +114,9 @@ export function Tickets() {
         {tickets[b.id] && <div className="qr-box stack"><div className="between"><h3>Billet valide</h3><Badge tone="success">Version {tickets[b.id].version}</Badge></div>
           <div className="qr-canvas"><QRCodeSVG value={tickets[b.id].token} size={168} marginSize={1}/></div>
           <span className="small muted">Code manuel : <strong>{tickets[b.id].manualCode}</strong></span>
+          <span className="small"><strong>Embarquement :</strong> {tickets[b.id].departure.city}{tickets[b.id].departure.name?` — ${tickets[b.id].departure.name}`:''}{tickets[b.id].departure.landmark?` (${tickets[b.id].departure.landmark})`:''}</span>
+          <span className="small"><strong>Arrivée :</strong> {tickets[b.id].arrival.city}{tickets[b.id].arrival.name?` — ${tickets[b.id].arrival.name}`:''}{tickets[b.id].arrival.landmark?` (${tickets[b.id].arrival.landmark})`:''}</span>
+          {tickets[b.id].departure.latitude!==null && <span className="small"><a href={`https://www.openstreetmap.org/?mlat=${tickets[b.id].departure.latitude}&mlon=${tickets[b.id].departure.longitude}#map=17/${tickets[b.id].departure.latitude}/${tickets[b.id].departure.longitude}`} target="_blank" rel="noreferrer">Voir le point d’embarquement sur la carte</a></span>}
           <span className="small">Valable jusqu’au {new Date(tickets[b.id].expiresAt).toLocaleString('fr-FR')}. Présentez ce QR au contrôleur à l’embarquement.</span>
           <span className="small muted">Récupérer à nouveau remplace l’ancien code.</span></div>}
         {['held','confirmed'].includes(b.status) && <button className="btn btn-soft" disabled={!!busy || !online} onClick={()=>action(b.id,'cancel')}>Annuler la réservation</button>}
@@ -117,12 +134,17 @@ export function Tracking(){
   return <><SectionTitle icon={Navigation} title="Suivi de mon trajet"/>{!booking || !position.data ? <ApiState resource={booking?position:bookings} empty="Aucune position disponible pour un billet actif."/> : <Card className="stack"><h2>{booking.route_name}</h2><p>Dernière position : {position.data.latitude}, {position.data.longitude}</p><span className="small muted">Observée le {new Date(position.data.observed_at).toLocaleString('fr-FR')}</span><button className="btn btn-soft" onClick={position.reload}>Actualiser</button></Card>}</>;
 }
 export function Account(){
-  const {user}=useSession();return <><SectionTitle icon={UserRound} title="Mon compte"/><Card className="stack">{user?<><h2>{user.display_name}</h2><Badge tone="success">Compte connecté</Badge>{!user.needs_profile && <ProfileForm/>}{!user.needs_profile && user.role==='passenger' && <OnboardingChoice/>}<p className="small muted">Vos billets et réservations sont synchronisés avec le service.</p></>:<p>Connectez-vous pour accéder à votre compte.</p>}</Card></>;
+  const {user}=useSession(),navigate=useNavigate();
+  return <><SectionTitle icon={UserRound} title="Mon compte"/><Card className="stack">{user?<><h2>{user.display_name}</h2><Badge tone="success">Compte connecté</Badge>{!user.needs_profile && <ProfileForm/>}<p className="small muted">Vos billets et réservations sont synchronisés avec le service.</p></>:<p>Connectez-vous pour accéder à votre compte.</p>}</Card>
+  {(!user || (user.role==='passenger' && !user.needs_profile)) && <Card className="stack"><SectionTitle icon={Store} title="Conduire ou gérer une compagnie ?"/>
+    <p className="small muted">LeRoutier accueille aussi les chauffeurs indépendants et les compagnies de transport. Créez votre compte opérateur et suivez la vérification — tout se passe au même endroit.</p>
+    <button className="btn btn-soft" onClick={()=>navigate('/onboarding')}>Créer un compte opérateur</button></Card>}
+  </>;
 }
 
-// Initial account choice: Passenger (default), Independent Driver or Transport
-// Company. One canonical operator model backs the two operational paths.
-function OnboardingChoice(){
+// Public operator entry: the explicit choice between Passenger, Independent
+// Driver and Transport Company, with the onboarding flows and their states.
+export function OnboardingPage(){
   const {user,request,refresh,online}=useSession();
   const [path,setPath]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
   const [displayName,setDisplayName]=useState(user?.display_name||''),[phone,setPhone]=useState(user?.phone||''),
@@ -137,19 +159,32 @@ function OnboardingChoice(){
       }else{
         await request('/onboarding/company',{method:'POST',key:'onboard-'+crypto.randomUUID(),body:{displayName,contactPhone,country,...(regRef.trim()?{registrationRef:regRef.trim()}:{})}});
       }
-      await refresh();setNotice('Bienvenue ! Votre compte opérateur est en attente de vérification.');
+      await refresh();setNotice('Compte opérateur créé — en attente de vérification.');
     }catch(e){setError(e.message);}finally{setBusy(false);}
   }
-  return <Card className="stack"><SectionTitle icon={Package} title="Vous êtes…"/>
-    {!path && <div className="controls wrap">
-      <button className="btn btn-soft" onClick={()=>setPath(null)}>Passager — continuer simplement</button>
-      <button className="btn btn-primary" onClick={()=>setPath('independent')}>Chauffeur indépendant</button>
-      <button className="btn btn-soft" onClick={()=>setPath('company')}>Compagnie de transport</button>
-    </div>}
-    {path && <form className="stack" onSubmit={submit}>
+  const operational=user && user.role!=='passenger';
+  return <>
+    <Card className="hero stack"><span className="eyebrow">Rejoindre LeRoutier</span><h1>Vous voyagez, vous conduisez ou vous gérez une compagnie ?</h1><p>Choisissez votre parcours. Les comptes opérateurs passent par une vérification avant toute activité financière ou opérationnelle.</p></Card>
+    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    {!user && <Card><p role="status">Connectez-vous d’abord : votre identité vérifiée devient votre compte LeRoutier. La première connexion crée un profil passager en toute sécurité.</p></Card>}
+    {operational && <Card className="card-success stack"><h3>Vous êtes déjà opérateur</h3>
+      {user.role==='driver' && <p className="small">Votre compte chauffeur est actif — utilisez la console Conducteur pour votre service, vos colis et vos gains.</p>}
+      {user.role==='ops' && <p className="small">Votre compte administrateur est actif — utilisez le centre opérationnel (app Ops) pour gérer votre compagnie.</p>}
+      {user.role==='convoyeur' && <p className="small">Votre compte convoyeur est actif — utilisez la console Conducteur (mode convoyeur).</p>}
+    </Card>}
+    {!operational && !path && <Card className="stack"><h3>Je suis…</h3>
+      <div className="controls wrap">
+        <button className="btn btn-soft" disabled={!online}>Passager — voyager simplement</button>
+        <button className="btn btn-primary" disabled={!online} onClick={()=>setPath('independent')}>Chauffeur indépendant</button>
+        <button className="btn btn-soft" disabled={!online} onClick={()=>setPath('company')}>Compagnie de transport</button>
+      </div>
+      <p className="small muted">Le passager n’a besoin de rien de plus : la recherche de trajets est déjà disponible sans compte.</p>
+    </Card>}
+    {!operational && path && <Card className="stack"><form className="stack" onSubmit={submit}>
       <span className="eyebrow">{path==='independent'?'Chauffeur indépendant':'Compagnie de transport'}</span>
-      <label>Nom{path==='company'?' de la compagnie':' complet'}<input className="control" required minLength={2} maxLength={200} value={displayName} onChange={e=>setDisplayName(e.target.value)}/></label>
       {path==='independent' && <>
+        <p className="small muted">Un seul compte devient votre opérateur, votre profil conducteur et votre bénéficiaire de revenus. Prévoir : permis, véhicule (facultatif à l’inscription).</p>
+        <label>Nom complet<input className="control" required minLength={2} maxLength={200} value={displayName} onChange={e=>setDisplayName(e.target.value)}/></label>
         <label>Téléphone<input className="control" type="tel" required value={phone} onChange={e=>setPhone(e.target.value)}/></label>
         <label>Référence du permis<input className="control" required minLength={2} value={license} onChange={e=>setLicense(e.target.value)}/></label>
         <div className="between wrap">
@@ -159,16 +194,16 @@ function OnboardingChoice(){
         </div>
       </>}
       {path==='company' && <>
+        <p className="small muted">La compagnie devient un opérateur LeRoutier ; vous en devenez l’administrateur. Après vérification, ajoutez personnel, véhicules, lignes et services.</p>
+        <label>Nom de la compagnie<input className="control" required minLength={2} maxLength={200} value={displayName} onChange={e=>setDisplayName(e.target.value)}/></label>
         <label>Téléphone de contact<input className="control" type="tel" required value={contactPhone} onChange={e=>setContactPhone(e.target.value)}/></label>
         <label>Référence d’immatriculation (facultatif)<input className="control" value={regRef} onChange={e=>setRegRef(e.target.value)}/></label>
       </>}
-      <p className="small muted">Le compte est créé en attente de vérification. Aucune action financière ou opérationnelle n’est possible avant validation.</p>
-      <div className="controls"><button className="btn btn-primary" disabled={busy || !online}>{busy?'Création…':'Créer mon compte opérateur'}</button><button type="button" className="btn btn-soft" onClick={()=>setPath(null)}>Retour</button></div>
-      {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    </form>}
-  </Card>;
+      <p className="small muted">Le compte est créé en <strong>attente de vérification</strong>. Aucune action financière ou opérationnelle n’est possible avant validation par l’équipe LeRoutier.</p>
+      <div className="controls"><button className="btn btn-primary" disabled={busy || !online || !user}>{busy?'Création…':'Créer mon compte opérateur'}</button><button type="button" className="btn btn-soft" onClick={()=>setPath(null)}>Retour</button></div>
+    </form></Card>}
+  </>;
 }
-
 const parcelLabels={created:'Créé',accepted:'Accepté',manifested:'Affecté',loaded:'Chargé',in_transit:'En transit',arrived:'Arrivé',
   ready_for_pickup:'Prêt au retrait',collected:'Retiré',cancelled:'Annulé',rejected:'Refusé',held:'Retenu',damaged:'Endommagé',
   lost:'Perdu',return_requested:'Retour demandé',returned:'Retourné'};

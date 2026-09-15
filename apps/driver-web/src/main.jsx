@@ -6,5 +6,5 @@ import '@leroutier/ui/styles.css';
 import App from './App.jsx';
 
 createRoot(document.getElementById('root')).render(
-  <React.StrictMode><BrowserRouter><ApiProvider baseUrl={import.meta.env.VITE_API_URL} role="driver"><App /></ApiProvider></BrowserRouter></React.StrictMode>,
+  <React.StrictMode><BrowserRouter><ApiProvider baseUrl={import.meta.env.VITE_API_URL} role={['driver','convoyeur']}><App /></ApiProvider></BrowserRouter></React.StrictMode>,
 );

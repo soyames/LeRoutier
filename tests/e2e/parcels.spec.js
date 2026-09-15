@@ -35,6 +35,8 @@ test('passenger creates a parcel, sees the receipt QR and tracks it publicly',as
 
 test('driver sees parcel cargo on the assigned service and scans loading',async({page})=>{
   await login(page,4174);
+  // Sessions are memory-only: navigate client-side via the nav.
+  await page.getByRole('button',{name:'Colis'}).click();
   await expect(page.getByText('Fret & colis')).toBeVisible();
   await expect(page.getByText('LRP-12345678')).toBeVisible();
   await expect(page.getByText('destination Parakou')).toBeVisible();

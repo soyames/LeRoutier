@@ -79,7 +79,17 @@ export function payments(db,adapter=null){
         return publicPayment(await one(tx,'UPDATE payments SET provider_reference=$2,checkout_url=$3,provider_metadata=$4,updated_at=now() WHERE id=$1 RETURNING *',[p.id,result.reference,checkout,JSON.stringify(metadata)]));
       });
     },
-    async status(actor,id){await domain.booking(actor,id);return db.transaction(async tx=>(await tx.query('SELECT * FROM payments WHERE booking_id=$1 ORDER BY created_at DESC',[id])).rows.map(publicPayment));},
+    // Read-only status polling: no row locks — the passenger UI polls this
+    // every few seconds and must never contend with service operations.
+    async status(actor,id){
+      invariant(actor?.role==='passenger','FORBIDDEN','Passenger access required.',403);
+      return db.transaction(async tx=>{
+        const b=await one(tx,'SELECT * FROM bookings WHERE id=$1',[uuid(id)]);
+        invariant(b,'NOT_FOUND','Booking not found.',404);
+        invariant(b.passenger_id===actor.id,'FORBIDDEN','Booking is not yours.',403);
+        return (await tx.query('SELECT * FROM payments WHERE booking_id=$1 ORDER BY created_at DESC',[id])).rows.map(publicPayment);
+      });
+    },
     async listOps(actor,filter={}){
       invariant(actor?.role==='ops','FORBIDDEN','Operations access required.',403);
       const status=filter.status;
