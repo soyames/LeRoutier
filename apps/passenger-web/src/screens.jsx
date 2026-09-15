@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
-import { Card, Badge, SectionTitle, ApiState } from '@leroutier/ui';
+import { Card, Badge, SectionTitle, ApiState, ProfileForm } from '@leroutier/ui';
 import { Armchair, Ticket, Building2, Navigation, UserRound, Route } from 'lucide-react';
 
 export function Trips() {
@@ -32,7 +32,7 @@ export function Trips() {
       <div className="between"><div><h3>{service.operator_name}</h3><span className="small muted">{service.registration}</span></div><div className="price">{service.availability.fare.amountMinor.toLocaleString('fr-FR')} FCFA</div></div>
       <div className="route-line"><div><strong>{service.availability.stops[service.availability.origin].city}</strong></div><div className="mid"><span className="small muted">{new Date(service.departure_at).toLocaleString('fr-FR')}</span><div className="track"/></div><strong>{service.availability.stops[service.availability.destination].city}</strong></div>
       <div className="between wrap"><Badge tone={service.availability.available?'success':'danger'}><Armchair size={13}/>{service.availability.available} places</Badge>
-        <button className="btn btn-primary" disabled={!user || !online || !!busy || !service.availability.available} onClick={()=>book(service)}>{busy===service.id?'Réservation…':'Réserver une place'}</button></div>
+        <button className="btn btn-primary" disabled={!user || user.needs_profile || !online || !!busy || !service.availability.available} onClick={()=>book(service)}>{busy===service.id?'Réservation…':'Réserver une place'}</button></div>
       {service.is_demo && <span className="small muted">Service de démonstration</span>}
     </Card>)}
   </>;
@@ -64,5 +64,5 @@ export function Tracking(){
   return <><SectionTitle icon={Navigation} title="Suivi de mon trajet"/>{!booking || !position.data ? <ApiState resource={booking?position:bookings} empty="Aucune position disponible pour un billet actif."/> : <Card className="stack"><h2>{booking.route_name}</h2><p>Dernière position : {position.data.latitude}, {position.data.longitude}</p><span className="small muted">Observée le {new Date(position.data.observed_at).toLocaleString('fr-FR')}</span><button className="btn btn-soft" onClick={position.reload}>Actualiser</button></Card>}</>;
 }
 export function Account(){
-  const {user}=useSession();return <><SectionTitle icon={UserRound} title="Mon compte"/><Card className="stack">{user?<><h2>{user.display_name}</h2><Badge tone="success">Compte connecté</Badge><p className="small muted">Vos billets et réservations sont synchronisés avec le service.</p></>:<p>Connectez-vous pour accéder à votre compte.</p>}</Card></>;
+  const {user}=useSession();return <><SectionTitle icon={UserRound} title="Mon compte"/><Card className="stack">{user?<><h2>{user.display_name}</h2><Badge tone="success">Compte connecté</Badge>{!user.needs_profile && <ProfileForm/>}<p className="small muted">Vos billets et réservations sont synchronisés avec le service.</p></>:<p>Connectez-vous pour accéder à votre compte.</p>}</Card></>;
 }
