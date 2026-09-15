@@ -4,7 +4,8 @@
     "pg": "^8.16.3",
     "@leroutier/domain": "workspace:*",
     "@leroutier/config": "workspace:*",
-    "@leroutier/agents": "workspace:*"
+    "@leroutier/agents": "workspace:*",
+    "@leroutier/notifications": "workspace:*"
   },
   "version": "0.1.0",
   "private": true,

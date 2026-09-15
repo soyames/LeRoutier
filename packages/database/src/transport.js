@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { DomainError, invariant, journeySegments, validateTransition, uuid, idempotencyKey } from '@leroutier/domain';
+import { audit } from './identities.js';
 
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const one = async (tx, sql, params = []) => (await tx.query(sql, params)).rows[0];
@@ -204,6 +205,56 @@ export function transport(db) {
       const service = await serviceLock(tx, serviceId);
       if (opsOnly) ops(actor, service); else await crew(tx, actor, service);
       return service;
+    },
+    // Ops reschedules a service or corrects its boarding point. Both change
+    // what every passenger was told, so each emits its own event: downstream
+    // the timeline is recomputed and the previous timing advice is superseded
+    // rather than left to contradict the new one.
+    async reschedule(actor, serviceId, input) {
+      invariant(input && Object.keys(input).every(k => ['departureAt', 'arrivalAt', 'departurePointId', 'arrivalPointId', 'reason'].includes(k)),
+        'INVALID_SCHEDULE', 'Unexpected schedule fields.');
+      invariant(input.reason === undefined || input.reason === null || (typeof input.reason === 'string' && input.reason.length <= 200),
+        'INVALID_SCHEDULE', 'Reason is too long.');
+      for (const key of ['departurePointId', 'arrivalPointId']) if (input[key]) uuid(input[key]);
+      const departure = input.departureAt === undefined ? undefined : Date.parse(input.departureAt);
+      const arrival = input.arrivalAt === undefined || input.arrivalAt === null ? input.arrivalAt : Date.parse(input.arrivalAt);
+      invariant(departure === undefined || Number.isFinite(departure), 'INVALID_SCHEDULE', 'Departure time is invalid.');
+      invariant(arrival === undefined || arrival === null || Number.isFinite(arrival), 'INVALID_SCHEDULE', 'Arrival time is invalid.');
+      return db.transaction(async tx => {
+        const service = await serviceLock(tx, serviceId);
+        ops(actor, service);
+        invariant(['scheduled', 'active', 'disrupted'].includes(service.status), 'INVALID_TRANSITION', 'This service can no longer be rescheduled.', 409);
+        const departureAt = departure === undefined ? service.departure_at : new Date(departure);
+        const arrivalAt = arrival === undefined ? service.arrival_at : (arrival === null ? null : new Date(arrival));
+        invariant(arrivalAt === null || new Date(arrivalAt) > new Date(departureAt), 'INVALID_SCHEDULE', 'Arrival must follow departure.');
+        for (const key of ['departurePointId', 'arrivalPointId']) {
+          if (!input[key]) continue;
+          invariant(await one(tx, "SELECT id FROM boarding_points WHERE id=$1 AND status='verified'", [input[key]]),
+            'INVALID_POINT', 'Only a verified location can be used.', 409);
+        }
+        const previousPoint = service.departure_point_id;
+        const result = await one(tx, `UPDATE services SET departure_at=$2,arrival_at=$3,
+          departure_point_id=coalesce($4,departure_point_id),arrival_point_id=coalesce($5,arrival_point_id),updated_at=now()
+          WHERE id=$1 RETURNING *`, [service.id, departureAt, arrivalAt, input.departurePointId ?? null, input.arrivalPointId ?? null]);
+        const movedTime = new Date(result.departure_at).getTime() !== new Date(service.departure_at).getTime();
+        const movedPoint = input.departurePointId && input.departurePointId !== previousPoint;
+        if (movedTime) {
+          await emit(tx, 'service.rescheduled', service.id, { serviceId: service.id,
+            departureAt: new Date(result.departure_at).toISOString(), previousDepartureAt: new Date(service.departure_at).toISOString(),
+            reason: input.reason ?? null });
+        }
+        if (movedPoint) {
+          const named = await one(tx, 'SELECT name FROM boarding_points WHERE id=$1', [result.departure_point_id]);
+          const previousNamed = previousPoint ? await one(tx, 'SELECT name FROM boarding_points WHERE id=$1', [previousPoint]) : null;
+          await emit(tx, 'service.boarding_point_changed', service.id, { serviceId: service.id,
+            boardingPointName: named?.name ?? null, previousBoardingPointName: previousNamed?.name ?? null });
+        }
+        // Distinct from the emitted 'service.rescheduled' notification event:
+        // audit() publishes under its own action name, so they must not collide.
+        await audit(tx, actor.id, 'service.schedule_changed', service.id, service.operator_id,
+          { movedTime, movedPoint, reason: input.reason ?? null });
+        return result;
+      });
     },
   };
 }

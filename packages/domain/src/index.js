@@ -58,3 +58,51 @@ export function idempotencyKey(value) {
   invariant(typeof value === 'string' && /^[\w-]{8,100}$/.test(value), 'INVALID_KEY', 'A valid Idempotency-Key is required.');
   return value;
 }
+
+// First-mile timing policy. One configurable default instead of buffers
+// scattered through screens and workers; overridable per deployment.
+// Worked example with these defaults: departure 07:30 gives boarding from
+// 07:10, be-there-by 07:15, and a 25-minute local trip leaves home at 06:40.
+export const FIRST_MILE_POLICY = {
+  boardingOpensMinutes: 20,
+  recommendedArrivalMinutes: 15,
+  boardingClosesMinutes: 5,
+  safetyBufferMinutes: 10,
+  defaultLocalTravelMinutes: 25,
+};
+
+// Schedule-derived journey plan. Pure: no database, no provider, no location.
+// localTravelMinutes is supplied per request and never stored — when it is
+// absent the policy default is used and the result is marked as an estimate,
+// because LeRoutier has no live routing and must not imply that it does.
+// The database driver returns timestamps as Date objects while the API
+// receives ISO strings: Date.parse() on a Date coerces through String() and
+// silently loses the milliseconds, so both forms go through new Date().
+const instant = value => (value === null || value === undefined ? NaN : new Date(value).getTime());
+
+export function journeyPlan({ departureAt, arrivalAt = null, localTravelMinutes = null, policy = FIRST_MILE_POLICY }) {
+  const departure = instant(departureAt);
+  invariant(Number.isFinite(departure), 'INVALID_SCHEDULE', 'Departure time is invalid.');
+  const arrival = arrivalAt === null || arrivalAt === undefined ? null : instant(arrivalAt);
+  invariant(arrival === null || (Number.isFinite(arrival) && arrival > departure), 'INVALID_SCHEDULE', 'Arrival time is invalid.');
+  invariant(localTravelMinutes === null || (Number.isInteger(localTravelMinutes) && localTravelMinutes >= 0 && localTravelMinutes <= 600),
+    'INVALID_TRAVEL_ESTIMATE', 'Local travel estimate is invalid.');
+  const at = minutes => new Date(departure - minutes * 60_000).toISOString();
+  const travelMinutes = localTravelMinutes ?? policy.defaultLocalTravelMinutes;
+  return {
+    departureAt: new Date(departure).toISOString(),
+    arrivalAt: arrival === null ? null : new Date(arrival).toISOString(),
+    // Null arrival means "not scheduled by the operator" — never a guess.
+    arrivalScheduled: arrival !== null,
+    boardingOpensAt: at(policy.boardingOpensMinutes),
+    boardingClosesAt: at(policy.boardingClosesMinutes),
+    beThereBy: at(policy.recommendedArrivalMinutes),
+    leaveBy: at(policy.recommendedArrivalMinutes + travelMinutes + policy.safetyBufferMinutes),
+    travelMinutes,
+    safetyBufferMinutes: policy.safetyBufferMinutes,
+    // No live routing provider is integrated: every travel time here is an
+    // estimate and the UI must label it as one.
+    travelSource: localTravelMinutes === null ? 'policy_default' : 'client_estimate',
+    estimated: true,
+  };
+}
