@@ -7,9 +7,8 @@ export default async function api(req,res) {
   try {
     if(!handler) {const config=serverConfig();handler=nodeHandler(createApi(createDatabase(config),config));}
     return await handler(req,res);
-  } catch(error) {
-    // Safe by design: configuration errors and module-resolution failures carry no credentials.
-    console.error('API handler failed:', error instanceof Error ? error.message : String(error));
+  } catch {
+    console.error('API handler unavailable.');
     res.statusCode=503;res.end(JSON.stringify({error:{code:'UNAVAILABLE',message:'The service is temporarily unavailable.'}}));
   }
 }
