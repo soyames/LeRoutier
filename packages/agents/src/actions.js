@@ -148,7 +148,7 @@ export function createActions(ctx) {
     'alert.create': { category: 'low_risk', approval: 'never', scope: 'alert.create', description: 'Create an operational alert for the Ops dashboard.',
       input: { kind: str, message: str, serviceId: optStr }, async run(executor, input) {
         const { kind, message, serviceId } = validate(this.input, input);
-        invariant(['delay', 'recovery', 'payment', 'payout', 'other'].includes(kind), 'INVALID_ACTION_INPUT', 'Alert kind is invalid.');
+        invariant(['delay', 'recovery', 'payment', 'payout', 'parcel', 'other'].includes(kind), 'INVALID_ACTION_INPUT', 'Alert kind is invalid.');
         return db.transaction(async tx => {
           if (serviceId) {
             uuid(serviceId);
