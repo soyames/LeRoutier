@@ -4,6 +4,7 @@ import { transport } from '@leroutier/database/transport';
 import { payments } from '@leroutier/database/payments';
 import { payouts } from '@leroutier/database/payouts';
 import { recovery } from '@leroutier/database/recovery';
+import { parcels } from '@leroutier/database/parcels';
 import { createActions, createWorkflowEngine } from '@leroutier/agents';
 import { paymentAdapter } from '../../../services/api/src/payment-adapter.js';
 
@@ -14,7 +15,7 @@ const db = createDatabase();
 try {
   const adapter = paymentAdapter(serverConfig());
   const domain = transport(db);
-  const actions = createActions({ db, domain, payments: payments(db, adapter), payouts: payouts(db, adapter), recovery: recovery(db) });
+  const actions = createActions({ db, domain, payments: payments(db, adapter), payouts: payouts(db, adapter), recovery: recovery(db), parcels: parcels(db) });
   const engine = createWorkflowEngine({ db, actions });
   const result = await engine.processOutbox();
   console.log(`Workflow tick processed ${result.processed} events.`);
