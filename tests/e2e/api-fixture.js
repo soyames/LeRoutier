@@ -16,5 +16,6 @@ export async function mockApi(page) {
   await page.route('**/services/*/manifest',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/ops/fleet',r=>r.fulfill({json:{data:{services:[service],vehicles:[{id:id(20),registration:'DEMO-BUS-01',capacity:12,status:'active'}]}}}));
   await page.route('**/ops/bookings',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/ops/provisioning',r=>r.fulfill({json:{data:{operators:[],users:[],routes:[],vehicles:[],places:[],stops:[]}}}));
   await page.route('**/incidents',r=>r.fulfill({json:{data:[]}}));
 }
