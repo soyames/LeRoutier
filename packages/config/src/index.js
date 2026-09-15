@@ -30,6 +30,33 @@ export function serverConfig(env = process.env) {
     payoutMinMinor: env.PAYOUT_MIN_MINOR !== undefined && env.PAYOUT_MIN_MINOR !== '' ? Number(env.PAYOUT_MIN_MINOR) : undefined,
     payoutMaxMinor: env.PAYOUT_MAX_MINOR !== undefined && env.PAYOUT_MAX_MINOR !== '' ? Number(env.PAYOUT_MAX_MINOR) : undefined,
     oidcRedirectUris: (env.OIDC_REDIRECT_URIS || '').split(',').map(s=>s.trim()).filter(Boolean),
+    // Outbound notification providers. None is invented: a channel is only
+    // available when its real credentials are present, and stays unavailable
+    // otherwise rather than silently dropping or faking a delivery.
+    notificationProviders: {
+      sms: env.SMS_PROVIDER_URL && env.SMS_PROVIDER_KEY ? {url:env.SMS_PROVIDER_URL.trim(),key:env.SMS_PROVIDER_KEY.trim()} : null,
+      whatsapp: env.WHATSAPP_PROVIDER_URL && env.WHATSAPP_PROVIDER_KEY ? {url:env.WHATSAPP_PROVIDER_URL.trim(),key:env.WHATSAPP_PROVIDER_KEY.trim()} : null,
+      email: env.EMAIL_PROVIDER_URL && env.EMAIL_PROVIDER_KEY ? {url:env.EMAIL_PROVIDER_URL.trim(),key:env.EMAIL_PROVIDER_KEY.trim()} : null,
+      webPushPublicKey: env.WEB_PUSH_PUBLIC_KEY, webPushPrivateKey: env.WEB_PUSH_PRIVATE_KEY,
+    },
+    // First-mile timing policy: one configurable default, documented in
+    // docs/product/FIRST_LAST_MILE.md, instead of buffers invented per screen.
+    firstMile: firstMilePolicy(env),
+  };
+}
+
+function positiveMinutes(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 600 ? parsed : fallback;
+}
+
+export function firstMilePolicy(env = process.env) {
+  return {
+    boardingOpensMinutes: positiveMinutes(env.FIRST_MILE_BOARDING_OPENS_MINUTES, 20),
+    recommendedArrivalMinutes: positiveMinutes(env.FIRST_MILE_ARRIVE_BY_MINUTES, 15),
+    boardingClosesMinutes: positiveMinutes(env.FIRST_MILE_BOARDING_CLOSES_MINUTES, 5),
+    safetyBufferMinutes: positiveMinutes(env.FIRST_MILE_SAFETY_BUFFER_MINUTES, 10),
+    defaultLocalTravelMinutes: positiveMinutes(env.FIRST_MILE_DEFAULT_TRAVEL_MINUTES, 25),
   };
 }
 

@@ -3,8 +3,11 @@ import { invariant } from '@leroutier/domain';
 export async function audit(tx,actorId,action,entityId,operatorId=null,details={}) {
   await tx.query('INSERT INTO audit_events(actor_id,action,entity_id,operator_id,details) VALUES($1,$2,$3,$4,$5)',
     [actorId,action,entityId,operatorId,JSON.stringify(details)]);
+  // The audit trail is also the domain event stream. Details travel with the
+  // event so notification policies can match on them and render real content;
+  // actorId/operatorId stay authoritative and are never overwritten by details.
   await tx.query('INSERT INTO outbox(event_type,aggregate_id,payload) VALUES($1,$2,$3)',
-    [action,entityId,JSON.stringify({actorId,operatorId})]);
+    [action,entityId,JSON.stringify({...details,actorId,operatorId})]);
 }
 
 export async function activeIdentity(tx,id) {

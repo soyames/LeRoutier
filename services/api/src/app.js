@@ -17,6 +17,9 @@ import { onboarding } from '@leroutier/database/onboarding';
 import { locations } from '@leroutier/database/locations';
 import { operatorSettlements } from '@leroutier/database/operator-settlements';
 import { walkUpBookings } from '@leroutier/database/walkup';
+import { notificationPolicies } from '@leroutier/database/notifications';
+import { mobility } from '@leroutier/database/mobility';
+import { journeys } from '@leroutier/database/journeys';
 import { paymentAdapter } from './payment-adapter.js';
 import { authenticate as authenticateAgent, catalog, createActions, createWorkflowEngine } from '@leroutier/agents';
 
@@ -27,8 +30,9 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const pay=payments(db,adapter),ticket=tickets(db);
   const earn=earnings(db),payout=payouts(db,adapter,config),recover=recovery(db),parcel=parcels(db);
   const onboard=onboarding(db),loc=locations(db),settle=operatorSettlements(db,adapter),walkUp=walkUpBookings(db);
+  const notify=notificationPolicies(db,config),rides=mobility(db),journey=journeys(db,config);
   const actions=createActions({db,domain,payments:pay,payouts:payout,recovery:recover,parcels:parcel});
-  const workflows=createWorkflowEngine({db,actions});
+  const workflows=createWorkflowEngine({db,actions,onEvent:(tx,event)=>notify.dispatchEvent(tx,event)});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
   async function limited(subject) {
     await db.transaction(async tx=>{
@@ -298,6 +302,26 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       return domain.hold(actor,await body(),req.headers.get('idempotency-key'));
     }
     if(method==='GET' && path==='/me/bookings') return domain.passengerBookings(actor);
+    // In-app notification centre. Role-aware by construction: a user only ever
+    // reads notifications addressed to their own identity.
+    if(method==='GET' && path==='/notifications')
+      return notify.list(actor,{unreadOnly:url.searchParams.get('unread')==='true',limit:Number(url.searchParams.get('limit'))||50});
+    if(method==='GET' && path==='/notifications/preferences') return notify.preferences(actor);
+    if(method==='PUT' && path==='/notifications/preferences') return notify.setPreference(actor,await body());
+    const notificationRead=path.match(/^\/notifications\/([^/]+)\/read$/);
+    if(method==='POST' && notificationRead) return notify.markRead(actor,notificationRead[1]);
+    // First/last mile. Providers are suggestions: LeRoutier books no ride and
+    // quotes no fare until a real integration exists.
+    if(method==='GET' && path==='/mobility/providers')
+      return rides.providers(actor,{country:url.searchParams.get('country')||'BJ',leg:url.searchParams.get('leg')||'first_mile'});
+    if(method==='POST' && path==='/mobility/handoff') return rides.recordHandoff(actor,await body());
+    // Journey timeline: derived from real booking/service/boarding-point state.
+    // localTravelMinutes is an optional client-side estimate and is never stored.
+    const timeline=path.match(/^\/journeys\/([^/]+)\/timeline$/);
+    if(method==='GET' && timeline) {
+      const travel=url.searchParams.get('localTravelMinutes');
+      return journey.timeline(actor,timeline[1],{localTravelMinutes:travel===null||travel===''?null:Number(travel)});
+    }
     const booking=path.match(/^\/bookings\/([^/]+)(?:\/(confirm|cancel|board|alight|payments))?$/);
     if(booking) {
       const id=uuid(booking[1]),action=booking[2];
@@ -320,7 +344,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
         JOIN places p ON p.id=s.place_id WHERE ss.service_id=$1 ORDER BY sequence`,[rows[0].id]);
       return {...rows[0],stops};
     }
-    const service=path.match(/^\/services\/([^/]+)\/(manifest|advance|positions|status|recovery)$/);
+    const service=path.match(/^\/services\/([^/]+)\/(manifest|advance|positions|status|recovery|schedule)$/);
     if(service) {
       const id=uuid(service[1]),action=service[2];
       if(method==='GET' && action==='manifest') return domain.manifest(actor,id);
@@ -360,6 +384,9 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
           return result;
         });
       }
+      // Delay or boarding-point correction. Passengers are re-notified and
+      // their first-mile advice is recomputed from the new departure time.
+      if(method==='POST' && action==='schedule') return domain.reschedule(actor,id,await body());
       if(method==='POST' && action==='recovery') return recover.assign(actor,{...await body(),serviceId:id});
     }
     // Operational diagnostics: machine-readable counts for the Ops console.
