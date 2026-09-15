@@ -376,7 +376,7 @@ export function parcels(db) {
         const row = await one(tx, 'INSERT INTO parcel_exceptions(parcel_id,kind,description,reported_by) VALUES($1,$2,$3,$4) RETURNING *',
           [parcel.id, input.kind, input.description.trim(), actor.id]);
         await addEvent(tx, { parcelId: parcel.id, kind: 'exception', actor, note: input.kind + ': ' + input.description.trim() });
-        await emit(tx, 'parcel.exception', parcel.id, { trackingNumber: parcel.tracking_number, kind: input.kind });
+        await emit(tx, 'parcel.exception', parcel.id, { trackingNumber: parcel.tracking_number, kind: input.kind, parcelId: parcel.id });
         await audit(tx, actor.id, 'parcel.exception', parcel.id, parcel.operator_id, { kind: input.kind, exceptionId: row.id });
         const target = EXCEPTION_STATUS[input.kind];
         if (!target) return publicParcel(parcel);

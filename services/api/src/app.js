@@ -5,7 +5,7 @@ import { validatePosition } from '@leroutier/geo';
 import { enqueue } from '@leroutier/notifications';
 import { authentication } from './auth.js';
 import { publicAuthConfig } from '@leroutier/config';
-import { updateProfile } from '@leroutier/database/identities';
+import { updateProfile, audit } from '@leroutier/database/identities';
 import { provisioning } from '@leroutier/database/provisioning';
 import { payments } from '@leroutier/database/payments';
 import { tickets } from '@leroutier/database/tickets';
@@ -286,10 +286,53 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
             await tx.query('UPDATE service_assignments SET ended_at=now() WHERE service_id=$1 AND ended_at IS NULL',[id]);
           }
           const result=(await tx.query('UPDATE services SET status=$2,updated_at=now() WHERE id=$1 RETURNING *',[id,input.status])).rows[0];
-          await enqueue(tx,'service.status',id,{status:input.status});return result;
+          await enqueue(tx,'service.status',id,{status:input.status});
+          await audit(tx,actor.id,'service.status_changed',id,s.operator_id,{from:s.status,to:input.status});
+          return result;
         });
       }
       if(method==='POST' && action==='recovery') return recover.assign(actor,{...await body(),serviceId:id});
+    }
+    // Operational diagnostics: machine-readable counts for the Ops console.
+    // Counts only — no party data, no secrets, no mutation. Ops-auth required.
+    if(method==='GET' && path==='/ops/diagnostics') {
+      invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
+      return db.transaction(async tx=>{
+        const scope=actor.operator_id;
+        const rows=(await tx.query(`SELECT
+          (SELECT count(*) FROM payments p JOIN bookings b ON b.id=p.booking_id JOIN services s ON s.id=b.service_id
+            WHERE p.status='failed' AND ($1::uuid IS NULL OR s.operator_id=$1))::integer AS failed_payments,
+          (SELECT count(*) FROM payout_requests r JOIN driver_profiles dp ON dp.user_id=r.driver_id
+            WHERE r.status='failed' AND ($1::uuid IS NULL OR dp.operator_id=$1))::integer AS failed_payouts,
+          (SELECT count(*) FROM payout_requests r JOIN driver_profiles dp ON dp.user_id=r.driver_id
+            WHERE r.status='processing' AND ($1::uuid IS NULL OR dp.operator_id=$1))::integer AS processing_payouts,
+          (SELECT count(*) FROM incidents i JOIN services s ON s.id=i.service_id
+            WHERE i.status<>'resolved' AND ($1::uuid IS NULL OR s.operator_id=$1))::integer AS open_incidents,
+          (SELECT count(*) FROM services s JOIN service_assignments a ON a.service_id=s.id AND a.ended_at IS NULL
+            WHERE s.status IN ('active','disrupted') AND ($1::uuid IS NULL OR s.operator_id=$1)
+            AND NOT EXISTS(SELECT 1 FROM vehicle_positions vp WHERE vp.service_id=s.id AND vp.observed_at>now()-interval '30 minutes'))::integer AS stale_tracking,
+          (SELECT count(*) FROM outbox WHERE event_type IN ('payment.anomaly','payout.anomaly') AND created_at>now()-interval '7 days')::integer AS payment_anomalies,
+          (SELECT count(*) FROM workflow_runs WHERE status='failed')::integer AS failed_workflows,
+          (SELECT count(*) FROM workflow_runs WHERE status='awaiting_approval')::integer AS awaiting_approvals,
+          (SELECT count(*) FROM parcel_exceptions e JOIN parcels p ON p.id=e.parcel_id
+            WHERE e.status='open' AND ($1::uuid IS NULL OR p.operator_id=$1))::integer AS open_parcel_exceptions,
+          (SELECT count(*) FROM parcels p WHERE p.status='ready_for_pickup' AND p.updated_at<now()-interval '24 hours'
+            AND ($1::uuid IS NULL OR p.operator_id=$1))::integer AS uncollected_parcels,
+          (SELECT count(*) FROM parcels p WHERE p.status='ready_for_pickup' AND ($1::uuid IS NULL OR p.operator_id=$1))::integer AS ready_parcels`,[scope])).rows;
+        const d=rows[0];
+        const failedRuns=(await tx.query(`SELECT id,workflow,step,attempts,created_at,context->'failure'->>'code' AS failure_code
+          FROM workflow_runs WHERE status='failed' ORDER BY updated_at DESC LIMIT 10`)).rows;
+        return {
+          generatedAt:new Date().toISOString(),database:'ok',
+          fedapay:{collections:pay.configured,payouts:!!(adapter && adapter.payoutsAvailable),environment:adapter?.environment ?? null},
+          payments:{failed:d.failed_payments,anomalies7d:d.payment_anomalies},
+          payouts:{failed:d.failed_payouts,processing:d.processing_payouts},
+          incidents:{open:d.open_incidents},
+          services:{staleTracking:d.stale_tracking},
+          workflows:{failed:d.failed_workflows,awaitingApproval:d.awaiting_approvals,failedRuns},
+          parcels:{openExceptions:d.open_parcel_exceptions,uncollected:d.uncollected_parcels,readyForPickup:d.ready_parcels},
+        };
+      });
     }
     if(method==='GET' && path==='/ops/bookings') {
       invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
@@ -322,7 +365,9 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
         const row=(await tx.query('SELECT * FROM incidents WHERE id=$1',[incident[1]])).rows[0];
         invariant(row,'NOT_FOUND','Incident not found.',404);await domain.authorizeService(tx,actor,row.service_id,true);
         const result=(await tx.query('UPDATE incidents SET status=$2,updated_at=now() WHERE id=$1 RETURNING *',[row.id,input.status])).rows[0];
-        await enqueue(tx,'incident.updated',row.id,{status:input.status});return result;
+        await enqueue(tx,'incident.updated',row.id,{status:input.status});
+        await audit(tx,actor.id,'incident.status_changed',row.id,null,{serviceId:row.service_id,from:row.status,to:input.status});
+        return result;
       });
     }
     throw new DomainError('NOT_FOUND','Endpoint not found.',404);
