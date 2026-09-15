@@ -8,6 +8,9 @@ export async function seed(db, { capacity = 12 } = {}) {
     await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['seed-' + db.schema]);
     if ((await tx.query('SELECT id FROM services WHERE id=$1', [demo.service])).rowCount) return;
     await tx.query("INSERT INTO operators(id,name,is_demo) VALUES($1,'DEMO - Corridor Benin',true) ON CONFLICT DO NOTHING", [demo.operator]);
+    // Demo/dev fixtures run as a verified operator (onboarding flows test the
+    // pending_verification path themselves).
+    await tx.query("UPDATE operators SET verification_status='verified' WHERE id=$1",[demo.operator]);
     for (const [id, name, role] of [[demo.passenger,'Passager Démo','passenger'],[demo.driver,'Conducteur Démo','driver'],[demo.ops,'Régulation Démo','ops']]) {
       await tx.query('INSERT INTO users(id,display_name,role,operator_id,is_demo) VALUES($1,$2,$3,$4,true) ON CONFLICT DO NOTHING', [id,name,role,role==='passenger'?null:demo.operator]);
     }

@@ -9,11 +9,14 @@ export async function audit(tx,actorId,action,entityId,operatorId=null,details={
 
 export async function activeIdentity(tx,id) {
   const user=(await tx.query(`SELECT u.id,u.auth_subject,u.auth_issuer,u.display_name,u.role,u.operator_id,u.active,u.is_demo,u.profile_completed_at,p.phone,
-    d.active AS driver_active,o.active AS operator_active FROM users u
+    d.active AS driver_active,c.active AS convoyeur_active,o.active AS operator_active,o.type AS operator_type,o.verification_status,
+    o.owner_user_id FROM users u
     LEFT JOIN passenger_profiles p ON p.user_id=u.id LEFT JOIN driver_profiles d ON d.user_id=u.id
+    LEFT JOIN convoyeur_profiles c ON c.user_id=u.id
     LEFT JOIN operators o ON o.id=u.operator_id WHERE u.id=$1`,[id])).rows[0];
   invariant(user && user.active && (!user.operator_id || user.operator_active) &&
-    (user.role!=='driver' || user.driver_active),'ACCOUNT_DISABLED','This account is inactive. Contact an administrator.',403);
+    (user.role!=='driver' || user.driver_active) && (user.role!=='convoyeur' || user.convoyeur_active),
+  'ACCOUNT_DISABLED','This account is inactive. Contact an administrator.',403);
   return {...user,needs_profile:user.role==='passenger' && !user.profile_completed_at && !user.is_demo};
 }
 
