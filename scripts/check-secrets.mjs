@@ -24,6 +24,8 @@ try {
     if([...values].some(value=>text.includes(value))) failures++;
     if(isBundle && (/postgres(?:ql)?:\/\//i.test(text) || /DATABASE_URL/.test(text))) failures++;
     if(/VITE_[A-Z_]*(?:DATABASE|DB_PASSWORD|NEON|SECRET)[A-Z_]*\s*=\s*[^\s]/.test(text)) failures++;
+    if(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(text)) failures++;
+    if(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/.test(text)) failures++;
   }
   for(const file of files) {
     if(!fs.existsSync(file)) continue;
@@ -38,7 +40,7 @@ try {
   }
   scan(execFileSync('git',['diff','HEAD','--no-ext-diff'],{encoding:'utf8',maxBuffer:30_000_000}));
   scan(execFileSync('git',['log','--all','-p','--no-ext-diff'],{encoding:'utf8',maxBuffer:60_000_000}));
-  for(const file of ['.env.local','apps/passenger-web/.env.local','apps/driver-web/.env.local','apps/ops-web/.env.local']) {
+  for(const file of ['.env.local','services/api/.env.local','apps/passenger-web/.env.local','apps/driver-web/.env.local','apps/ops-web/.env.local']) {
     execFileSync('git',['check-ignore','--quiet',file]);
   }
   if(failures) {console.error(`Secret scan failed: ${failures} unsafe content checks. Matched values withheld.`);process.exitCode=1;}
