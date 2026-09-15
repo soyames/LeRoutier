@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
 import { Card, Badge, SectionTitle, ApiState, ProfileForm } from '@leroutier/ui';
 import { QRCodeSVG } from 'qrcode.react';
-import { Armchair, Ticket, Building2, Navigation, UserRound, Route, CreditCard } from 'lucide-react';
+import { Armchair, Ticket, Building2, Navigation, UserRound, Route, CreditCard, Package } from 'lucide-react';
 
 export function Trips() {
   const routes=useApi('/routes'),{user,request,online}=useSession(),navigate=useNavigate();
@@ -118,4 +118,83 @@ export function Tracking(){
 }
 export function Account(){
   const {user}=useSession();return <><SectionTitle icon={UserRound} title="Mon compte"/><Card className="stack">{user?<><h2>{user.display_name}</h2><Badge tone="success">Compte connecté</Badge>{!user.needs_profile && <ProfileForm/>}<p className="small muted">Vos billets et réservations sont synchronisés avec le service.</p></>:<p>Connectez-vous pour accéder à votre compte.</p>}</Card></>;
+}
+
+const parcelLabels={created:'Créé',accepted:'Accepté',manifested:'Affecté',loaded:'Chargé',in_transit:'En transit',arrived:'Arrivé',
+  ready_for_pickup:'Prêt au retrait',collected:'Retiré',cancelled:'Annulé',rejected:'Refusé',held:'Retenu',damaged:'Endommagé',
+  lost:'Perdu',return_requested:'Retour demandé',returned:'Retourné'};
+const parcelTones={created:'neutral',accepted:'neutral',manifested:'neutral',loaded:'neutral',in_transit:'neutral',arrived:'neutral',
+  ready_for_pickup:'warning',collected:'success',cancelled:'neutral',rejected:'danger',held:'warning',damaged:'danger',lost:'danger',
+  return_requested:'warning',returned:'neutral'};
+const categories=['documents','food','electronics','fragile','high_value','other'];
+const categoryLabels={documents:'Documents',food:'Denrées alimentaires',electronics:'Électronique',fragile:'Fragile',high_value:'Valeur déclarée',other:'Autre'};
+
+export function Parcels(){
+  const {user,request,online}=useSession(),routes=useApi('/routes'),mine=useApi(user?'/me/parcels':null);
+  const stops=routes.data?.[0]?.stops || [];
+  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
+  const [senderName,setSenderName]=useState(user?.display_name||''),[senderPhone,setSenderPhone]=useState(user?.phone||''),
+    [receiverName,setReceiverName]=useState(''),[receiverPhone,setReceiverPhone]=useState('');
+  const [origin,setOrigin]=useState(''),[destination,setDestination]=useState(''),[category,setCategory]=useState('documents'),
+    [weight,setWeight]=useState(''),[notes,setNotes]=useState('');
+  const [label,setLabel]=useState(null);
+  const [trackingInput,setTrackingInput]=useState(''),[tracking,setTracking]=useState(null);
+  const quoteUrl=origin&&destination?`/parcels/quote?originStopId=${origin}&destinationStopId=${destination}&category=${category}${weight?`&weightG=${weight}`:''}`:null;
+  const quoteApi=useApi(quoteUrl);
+  const quote=quoteApi.data;
+  async function create(e){
+    e.preventDefault();setBusy(true);setError('');setNotice('');
+    try{
+      const parcel=await request('/parcels',{method:'POST',key:'parcel-'+crypto.randomUUID(),body:{
+        senderName,senderPhone:senderPhone.trim(),receiverName,receiverPhone:receiverPhone.trim(),
+        originStopId:origin,destinationStopId:destination,category,weightG:weight?Number(weight):undefined,notes:notes.trim()||undefined}});
+      setLabel(await request(`/parcels/${parcel.id}/label`));mine.reload();setNotice('Expédition créée.');
+    }catch(e){setError(e.message);}finally{setBusy(false);}
+  }
+  async function track(e){e.preventDefault();setError('');setTracking(null);
+    try{setTracking(await request(`/public/parcel-tracking/${trackingInput.trim().toUpperCase()}`));}catch(e){setError(e.message);}}
+  return <>
+    <Card className="hero stack"><span className="eyebrow">Fret interurbain</span><h1>Envoyez un colis avec les services LeRoutier existants.</h1><p>Remise en gare, transport par les véhicules de ligne et retrait sécurisé par code à l’arrivée. Suivi public par numéro d’envoi.</p></Card>
+    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    {label && <Card className="card-success stack"><div className="between"><h3>Reçu d’expédition</h3><Badge tone="success">{label.trackingNumber}</Badge></div>
+      <div className="qr-canvas"><QRCodeSVG value={label.token} size={168} marginSize={1}/></div>
+      <span className="small muted">Code-barres : {label.barcode} · présentez ce QR à la remise du colis.</span></Card>}
+    <SectionTitle icon={Package} title="Créer une expédition"/>
+    {!user && <Card><p role="status">Connectez-vous pour créer une expédition.</p></Card>}
+    {user && <Card className="stack"><form className="stack" onSubmit={create}>
+      <div className="between wrap"><label className="grow">Expéditeur<input className="control" required minLength={2} maxLength={100} value={senderName} onChange={e=>setSenderName(e.target.value)}/></label>
+      <label className="grow">Téléphone expéditeur<input className="control" type="tel" required value={senderPhone} onChange={e=>setSenderPhone(e.target.value)}/></label></div>
+      <div className="between wrap"><label className="grow">Destinataire<input className="control" required minLength={2} maxLength={100} value={receiverName} onChange={e=>setReceiverName(e.target.value)}/></label>
+      <label className="grow">Téléphone destinataire<input className="control" type="tel" required value={receiverPhone} onChange={e=>setReceiverPhone(e.target.value)}/></label></div>
+      <div className="between wrap">
+        <label className="grow">Départ<select className="control" value={origin} onChange={e=>setOrigin(e.target.value)}><option value="">Choisir…</option>{stops.map(s=><option key={s.stopId} value={s.stopId}>{s.city} · {s.name}</option>)}</select></label>
+        <label className="grow">Arrivée<select className="control" value={destination} onChange={e=>setDestination(e.target.value)}><option value="">Choisir…</option>{stops.map(s=><option key={s.stopId} value={s.stopId}>{s.city} · {s.name}</option>)}</select></label>
+      </div>
+      <div className="between wrap">
+        <label className="grow">Catégorie<select className="control" value={category} onChange={e=>setCategory(e.target.value)}>{categories.map(c=><option key={c} value={c}>{categoryLabels[c]}</option>)}</select></label>
+        <label className="grow">Poids (grammes)<input className="control" type="number" min={1} step={1} placeholder="Facultatif" value={weight} onChange={e=>setWeight(e.target.value)}/></label>
+      </div>
+      <label>Notes (facultatif)<input className="control" maxLength={2000} value={notes} onChange={e=>setNotes(e.target.value)}/></label>
+      {quote && <div className="notice"><div className="between"><strong>Prix estimé</strong><span>{quote.amountMinor.toLocaleString('fr-FR')} FCFA</span></div><span className="small">{quote.operatorName}</span></div>}
+      {quoteUrl && quoteApi.error && <p role="alert">{quoteApi.error}</p>}
+      <button className="btn btn-primary" disabled={busy || !online || !origin || !destination || !quote || !receiverName.trim() || !receiverPhone.trim()}>Confirmer l’expédition</button>
+      <p className="small muted">Le paiement peut s’effectuer à l’expédition, à la réception ou au guichet selon le service. Aucun prix n’est inventé : la grille est configurée par l’opérateur.</p>
+    </form></Card>}
+    <SectionTitle title="Mes expéditions"/>
+    {mine.loading || mine.error || !mine.data?.length ? <ApiState resource={mine} empty="Aucune expédition."/> : mine.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.trackingNumber}</h3><Badge tone={parcelTones[p.status]}>{parcelLabels[p.status]}</Badge></div>
+      <span className="small muted">{categoryLabels[p.category]} · {p.priceMinor.toLocaleString('fr-FR')} FCFA · {new Date(p.createdAt).toLocaleDateString('fr-FR')}</span></div>
+      <button className="btn btn-soft" disabled={busy || !online} onClick={async()=>{try{setLabel(await request(`/parcels/${p.id}/label`));}catch(e){setError(e.message);}}}>Voir le QR</button></Card>)}
+    <SectionTitle icon={Navigation} title="Suivre un colis"/>
+    <Card className="stack"><form className="between wrap" onSubmit={track}>
+      <label className="grow">Numéro de suivi<input className="control" placeholder="LRP-XXXXXXXX" value={trackingInput} onChange={e=>setTrackingInput(e.target.value)}/></label>
+      <button className="btn btn-soft" disabled={!trackingInput.trim()}>Suivre</button></form>
+      {tracking && <div className="stack"><div className="between"><Badge tone={parcelTones[tracking.status]}>{parcelLabels[tracking.status]}</Badge><h3>{tracking.trackingNumber}</h3></div>
+        <span className="small">{tracking.origin.city} → {tracking.destination.city}</span>
+        {tracking.lastMilestone && <span className="small muted">Dernier jalon : {tracking.lastMilestone.kind} · {new Date(tracking.lastMilestone.at).toLocaleString('fr-FR')}</span>}
+        {tracking.eta && <span className="small">Arrivée estimée : {new Date(tracking.eta).toLocaleString('fr-FR')}</span>}
+        {tracking.pickupReady && <p role="status">Prêt au retrait — un code vous sera remis pour récupérer le colis.</p>}
+        {tracking.location && <p className="small muted">Position approximative du véhicule transporteur : {tracking.location.latitude}, {tracking.location.longitude} ({new Date(tracking.location.observedAt).toLocaleTimeString('fr-FR')}) — précision véhicule, pas colis.</p>}
+      </div>}
+    </Card>
+  </>;
 }

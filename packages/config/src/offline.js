@@ -1,10 +1,11 @@
 // Deliberately stores no auth tokens or passenger profile fields.
 export const OFFLINE_TTL=12*3600_000;
 export function validateQueuedAction(type,payload){
-  const fields=type==='incident'?['serviceId','kind','severity','description']:['serviceId','bookingId','stopSequence','code'];
-  if(!['board','alight','incident'].includes(type) || !payload || Object.keys(payload).some(k=>!fields.includes(k)) || typeof payload.serviceId!=='string')throw new Error('Action hors ligne invalide.');
-  if(type!=='incident' && (!Number.isInteger(payload.stopSequence) || !(typeof payload.bookingId==='string' || typeof payload.code==='string')))throw new Error('Billet et arrêt requis.');
+  const fields=type==='incident'?['serviceId','kind','severity','description']:type==='parcel'?['serviceId','parcelId','kind']:['serviceId','bookingId','stopSequence','code'];
+  if(!['board','alight','incident','parcel'].includes(type) || !payload || Object.keys(payload).some(k=>!fields.includes(k)) || typeof payload.serviceId!=='string')throw new Error('Action hors ligne invalide.');
+  if(type==='board' || type==='alight'){if(!Number.isInteger(payload.stopSequence) || !(typeof payload.bookingId==='string' || typeof payload.code==='string'))throw new Error('Billet et arrêt requis.');}
   if(type==='incident' && (typeof payload.description!=='string' || payload.description.length>2000 || !payload.description.trim()))throw new Error('Description requise.');
+  if(type==='parcel' && (typeof payload.parcelId!=='string' || !['loaded','departed','arrived'].includes(payload.kind)))throw new Error('Scan colis invalide.');
 }
 export function createSyncQueue(storage,owner,now=()=>Date.now()){
   const name='lr-driver-queue:'+owner;
