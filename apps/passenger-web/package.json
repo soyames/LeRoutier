@@ -11,12 +11,13 @@
     "typecheck": "tsc --project jsconfig.json"
   },
   "dependencies": {
+    "@leroutier/config": "workspace:*",
     "@leroutier/ui": "workspace:*",
     "lucide-react": "catalog:",
+    "qrcode.react": "^4.2.0",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "react-router": "catalog:",
-    "@leroutier/config": "workspace:*"
+    "react-router": "catalog:"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "catalog:",

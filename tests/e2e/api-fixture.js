@@ -18,4 +18,13 @@ export async function mockApi(page) {
   await page.route('**/ops/bookings',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/ops/provisioning',r=>r.fulfill({json:{data:{operators:[],users:[],routes:[],vehicles:[],places:[],stops:[]}}}));
   await page.route('**/incidents',r=>r.fulfill({json:{data:[]}}));
+  // FedaPay / payouts / agentic Ops sections
+  await page.route('**/payments/config',r=>r.fulfill({json:{data:{available:true}}}));
+  await page.route('**/ops/payments*',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/ops/payouts',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/agent/approvals',r=>r.fulfill({json:{data:[]}}));
+  // Driver earnings/payouts
+  await page.route('**/driver/earnings',r=>r.fulfill({json:{data:{summary:{available:0,reserved:0,paid:0,reversed:0,currency:'XOF'},entries:[]}}}));
+  await page.route('**/driver/payouts',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/driver/payout-destinations',r=>r.fulfill({json:{data:[]}}));
 }

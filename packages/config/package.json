@@ -8,7 +8,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.js",
-    "./client": "./src/client.jsx"
+    "./client": "./src/client.jsx",
+    "./offline": "./src/offline.js"
   },
   "peerDependencies": {
     "react": "^19.1.1"
