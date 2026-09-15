@@ -16,7 +16,7 @@ function ProvisionForm({title,path,children,body,onSaved,method='POST'}){
   }
   return <details><summary>{title}</summary><form className="stack" onSubmit={submit}><fieldset disabled={busy || !online} className="stack">{children}<button className="btn btn-primary">Enregistrer</button></fieldset>{error && <p role="alert">{error}</p>}</form></details>;
 }
-export function Provisioning({onSaved}){
+export function Provisioning({onSaved=()=>{}}){
   const {user}=useSession(),catalog=useApi(user?'/ops/provisioning':null),[operator,setOperator]=useState(''),[notice,setNotice]=useState(''),[stopCount,setStopCount]=useState(2);
   if(!user)return null;
   const data=catalog.data,operatorId=user.operator_id || operator || data?.operators[0]?.id;

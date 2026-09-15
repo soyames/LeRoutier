@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useSession } from '@leroutier/config/client';
 import { Card } from './shell.jsx';
 
+function isDriverApp(role){return Array.isArray(role)?role.includes('driver')||role.includes('convoyeur'):role==='driver';}
 export function SessionPanel() {
   const {user,identity,role,login,loginDemo,logout,demoLogin,configured,online,authLoading,authError,canSignin}=useSession();
   const [error,setError]=useState(''),[busy,setBusy]=useState(false);
@@ -13,7 +14,13 @@ export function SessionPanel() {
   return <Card className="stack">
     {!online && <p role="status">Hors ligne — les actions nécessitent une connexion.</p>}
     {identity ? <><div className="between"><span>{identity.display_name || 'Compte connecté'}</span><button className="btn btn-soft" disabled={busy} onClick={()=>connect(logout)}>Déconnexion</button></div>
-      {!user && <p role="status">{role==='driver'?'Ce compte n’est pas provisionné comme conducteur. Contactez votre opérateur.':'Ce compte n’est pas autorisé pour cette application. Contactez votre opérateur.'}</p>}
+      {!user && <p role="status">
+        {isDriverApp(role) && identity.role==='convoyeur' && 'Votre compte convoyeur est actif — utilisez la console Conducteur en mode convoyeur.'}
+        {isDriverApp(role) && identity.role==='ops' && 'Votre compte administrateur s’utilise dans le centre opérationnel (app Ops), pas dans la console conducteur.'}
+        {isDriverApp(role) && identity.role==='passenger' && 'Votre compte passager n’est pas encore provisionné comme équipage. Créez un compte opérateur ou demandez votre provisionnement.'}
+        {role==='ops' && identity.role==='passenger' && 'Votre compte passager n’a pas accès au centre opérationnel. Créez un compte opérateur (compagnie) pour administrer.'}
+        {role==='ops' && identity.role==='driver' && 'Votre compte chauffeur s’utilise dans la console Conducteur, pas dans le centre opérationnel.'}
+      </p>}
       {user?.needs_profile && <ProfileForm/>}</> : <>
       <h3>Connexion</h3>
       {authLoading?<p role="status">Chargement de la connexion…</p>:<>

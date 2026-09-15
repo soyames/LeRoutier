@@ -9,7 +9,7 @@ test('API error is visible and can be retried',async({page})=>{
   await page.getByRole('button',{name:'Réessayer'}).click();await expect(page.getByLabel('Départ')).toBeVisible();
 });
 test('empty search is rendered honestly',async({page})=>{
-  await page.route('**/services?*',r=>r.fulfill({json:{data:[]}}));await page.goto('/');await expect(page.getByText('Aucun départ pour ce trajet.')).toBeVisible();
+  await page.route('**/services?*',r=>r.fulfill({json:{data:[]}}));await page.goto('/');await expect(page.getByText('Aucun départ n’est publié sur ce trajet pour le moment. Essayez une autre destination ou revenez plus tard.')).toBeVisible();
 });
 test('failed booking never displays success',async({page})=>{
   await page.route('**/bookings',r=>r.fulfill({status:409,json:{error:{message:'No seat is available on every requested segment.'}}}));
