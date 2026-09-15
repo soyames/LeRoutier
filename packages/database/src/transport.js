@@ -112,6 +112,8 @@ export function transport(db) {
         if (b.status === target) return b;
         const next = validateTransition(b.status, action);
         if (action === 'confirm') {
+          invariant(['scheduled','active'].includes(service.status) && b.origin_sequence>=service.current_sequence &&
+            (service.status==='active' || new Date(service.departure_at)>new Date()),'SERVICE_UNAVAILABLE','Service is no longer open for confirmation.',409);
           const paid = await one(tx, "SELECT coalesce(sum(amount_minor),0)::integer AS amount FROM payments WHERE booking_id=$1 AND status='succeeded'", [id]);
           invariant(paid.amount === b.amount_minor, 'PAYMENT_REQUIRED', 'A verified payment record is required.', 409);
         }
@@ -140,6 +142,7 @@ export function transport(db) {
         const prior = await one(tx, 'SELECT * FROM payments WHERE idempotency_key=$1', [key]);
         if (prior) { invariant(prior.request_fingerprint === hash, 'IDEMPOTENCY_CONFLICT', 'The key was used for another payment.', 409); return prior; }
         invariant(b.status === 'held' && b.amount_minor === input.amountMinor, 'INVALID_PAYMENT', 'Payment does not match an active hold.', 409);
+        invariant(!await one(tx,"SELECT id FROM payments WHERE booking_id=$1 AND status='pending'",[id]),'PAYMENT_PENDING','Reconcile the pending provider payment before recording another payment.',409);
         invariant(!await one(tx, "SELECT id FROM payments WHERE booking_id=$1 AND status='succeeded'", [id]), 'ALREADY_PAID', 'Payment already recorded.', 409);
         const payment = await one(tx, `INSERT INTO payments(booking_id,provider,provider_reference,amount_minor,currency,status,idempotency_key,request_fingerprint,recorded_by)
           VALUES($1,$2,$3,$4,$5,'succeeded',$6,$7,$8) RETURNING *`, [id,input.provider,input.reference,input.amountMinor,'XOF',key,hash,actor.id]);

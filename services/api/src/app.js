@@ -7,9 +7,22 @@ import { authentication } from './auth.js';
 import { publicAuthConfig } from '@leroutier/config';
 import { updateProfile } from '@leroutier/database/identities';
 import { provisioning } from '@leroutier/database/provisioning';
+import { payments } from '@leroutier/database/payments';
+import { tickets } from '@leroutier/database/tickets';
+import { driverAction, recordIncident } from '@leroutier/database/driver-actions';
+import { earnings, payouts } from '@leroutier/database/payouts';
+import { recovery } from '@leroutier/database/recovery';
+import { paymentAdapter } from './payment-adapter.js';
+import { authenticate as authenticateAgent, catalog, createActions, createWorkflowEngine } from '@leroutier/agents';
 
-export function createApi(db, config, keyResolver=undefined) {
+const API_PREFIX = '/api/v1';
+
+export function createApi(db, config, keyResolver=undefined, adapter=paymentAdapter(config)) {
   const domain=transport(db), auth=authentication(db,config,keyResolver),provision=provisioning(db,config);
+  const pay=payments(db,adapter),ticket=tickets(db);
+  const earn=earnings(db),payout=payouts(db,adapter,config),recover=recovery(db);
+  const actions=createActions({db,domain,payments:pay,payouts:payout,recovery:recover});
+  const workflows=createWorkflowEngine({db,actions});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
   async function limited(subject) {
     await db.transaction(async tx=>{
@@ -18,18 +31,46 @@ export function createApi(db, config, keyResolver=undefined) {
       invariant(rows[0].requests<=120,'RATE_LIMITED','Too many requests. Try again shortly.',429);
     });
   }
-  async function route(request) {
-    const url=new URL(request.url), path=url.pathname.replace(/\/$/,'') || '/';
-    const method=request.method;
-    const body=async()=>{
-      invariant((request.headers.get('content-type') || '').includes('application/json'),'INVALID_BODY','JSON is required.');
-      const text=await request.text();
+  function body(req){
+    return async()=>{
+      invariant((req.headers.get('content-type') || '').includes('application/json'),'INVALID_BODY','JSON is required.');
+      const text=await req.text();
       invariant(text.length<=16_384,'INVALID_BODY','Request is too large.',413);
       try { const b=JSON.parse(text);invariant(b && typeof b==='object' && !Array.isArray(b),'INVALID_BODY','An object is required.');return b; }
       catch { throw new DomainError('INVALID_BODY','Invalid JSON.'); }
     };
+  }
+  async function route(req,path,url,method,readBody){
+    const body=readBody;
     if(method==='GET' && path==='/health') {await list('SELECT 1');return {status:'ok'};}
     if(method==='GET' && path==='/auth/config') return publicAuthConfig(config);
+    if(method==='GET' && path==='/payments/config') return {available:pay.configured};
+    // Dedicated LeRoutier FedaPay webhook. Signature is verified exactly per
+    // FedaPay's official spec before anything is correlated or mutated;
+    // uncorrelatable events are safely ignored with a 200 response.
+    if(method==='POST' && path==='/webhooks/fedapay'){
+      invariant(adapter && adapter.name==='fedapay','PAYMENT_UNAVAILABLE','Payment integration is unavailable.',503);
+      const raw=await req.text();
+      invariant(raw.length<=16384,'INVALID_BODY','Webhook is too large.',413);
+      const event=await adapter.verifyEvent(raw,req.headers);
+      if(!event)return {ignored:true};
+      try{
+        if(event.kind==='payout')return await payout.applyEvent(event);
+        return await pay.applyEvent(event);
+      }catch(error){
+        const anomaly=['PAYMENT_MISMATCH','DUPLICATE_REFERENCE','EVENT_CONFLICT','PAYMENT_TRANSITION','NOT_FOUND'].includes(error.code);
+        if(!anomaly)throw error;
+        const ids=/** @type {{payoutRequestId?:string,paymentId?:string}} */(event);
+        await db.transaction(async tx=>{
+          const type=ids.payoutRequestId?'payout.anomaly':'payment.anomaly';
+          const aggregate=ids.payoutRequestId ?? ids.paymentId ?? randomUUID();
+          await tx.query('INSERT INTO outbox(event_type,aggregate_id,payload) VALUES($1,$2,$3)',[type,aggregate,JSON.stringify({
+            ...(ids.payoutRequestId?{payoutRequestId:ids.payoutRequestId}:{paymentId:ids.paymentId}),
+            reference:event.reference,code:error.code})]);
+        });
+        return {ignored:true,anomaly:true};
+      }
+    }
     if(method==='POST' && path==='/auth/demo') {invariant(config.demoLogin,'NOT_FOUND','Endpoint not found.',404);await limited('demo-login');return auth.demoSession((await body()).role);}
     if(method==='GET' && path==='/stops') {
       const search=(url.searchParams.get('q') || '').slice(0,100);
@@ -61,28 +102,109 @@ export function createApi(db, config, keyResolver=undefined) {
     }
     const available=path.match(/^\/services\/([^/]+)\/availability$/);
     if(method==='GET' && available) return domain.availability(uuid(available[1]),Number(url.searchParams.get('origin')),Number(url.searchParams.get('destination')));
-    const actor=await auth.authenticate(request);
-    if(method!=='GET') await limited(actor.id);
-    if(method==='GET' && path==='/me') return actor;
+    // Human users authenticate first; service/agent principals (distinct identity
+    // namespace) only apply to the dedicated agent API below.
+    const human=await auth.authenticate(req).catch(error=>error);
+    const agent=human instanceof DomainError ? await authenticateAgent(db,req) : null;
+    if(human instanceof DomainError && !agent) throw human;
+    const actor=agent ?? human;
+    if(method!=='GET') await limited(actor.id ?? actor.agent.id);
+    if(actor.agent && !path.startsWith('/agent/') && !(method==='POST' && path==='/workflows/tick'))
+      invariant(false,'FORBIDDEN','Agent principals can only use the agent API.',403);
+    if(method==='GET' && path==='/me') return actor.agent ? {agent:actor.agent} : actor;
+    if(method==='GET' && path==='/agent/me') {
+      invariant(actor.agent,'FORBIDDEN','Agent authentication is required.',403);
+      return {principal:{id:actor.agent.id,name:actor.agent.name,scopes:actor.agent.scopes,operatorId:actor.agent.operatorId},actions:catalog(actions,actor.agent)};
+    }
+    if(method==='GET' && path==='/agent/actions') {
+      invariant(actor.agent,'FORBIDDEN','Agent authentication is required.',403);
+      return catalog(actions,actor.agent);
+    }
+    const agentAction=path.match(/^\/agent\/actions\/([a-z0-9_.-]+)\/run$/);
+    if(method==='POST' && agentAction) {
+      invariant(actor.agent,'FORBIDDEN','Agent authentication is required.',403);
+      return workflows.runAction(actor.agent,agentAction[1],await body(),req.headers.get('idempotency-key') ?? undefined);
+    }
+    if(method==='GET' && path==='/agent/approvals') {
+      invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
+      return workflows.listApprovals(actor);
+    }
+    const agentApproval=path.match(/^\/agent\/approvals\/([^/]+)$/);
+    if(method==='POST' && agentApproval) {
+      invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
+      const input=await body();
+      invariant(input && Object.keys(input).every(k=>['decision','input'].includes(k)),'INVALID_DECISION','Unexpected approval fields.');
+      return workflows.approve(actor,uuid(agentApproval[1]),input.decision,input.input);
+    }
+    if(method==='GET' && path==='/workflows') {
+      invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
+      return workflows.listRuns(actor);
+    }
+    const workflowRetry=path.match(/^\/workflows\/([^/]+)\/retry$/);
+    if(method==='POST' && workflowRetry) {
+      invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
+      return workflows.retry(actor,uuid(workflowRetry[1]));
+    }
+    if(method==='POST' && path==='/workflows/tick') {
+      invariant(actor.agent && actor.agent.scopes.includes('workflow.run'),'FORBIDDEN','Agent scope workflow.run is required.',403);
+      return workflows.processOutbox();
+    }
+    if(method==='POST' && path==='/tickets/verify')return ticket.verify(actor,await body());
+    if(method==='POST' && path==='/driver/actions')return driverAction(db,actor,await body(),req.headers.get('idempotency-key'));
+    if(method==='GET' && path==='/driver/earnings') {
+      invariant(actor.role==='driver','FORBIDDEN','Driver access required.',403);
+      return {summary:await earn.summary(actor),entries:await earn.ledger(actor)};
+    }
+    if(method==='GET' && path==='/driver/payout-destinations') return payout.destinations(actor);
+    if(method==='POST' && path==='/driver/payout-destinations') return payout.addDestination(actor,await body());
+    if(method==='GET' && path==='/driver/payouts') return payout.list(actor);
+    if(method==='POST' && path==='/driver/payouts') return payout.request(actor,await body(),req.headers.get('idempotency-key'));
+    const payoutCancel=path.match(/^\/driver\/payouts\/([^/]+)\/cancel$/);
+    if(method==='POST' && payoutCancel) return payout.cancel(actor,uuid(payoutCancel[1]));
+    if(method==='GET' && path==='/ops/payments') {
+      invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
+      return pay.listOps(actor,{status:url.searchParams.get('status') ?? undefined});
+    }
+    const opsReconcile=path.match(/^\/ops\/payments\/([^/]+)\/reconcile$/);
+    if(method==='POST' && opsReconcile) return pay.reconcile(actor,uuid(opsReconcile[1]));
+    if(method==='GET' && path==='/ops/payouts') {
+      invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
+      return payout.listOps(actor,{status:url.searchParams.get('status') ?? undefined});
+    }
+    const opsApprove=path.match(/^\/ops\/payouts\/([^/]+)\/approve$/);
+    if(method==='POST' && opsApprove) return payout.approve(actor,uuid(opsApprove[1]));
+    const opsPayoutReconcile=path.match(/^\/ops\/payouts\/([^/]+)\/reconcile$/);
+    if(method==='POST' && opsPayoutReconcile) return payout.reconcile(actor,uuid(opsPayoutReconcile[1]));
+    const ticketPath=path.match(/^\/bookings\/([^/]+)\/ticket$/);
+    if(method==='POST' && ticketPath)return ticket.issue(actor,uuid(ticketPath[1]));
+    const paymentPath=path.match(/^\/bookings\/([^/]+)\/(payment-intents|payment-status|reconcile-manual)$/);
+    if(paymentPath){
+      const id=uuid(paymentPath[1]);
+      if(method==='GET' && paymentPath[2]==='payment-status')return pay.status(actor,id);
+      if(method==='POST' && paymentPath[2]==='payment-intents')return pay.initiate(actor,id,await body(),req.headers.get('idempotency-key'));
+      if(method==='POST' && paymentPath[2]==='reconcile-manual')return pay.manual(actor,id,await body(),req.headers.get('idempotency-key'));
+    }
+    const reconcile=path.match(/^\/payments\/([^/]+)\/reconcile$/);
+    if(method==='POST' && reconcile)return pay.reconcile(actor,uuid(reconcile[1]));
     if(method==='PATCH' && path==='/me') return updateProfile(db,actor,await body());
     if(method==='GET' && path==='/ops/provisioning') return provision.catalog(actor);
     const provisionPath=path.match(/^\/ops\/(operators|drivers|ops-users|places|stops|vehicles|routes|services)$/);
     if(method==='POST' && provisionPath) {
       const operations={operators:'operator',drivers:'driver','ops-users':'opsUser',places:'place',stops:'stop',vehicles:'vehicle',routes:'route',services:'service'};
-      return provision[operations[provisionPath[1]]](actor,await body(),request.headers.get('idempotency-key'));
+      return provision[operations[provisionPath[1]]](actor,await body(),req.headers.get('idempotency-key'));
     }
     const activation=path.match(/^\/ops\/users\/([^/]+)\/status$/);
-    if(method==='PATCH' && activation) return provision.userStatus(actor,uuid(activation[1]),await body(),request.headers.get('idempotency-key'));
+    if(method==='PATCH' && activation) return provision.userStatus(actor,uuid(activation[1]),await body(),req.headers.get('idempotency-key'));
     if(method==='POST' && path==='/bookings') {
       invariant(!actor.needs_profile,'PROFILE_REQUIRED','Complete your passenger profile before booking.',409);
-      return domain.hold(actor,await body(),request.headers.get('idempotency-key'));
+      return domain.hold(actor,await body(),req.headers.get('idempotency-key'));
     }
     if(method==='GET' && path==='/me/bookings') return domain.passengerBookings(actor);
     const booking=path.match(/^\/bookings\/([^/]+)(?:\/(confirm|cancel|board|alight|payments))?$/);
     if(booking) {
       const id=uuid(booking[1]),action=booking[2];
       if(method==='GET' && !action) return domain.booking(actor,id);
-      if(method==='POST' && action==='payments') return domain.recordPayment(actor,id,await body(),request.headers.get('idempotency-key'));
+      if(method==='POST' && action==='payments') return domain.recordPayment(actor,id,await body(),req.headers.get('idempotency-key'));
       if(method==='POST' && action) return domain.transition(actor,id,action,['board','alight'].includes(action)?(await body()).stopSequence:undefined);
     }
     if(method==='GET' && path==='/driver/service') {
@@ -114,6 +236,7 @@ export function createApi(db, config, keyResolver=undefined) {
           const assignment=(await tx.query('SELECT vehicle_id FROM service_assignments WHERE service_id=$1 AND ended_at IS NULL',[id])).rows[0];
           const result=await tx.query(`INSERT INTO vehicle_positions(service_id,vehicle_id,actor_id,latitude,longitude,observed_at)
             VALUES($1,$2,$3,$4,$5,$6) RETURNING latitude,longitude,observed_at`,[id,assignment.vehicle_id,actor.id,input.latitude,input.longitude,input.observedAt]);
+          await tx.query('INSERT INTO outbox(event_type,aggregate_id,payload) VALUES($1,$2,$3)',['service.position',id,JSON.stringify({serviceId:id,observedAt:input.observedAt})]);
           return result.rows[0];
         });
       }
@@ -132,24 +255,7 @@ export function createApi(db, config, keyResolver=undefined) {
           await enqueue(tx,'service.status',id,{status:input.status});return result;
         });
       }
-      if(method==='POST' && action==='recovery') {
-        const input=await body();uuid(input.vehicleId);uuid(input.driverId);uuid(input.incidentId);
-        return db.transaction(async tx=>{
-          const s=await domain.authorizeService(tx,actor,id,true);
-          invariant(['active','disrupted'].includes(s.status),'INVALID_TRANSITION','Service is not recoverable.',409);
-          invariant((await tx.query("SELECT id FROM incidents WHERE id=$1 AND service_id=$2 AND status<>'resolved'",[input.incidentId,id])).rowCount,'INVALID_INCIDENT','An open incident on this service is required.');
-          const v=(await tx.query("SELECT * FROM vehicles WHERE id=$1 AND operator_id=$2 AND status='active' FOR UPDATE",[input.vehicleId,s.operator_id])).rows[0];
-          invariant(v && v.capacity>=s.capacity,'INSUFFICIENT_REPLACEMENT','Replacement must support every existing seat.',409);
-          invariant((await tx.query('SELECT user_id FROM driver_profiles WHERE user_id=$1 AND operator_id=$2 AND active=true',[input.driverId,s.operator_id])).rowCount,'INVALID_DRIVER','Driver is not available for this operator.');
-          const prior=(await tx.query('SELECT id FROM service_assignments WHERE service_id=$1 AND ended_at IS NULL',[id])).rows[0];
-          invariant(prior,'INVALID_ASSIGNMENT','Current assignment is missing.',409);
-          await tx.query('UPDATE service_assignments SET ended_at=now() WHERE id=$1',[prior.id]);
-          const replacement=(await tx.query('INSERT INTO service_assignments(service_id,vehicle_id,driver_id) VALUES($1,$2,$3) RETURNING id',[id,input.vehicleId,input.driverId])).rows[0];
-          const result=(await tx.query(`INSERT INTO recovery_assignments(service_id,incident_id,previous_assignment_id,replacement_assignment_id,from_sequence,actor_id)
-            VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,[id,input.incidentId,prior.id,replacement.id,s.current_sequence,actor.id])).rows[0];
-          await enqueue(tx,'service.recovery',id,{recoveryId:result.id});return result;
-        });
-      }
+      if(method==='POST' && action==='recovery') return recover.assign(actor,{...await body(),serviceId:id});
     }
     if(method==='GET' && path==='/ops/bookings') {
       invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
@@ -173,13 +279,7 @@ export function createApi(db, config, keyResolver=undefined) {
         ($1='ops' AND ($2::uuid IS NULL OR s.operator_id=$2)) OR ($1='driver' AND EXISTS(SELECT 1 FROM service_assignments a WHERE a.service_id=s.id AND a.driver_id=$3 AND a.ended_at IS NULL)) ORDER BY created_at DESC LIMIT 100`,[actor.role,actor.operator_id,actor.id]);
     }
     if(method==='POST' && path==='/incidents') {
-      const input=await body();uuid(input.serviceId);
-      invariant(['breakdown','delay','medical','accident','other'].includes(input.kind) && ['low','medium','high'].includes(input.severity) && typeof input.description==='string' && input.description.trim().length>0 && input.description.length<=2000,'INVALID_INCIDENT','Incident details are invalid.');
-      return db.transaction(async tx=>{
-        await domain.authorizeService(tx,actor,input.serviceId);
-        const row=(await tx.query('INSERT INTO incidents(service_id,reported_by,kind,severity,description) VALUES($1,$2,$3,$4,$5) RETURNING *',[input.serviceId,actor.id,input.kind,input.severity,input.description.trim()])).rows[0];
-        await enqueue(tx,'incident.created',row.id,{serviceId:input.serviceId});return row;
-      });
+      return recordIncident(db,actor,await body());
     }
     const incident=path.match(/^\/incidents\/([^/]+)$/);
     if(method==='PATCH' && incident) {
@@ -193,19 +293,30 @@ export function createApi(db, config, keyResolver=undefined) {
     }
     throw new DomainError('NOT_FOUND','Endpoint not found.',404);
   }
-  return async request=>{
-    const origin=request.headers.get('origin');
+  return async req=>{
+    const origin=req.headers.get('origin');
     const allowed=!origin || config.corsOrigins.includes(origin);
     const headers={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','vary':'Origin'};
     if(origin && allowed) headers['access-control-allow-origin']=origin;
+    const url=new URL(req.url);
+    const rawPath=url.pathname.replace(/\/$/,'')||'/';
+    // API versioning: the transport contract is versioned, the domain is not.
+    // Unversioned paths are temporary compatibility aliases of /api/v1 that run
+    // the exact same handler and are marked deprecated on every response.
+    const legacy=!rawPath.startsWith(API_PREFIX);
+    const path=(legacy?API_PREFIX+rawPath:rawPath).replace(API_PREFIX,'')||'/';
     try {
       invariant(allowed,'FORBIDDEN','Origin is not allowed.',403);
-      if(request.method==='OPTIONS') return new Response(null,{status:204,headers:{...headers,'access-control-allow-methods':'GET,POST,PATCH,OPTIONS','access-control-allow-headers':'Authorization,Content-Type,Idempotency-Key'}});
-      return new Response(JSON.stringify({data:await route(request)}),{headers});
+      if(req.method==='OPTIONS') return new Response(null,{status:204,headers:{...headers,'access-control-allow-methods':'GET,POST,PATCH,OPTIONS','access-control-allow-headers':'Authorization,Content-Type,Idempotency-Key'}});
+      const data=await route(req,path,url,req.method,body(req));
+      if(legacy){headers.deprecation='true';headers.sunset='2026-12-31T23:59:59Z';}
+      return new Response(JSON.stringify({data}),{headers});
     } catch(error) {
       const known=error instanceof DomainError;
       const conflict=['23505','23514','23503'].includes(error.code);
-      return new Response(JSON.stringify({error:{code:known?error.code:conflict?'CONFLICT':'INTERNAL_ERROR',message:known?error.message:conflict?'The operation conflicts with current data.':'The service is temporarily unavailable.',requestId:randomUUID()}}),{status:known?error.status:conflict?409:503,headers});
+      const status=known?error.status:conflict?409:503;
+      if(legacy && status!==404){headers.deprecation='true';headers.sunset='2026-12-31T23:59:59Z';}
+      return new Response(JSON.stringify({error:{code:known?error.code:conflict?'CONFLICT':'INTERNAL_ERROR',message:known?error.message:conflict?'The operation conflicts with current data.':'The service is temporarily unavailable.',requestId:randomUUID()}}),{status,headers});
     }
   };
 }
