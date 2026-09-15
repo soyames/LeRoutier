@@ -395,6 +395,9 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       const conflict=['23505','23514','23503'].includes(error.code);
       const status=known?error.status:conflict?409:503;
       if(legacy && status!==404){headers.deprecation='true';headers.sunset='2026-12-31T23:59:59Z';}
+      // Operational visibility: unexpected errors are logged with code and
+      // message only (no connection strings, no credentials, no payloads).
+      if(!known && !conflict) console.error(`LR_API_ERROR ${req.method} ${path}`, error?.code ?? 'UNKNOWN', error?.message ?? '');
       return new Response(JSON.stringify({error:{code:known?error.code:conflict?'CONFLICT':'INTERNAL_ERROR',message:known?error.message:conflict?'The operation conflicts with current data.':'The service is temporarily unavailable.',requestId:randomUUID()}}),{status,headers});
     }
   };
