@@ -55,7 +55,7 @@ test('passenger signs in with PKCE, completes profile and signs out without pers
   await page.getByRole('button',{name:'Se connecter',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Complétez votre profil'})).toBeVisible();
   expect(state.exchanges()).toBe(1);
-  await expect(page.getByRole('button',{name:'Réserver une place'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Complétez votre profil'})).toBeDisabled();
   await page.getByLabel('Nom complet').fill('Voyageur Test');await page.getByLabel('Téléphone',{exact:true}).fill('');
   await page.getByRole('button',{name:'Enregistrer mon profil'}).click();
   await expect(page.getByRole('button',{name:'Réserver une place'})).toBeEnabled();
@@ -63,7 +63,7 @@ test('passenger signs in with PKCE, completes profile and signs out without pers
   await expect(page).toHaveURL('http://127.0.0.1:4173/');
   await page.getByRole('button',{name:'Déconnexion'}).click();
   await expect(page.getByRole('button',{name:'Se connecter',exact:true})).toBeVisible();
-  await expect(page.getByRole('button',{name:'Réserver une place'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Se connecter pour réserver'})).toBeEnabled();
 });
 test('callback without matching state is rejected',async({page})=>{
   await provider(page,4173);
@@ -74,12 +74,12 @@ test('callback without matching state is rejected',async({page})=>{
 });
 test('driver app shows explicit unprovisioned state for passenger identity',async({page})=>{
   await provider(page,4174);await page.getByRole('button',{name:'Se connecter',exact:true}).click();
-  await expect(page.getByText('Ce compte n’est pas provisionné comme conducteur. Contactez votre opérateur.')).toBeVisible();
+  await expect(page.getByText('Votre compte passager n’est pas encore provisionné comme équipage. Créez un compte opérateur ou demandez votre provisionnement.')).toBeVisible();
   await expect(page.getByRole('button',{name:'Déconnexion'})).toBeVisible();
 });
 test('ops app denies passenger identity and hides provisioning controls',async({page})=>{
   await provider(page,4175);await page.getByRole('button',{name:'Se connecter',exact:true}).click();
-  await expect(page.getByText('Ce compte n’est pas autorisé pour cette application. Contactez votre opérateur.')).toBeVisible();
+  await expect(page.getByText('Votre compte passager n’a pas accès au centre opérationnel. Créez un compte opérateur (compagnie) pour administrer.')).toBeVisible();
   await expect(page.getByText('Provisionner un agent Ops',{exact:true})).toHaveCount(0);
 });
 test('approved driver sees assignment and signout clears privileged data',async({page})=>{
@@ -98,6 +98,8 @@ test('operator ops can create a vehicle with a stable retry key and no fake succ
     return ++attempts===1?r.fulfill({status:503,json:{error:{message:'Réessayez.'}}}):r.fulfill({json:{data:{id:'created'}}});
   });
   await page.getByRole('button',{name:'Se connecter',exact:true}).click();
+  // Sessions are memory-only: navigate client-side, never reload the app.
+  await page.getByRole('button',{name:'Paramètres'}).click();
   await expect(page.getByText('Créer un opérateur',{exact:true})).toHaveCount(0);
   await page.getByText('Ajouter un véhicule',{exact:true}).click();
   await page.getByLabel('Immatriculation').fill('TEST-01');await page.getByLabel('Nombre de places').fill('12');

@@ -103,10 +103,15 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       invariant(!origin===!destination,'INVALID_JOURNEY','Both origin and destination are required.');
       if(origin) {uuid(origin);uuid(destination);}
       const services=await list(`SELECT s.*,r.name AS route_name,o.name AS operator_name,v.registration,
+        bdp.name AS departure_point_name,bdp.description AS departure_point_landmark,bdp.latitude AS departure_point_latitude,bdp.longitude AS departure_point_longitude,
+        bap.name AS arrival_point_name,bap.description AS arrival_point_landmark,bap.latitude AS arrival_point_latitude,bap.longitude AS arrival_point_longitude,
+        u.display_name AS driver_name,
         (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$1) AS origin,
         (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$2) AS destination
         FROM services s JOIN routes r ON r.id=s.route_id JOIN operators o ON o.id=s.operator_id
         JOIN service_assignments a ON a.service_id=s.id AND a.ended_at IS NULL JOIN vehicles v ON v.id=a.vehicle_id
+        LEFT JOIN users u ON u.id=a.driver_id
+        LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id
         WHERE s.status IN ('scheduled','active') AND (s.departure_at>now() OR s.status='active')
         ORDER BY s.departure_at LIMIT 50`,[origin,destination]);
       const result=[];
@@ -301,10 +306,15 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       if(method==='POST' && action) return domain.transition(actor,id,action,['board','alight'].includes(action)?(await body()).stopSequence:undefined);
     }
     if(method==='GET' && path==='/driver/service') {
-      invariant(actor.role==='driver','FORBIDDEN','Driver access required.',403);
-      const rows=await list(`SELECT s.*,r.name AS route_name,v.registration FROM service_assignments a JOIN services s ON s.id=a.service_id
-        JOIN routes r ON r.id=s.route_id JOIN vehicles v ON v.id=a.vehicle_id WHERE a.driver_id=$1 AND a.ended_at IS NULL
-        AND s.status IN ('scheduled','active','disrupted') ORDER BY departure_at LIMIT 1`,[actor.id]);
+      invariant(actor.role==='driver' || actor.role==='convoyeur','FORBIDDEN','Crew access required.',403);
+      const rows=await list(`SELECT s.*,r.name AS route_name,v.registration,
+        bdp.name AS departure_point_name,bdp.description AS departure_point_landmark,
+        bap.name AS arrival_point_name,bap.description AS arrival_point_landmark
+        FROM service_assignments a JOIN services s ON s.id=a.service_id
+        JOIN routes r ON r.id=s.route_id JOIN vehicles v ON v.id=a.vehicle_id
+        LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id
+        WHERE ((a.driver_id=$1 AND $2='driver') OR (a.convoyeur_id=$1 AND $2='convoyeur')) AND a.ended_at IS NULL
+        AND s.status IN ('scheduled','active','disrupted') ORDER BY departure_at LIMIT 1`,[actor.id,actor.role]);
       if(!rows[0]) return null;
       const stops=await list(`SELECT ss.sequence,ss.stop_id,s.name,p.name AS city FROM service_stops ss JOIN stops s ON s.id=ss.stop_id
         JOIN places p ON p.id=s.place_id WHERE ss.service_id=$1 ORDER BY sequence`,[rows[0].id]);

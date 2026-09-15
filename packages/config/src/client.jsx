@@ -56,7 +56,7 @@ export function ApiProvider({baseUrl='',role,children}) {
   },[auth.client]);
   const demoLogin=useCallback(async()=>{
     if(!auth.demoLogin)throw new Error('Connexion de développement indisponible.');
-    setSession(await request('/auth/demo',{method:'POST',body:{role}}));
+    setSession(await request('/auth/demo',{method:'POST',body:{role:Array.isArray(role)?role[0]:role}}));
   },[request,role,auth.demoLogin]);
   const logout=useCallback(async()=>{
     window.dispatchEvent(new Event('leroutier:logout'));
@@ -79,8 +79,9 @@ export function ApiProvider({baseUrl='',role,children}) {
   const refresh=useCallback(async()=>{
     const user=await request('/me');setSession(s=>s?{...s,user}:s);
   },[request]);
-  const value=useMemo(()=>({request,identity:session?.user,user:session?.user?.role===role?session.user:null,role,online,configured:!!base,
-    demoLogin:auth.demoLogin,authLoading:auth.loading,authError:auth.error,canSignin:!!auth.client,login,loginDemo:demoLogin,logout,updateProfile,refresh}),[request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh]);
+  const roles=useMemo(()=>Array.isArray(role)?role:[role],[role]);
+  const value=useMemo(()=>({request,identity:session?.user,user:session?.user && roles.includes(session.user.role)?session.user:null,role,online,configured:!!base,
+    demoLogin:auth.demoLogin,authLoading:auth.loading,authError:auth.error,canSignin:!!auth.client,login,loginDemo:demoLogin,logout,updateProfile,refresh}),[request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles]);
   return <Context.Provider value={value}>{callbackPending?<p role="status">Connexion sécurisée en cours…</p>:children}</Context.Provider>;
 }
 export function useSession(){return useContext(Context);}
