@@ -2,7 +2,9 @@
 // Never charges money, never sends payouts, never mutates production data,
 // never prints secrets. Usage: PROD_API_URL=... node scripts/prod-smoke.mjs
 const api = (process.env.PROD_API_URL || 'https://le-routier-api.vercel.app').replace(/\/$/, '');
-const apps = { passenger: 'https://le-routier-passenger.vercel.app', driver: 'https://le-routier-driver.vercel.app', ops: 'https://le-routier-ops.vercel.app' };
+// The unified PWA is canonical; the three originals stay until retired.
+const unified = (process.env.PROD_APP_URL || 'https://le-routier.vercel.app').replace(/\/$/, '');
+const apps = { leroutier: unified, passenger: 'https://le-routier-passenger.vercel.app', driver: 'https://le-routier-driver.vercel.app', ops: 'https://le-routier-ops.vercel.app' };
 let checks = 0, failures = 0;
 function ok(name, detail = '') { checks++; console.log(`  PASS  ${name}${detail ? ` (${detail})` : ''}`); }
 function fail(name, detail) { checks++; failures++; console.log(`  FAIL  ${name} — ${detail}`); }
@@ -48,6 +50,30 @@ console.log(`Production smoke against ${api}`);
 for (const [name, url] of Object.entries(apps)) {
   const response = await fetch(url);
   response.status === 200 ? ok(`App ${name} serves 200`) : fail(`App ${name}`, `status ${response.status}`);
+}
+{
+  // One installable PWA, branded LeRoutier rather than per role.
+  const response = await fetch(unified + '/manifest.webmanifest');
+  let manifest = null;
+  try { manifest = await response.json(); } catch { /* reported as a failure below */ }
+  manifest?.name === 'LeRoutier' && manifest.start_url === '/' && manifest.scope === '/' && manifest.icons?.length >= 2
+    ? ok('Unified PWA manifest installable', `${manifest.icons.length} icons`)
+    : fail('Unified PWA manifest', `status ${response.status}`);
+}
+{
+  // Deep links must survive a refresh through the SPA rewrite.
+  const response = await fetch(unified + '/work/today');
+  response.status === 200 ? ok('Unified deep link survives refresh') : fail('Unified deep link', `status ${response.status}`);
+}
+{
+  // The app reaches the API on its own origin, so no CORS entry is needed.
+  const { response, body } = await (async () => {
+    const r = await fetch(unified + '/api/v1/health');
+    let b = null; try { b = await r.json(); } catch { /* non-JSON handled below */ }
+    return { response: r, body: b };
+  })();
+  response.status === 200 && body?.data?.status === 'ok'
+    ? ok('Unified same-origin API proxy') : fail('Unified same-origin API proxy', `status ${response.status}`);
 }
 console.log(`\nSmoke complete: ${checks - failures}/${checks} checks passed.`);
 if (failures) process.exitCode = 1;
