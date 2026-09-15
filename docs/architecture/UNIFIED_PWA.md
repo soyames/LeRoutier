@@ -132,30 +132,45 @@ The unified app calls `/api/v1` on the existing API project through
 `VITE_API_URL`. The backend was not merged into the frontend and no handler was
 duplicated.
 
-### Same-origin proxy
+### Same-origin proxy — implemented
 
 `apps/web/vercel.json` rewrites `/api/v1/:path*` to the API project **before**
-the SPA fallback, so `https://<unified-domain>/api/v1/...` already resolves.
-This is safe with the current design: the API authorizes with Bearer tokens
-rather than cookies, and its CORS check admits requests that carry no `Origin`
-header, which is what a same-origin call sends.
+the SPA fallback, and the unified app uses it: `VITE_API_URL=same-origin`
+resolves to `window.location.origin` at runtime.
 
-Status: **prepared and deployed, not yet used.** The app still calls the API
-directly via `VITE_API_URL`, because the session client treats an empty base
-URL as "API not configured" — a guard that stops an unconfigured build from
-shipping. Switching to same-origin is a deliberate follow-up, not an accident.
+This is safe with the current design — the API authorizes with Bearer tokens
+rather than cookies, and its CORS check admits requests carrying no `Origin`
+header, which is what a same-origin call sends. Verified in production through
+the proxy: `GET /auth/config` and `/routes` return 200, `/me` returns 401
+without a token and 503 `AUTH_UNAVAILABLE` with one (OIDC is not configured
+yet), and a `POST` webhook with a bad signature is rejected 401 — so headers,
+methods and bodies are all forwarded intact.
+
+Two consequences worth stating plainly:
+
+- **No CORS entry is needed for the unified app.** A direct cross-origin call
+  from `https://le-routier.vercel.app` to the API is still refused with
+  `403 Origin is not allowed`, because the unified origin is deliberately not
+  in `CORS_ORIGINS`. Add it only if you switch back to direct calls.
+- **Attaching a custom domain needs no rebuild.** `same-origin` follows
+  whatever domain serves the app, so `leroutier.bj` works through the same
+  rewrite the moment DNS points at the project.
+
+Direct API usage is unchanged: `le-routier-api.vercel.app/api/v1` still serves
+the legacy apps exactly as before.
 
 ## Future custom domain
 
-Attaching `https://leroutier.bj` requires no code change:
+Attaching `https://leroutier.bj` requires no code change and no rebuild:
 
 1. attach the domain to the `le-routier` Vercel project;
 2. add `https://leroutier.bj/auth/callback` to `OIDC_REDIRECT_URIS`, and to the
-   provider's registered redirect URIs;
-3. add `https://leroutier.bj` to the API's `CORS_ORIGINS`;
-4. set `VITE_API_URL` (or switch to the same-origin proxy above).
+   provider's registered redirect URIs.
 
-Existing origins stay in `CORS_ORIGINS` until the old apps are retired.
+That is the whole list. `VITE_API_URL=same-origin` follows the new domain
+automatically, and no `CORS_ORIGINS` entry is required while the app calls the
+API through its own origin. Existing origins stay in `CORS_ORIGINS` until the
+old apps are retired.
 
 ### OIDC redirect URIs
 
