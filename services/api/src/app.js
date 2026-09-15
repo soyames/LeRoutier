@@ -45,7 +45,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     const body=readBody;
     if(method==='GET' && path==='/health') {await list('SELECT 1');return {status:'ok'};}
     if(method==='GET' && path==='/auth/config') return publicAuthConfig(config);
-    if(method==='GET' && path==='/payments/config') return {available:pay.configured};
+    if(method==='GET' && path==='/payments/config') return {available:pay.configured,payouts:{available:!!(adapter && adapter.payoutsAvailable)}};
     // Public parcel tracking: safe projection only — no parties, phones or
     // payment data, ever. Rate limited per client address.
     const publicTracking=path.match(/^\/public\/parcel-tracking\/(LRP-[0-9A-Fa-f]{8})$/);
