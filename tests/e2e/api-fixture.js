@@ -29,6 +29,11 @@ export async function mockApi(page) {
   await page.route('**/driver/payout-destinations',r=>r.fulfill({json:{data:[]}}));
   // Ops diagnostics
   await page.route('**/api/v1/ops/diagnostics',r=>r.fulfill({json:{data:{database:'ok',fedapay:{collections:true,payouts:true,environment:'live'},payments:{failed:0,anomalies7d:0},payouts:{failed:0,processing:0},incidents:{open:0},services:{staleTracking:0},workflows:{failed:0,awaitingApproval:0,failedRuns:[]},parcels:{openExceptions:0,uncollected:0,readyForPickup:0}}}}));
+  // Onboarding & locations
+  await page.route('**/api/v1/onboarding/me',r=>r.fulfill({json:{data:{role:'ops',displayName:'Compte Démo',needsProfile:false,membership:null}}}));
+  await page.route('**/api/v1/boarding-points',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/operators',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/ops/operator-payouts',r=>r.fulfill({json:{data:[]}}));
   // Parcel logistics (API routes only — navigation URLs must never be mocked)
   await page.route('**/api/v1/me/parcels',r=>r.fulfill({json:{data:[{id:id(50),trackingNumber:'LRP-12345678',category:'documents',quantity:1,weightG:null,priceMinor:1000,status:'created',paymentResponsibility:'sender',createdAt:'2026-09-15T00:00:00Z',originStopId:id(200),destinationStopId:id(201)}]}}));
   await page.route('**/api/v1/parcels/quote*',r=>r.fulfill({json:{data:{amountMinor:1000,currency:'XOF',operatorName:'Opérateur démo'}}}));

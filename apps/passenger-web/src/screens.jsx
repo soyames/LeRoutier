@@ -117,7 +117,56 @@ export function Tracking(){
   return <><SectionTitle icon={Navigation} title="Suivi de mon trajet"/>{!booking || !position.data ? <ApiState resource={booking?position:bookings} empty="Aucune position disponible pour un billet actif."/> : <Card className="stack"><h2>{booking.route_name}</h2><p>Dernière position : {position.data.latitude}, {position.data.longitude}</p><span className="small muted">Observée le {new Date(position.data.observed_at).toLocaleString('fr-FR')}</span><button className="btn btn-soft" onClick={position.reload}>Actualiser</button></Card>}</>;
 }
 export function Account(){
-  const {user}=useSession();return <><SectionTitle icon={UserRound} title="Mon compte"/><Card className="stack">{user?<><h2>{user.display_name}</h2><Badge tone="success">Compte connecté</Badge>{!user.needs_profile && <ProfileForm/>}<p className="small muted">Vos billets et réservations sont synchronisés avec le service.</p></>:<p>Connectez-vous pour accéder à votre compte.</p>}</Card></>;
+  const {user}=useSession();return <><SectionTitle icon={UserRound} title="Mon compte"/><Card className="stack">{user?<><h2>{user.display_name}</h2><Badge tone="success">Compte connecté</Badge>{!user.needs_profile && <ProfileForm/>}{!user.needs_profile && user.role==='passenger' && <OnboardingChoice/>}<p className="small muted">Vos billets et réservations sont synchronisés avec le service.</p></>:<p>Connectez-vous pour accéder à votre compte.</p>}</Card></>;
+}
+
+// Initial account choice: Passenger (default), Independent Driver or Transport
+// Company. One canonical operator model backs the two operational paths.
+function OnboardingChoice(){
+  const {user,request,refresh,online}=useSession();
+  const [path,setPath]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
+  const [displayName,setDisplayName]=useState(user?.display_name||''),[phone,setPhone]=useState(user?.phone||''),
+    [country,setCountry]=useState('BJ'),[license,setLicense]=useState(''),[registration,setRegistration]=useState(''),[capacity,setCapacity]=useState(''),
+    [contactPhone,setContactPhone]=useState(''),[regRef,setRegRef]=useState('');
+  async function submit(e){
+    e.preventDefault();setBusy(true);setError('');setNotice('');
+    try{
+      if(path==='independent'){
+        await request('/onboarding/independent',{method:'POST',key:'onboard-'+crypto.randomUUID(),body:{displayName,phone,country,licenseReference:license,
+          ...(registration.trim()?{vehicleRegistration:registration.trim(),vehicleCapacity:Number(capacity)}:{})}});
+      }else{
+        await request('/onboarding/company',{method:'POST',key:'onboard-'+crypto.randomUUID(),body:{displayName,contactPhone,country,...(regRef.trim()?{registrationRef:regRef.trim()}:{})}});
+      }
+      await refresh();setNotice('Bienvenue ! Votre compte opérateur est en attente de vérification.');
+    }catch(e){setError(e.message);}finally{setBusy(false);}
+  }
+  return <Card className="stack"><SectionTitle icon={Package} title="Vous êtes…"/>
+    {!path && <div className="controls wrap">
+      <button className="btn btn-soft" onClick={()=>setPath(null)}>Passager — continuer simplement</button>
+      <button className="btn btn-primary" onClick={()=>setPath('independent')}>Chauffeur indépendant</button>
+      <button className="btn btn-soft" onClick={()=>setPath('company')}>Compagnie de transport</button>
+    </div>}
+    {path && <form className="stack" onSubmit={submit}>
+      <span className="eyebrow">{path==='independent'?'Chauffeur indépendant':'Compagnie de transport'}</span>
+      <label>Nom{path==='company'?' de la compagnie':' complet'}<input className="control" required minLength={2} maxLength={200} value={displayName} onChange={e=>setDisplayName(e.target.value)}/></label>
+      {path==='independent' && <>
+        <label>Téléphone<input className="control" type="tel" required value={phone} onChange={e=>setPhone(e.target.value)}/></label>
+        <label>Référence du permis<input className="control" required minLength={2} value={license} onChange={e=>setLicense(e.target.value)}/></label>
+        <div className="between wrap">
+          <label className="grow">Pays<select className="control" value={country} onChange={e=>setCountry(e.target.value)}><option value="BJ">Bénin</option><option value="CI">Côte d’Ivoire</option><option value="TG">Togo</option></select></label>
+          <label className="grow">Véhicule — immatriculation (facultatif)<input className="control" value={registration} onChange={e=>setRegistration(e.target.value)}/></label>
+          <label className="grow">Places<input className="control" type="number" min={1} max={100} value={capacity} onChange={e=>setCapacity(e.target.value)}/></label>
+        </div>
+      </>}
+      {path==='company' && <>
+        <label>Téléphone de contact<input className="control" type="tel" required value={contactPhone} onChange={e=>setContactPhone(e.target.value)}/></label>
+        <label>Référence d’immatriculation (facultatif)<input className="control" value={regRef} onChange={e=>setRegRef(e.target.value)}/></label>
+      </>}
+      <p className="small muted">Le compte est créé en attente de vérification. Aucune action financière ou opérationnelle n’est possible avant validation.</p>
+      <div className="controls"><button className="btn btn-primary" disabled={busy || !online}>{busy?'Création…':'Créer mon compte opérateur'}</button><button type="button" className="btn btn-soft" onClick={()=>setPath(null)}>Retour</button></div>
+      {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    </form>}
+  </Card>;
 }
 
 const parcelLabels={created:'Créé',accepted:'Accepté',manifested:'Affecté',loaded:'Chargé',in_transit:'En transit',arrived:'Arrivé',

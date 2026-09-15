@@ -13,6 +13,10 @@ import { driverAction, recordIncident } from '@leroutier/database/driver-actions
 import { earnings, payouts } from '@leroutier/database/payouts';
 import { recovery } from '@leroutier/database/recovery';
 import { parcels } from '@leroutier/database/parcels';
+import { onboarding } from '@leroutier/database/onboarding';
+import { locations } from '@leroutier/database/locations';
+import { operatorSettlements } from '@leroutier/database/operator-settlements';
+import { walkUpBookings } from '@leroutier/database/walkup';
 import { paymentAdapter } from './payment-adapter.js';
 import { authenticate as authenticateAgent, catalog, createActions, createWorkflowEngine } from '@leroutier/agents';
 
@@ -22,6 +26,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const domain=transport(db), auth=authentication(db,config,keyResolver),provision=provisioning(db,config);
   const pay=payments(db,adapter),ticket=tickets(db);
   const earn=earnings(db),payout=payouts(db,adapter,config),recover=recovery(db),parcel=parcels(db);
+  const onboard=onboarding(db),loc=locations(db),settle=operatorSettlements(db,adapter),walkUp=walkUpBookings(db);
   const actions=createActions({db,domain,payments:pay,payouts:payout,recovery:recover,parcels:parcel});
   const workflows=createWorkflowEngine({db,actions});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
@@ -60,7 +65,15 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       const event=await adapter.verifyEvent(raw,req.headers);
       if(!event)return {ignored:true};
       try{
-        if(event.kind==='payout')return await payout.applyEvent(event);
+        if(event.kind==='payout'){
+          try{return await payout.applyEvent(event);}
+          catch(payoutError){
+            // Driver payouts first; operator-settlement payouts share the same
+            // provider metadata namespace and fall through safely.
+            if(payoutError.code!=='NOT_FOUND')throw payoutError;
+            return await settle.applyEvent(event);
+          }
+        }
         return await pay.applyEvent(event);
       }catch(error){
         const anomaly=['PAYMENT_MISMATCH','DUPLICATE_REFERENCE','EVENT_CONFLICT','PAYMENT_TRANSITION','NOT_FOUND'].includes(error.code);
@@ -156,6 +169,52 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     }
     if(method==='POST' && path==='/tickets/verify')return ticket.verify(actor,await body());
     if(method==='POST' && path==='/driver/actions')return driverAction(db,actor,await body(),req.headers.get('idempotency-key'));
+    // --- Onboarding & membership (one canonical operator model) ---
+    if(method==='GET' && path==='/onboarding/me') return onboard.state(actor);
+    if(method==='POST' && path==='/onboarding/company') return onboard.startCompany(actor,await body(),req.headers.get('idempotency-key'));
+    if(method==='POST' && path==='/onboarding/independent') return onboard.startIndependent(actor,await body(),req.headers.get('idempotency-key'));
+    if(method==='PATCH' && path==='/onboarding/operator') return onboard.updateProfile(actor,await body());
+    if(method==='GET' && path==='/operators') return onboard.listOperators(actor);
+    const operatorVerify=path.match(/^\/operators\/([^/]+)\/verification$/);
+    if(method==='POST' && operatorVerify) return onboard.verification(actor,uuid(operatorVerify[1]),(await body()).decision);
+    const operatorMembers=path.match(/^\/operators\/([^/]+)\/members$/);
+    if(method==='GET' && operatorMembers) return onboard.members(actor,uuid(operatorMembers[1]));
+    const operatorStations=path.match(/^\/operators\/([^/]+)\/stations$/);
+    if(method==='GET' && operatorStations) return loc.stationList(actor,uuid(operatorStations[1]));
+    if(method==='POST' && operatorStations) return loc.stationCreate(actor,{...await body(),operatorId:uuid(operatorStations[1])});
+    // --- Canonical operational location registry ---
+    if(method==='GET' && path==='/boarding-points') {
+      const purposes=url.searchParams.get('purposes');
+      return loc.search(actor,{q:url.searchParams.get('q')??undefined,placeId:url.searchParams.get('placeId')??undefined,
+        purposes:purposes?purposes.split(','):undefined,includeProposed:url.searchParams.get('includeProposed')==='true'});
+    }
+    if(method==='POST' && path==='/boarding-points/proposals') return loc.propose(actor,await body());
+    const pointModerate=path.match(/^\/boarding-points\/([^/]+)\/moderate$/);
+    if(method==='POST' && pointModerate) return loc.moderate(actor,uuid(pointModerate[1]),(await body()).decision);
+    const serviceCrew=path.match(/^\/services\/([^/]+)\/crew$/);
+    if(method==='GET' && serviceCrew) {
+      const id=uuid(serviceCrew[1]);
+      return db.transaction(async tx=>{
+        await domain.authorizeService(tx,actor,id,true);
+        const assignment=await tx.query(`SELECT a.driver_id,a.convoyeur_id,a.vehicle_id,d.display_name AS driver_name,c.display_name AS convoyeur_name,v.registration
+          FROM service_assignments a LEFT JOIN users d ON d.id=a.driver_id LEFT JOIN users c ON c.id=a.convoyeur_id
+          LEFT JOIN vehicles v ON v.id=a.vehicle_id WHERE a.service_id=$1 AND a.ended_at IS NULL`,[id]);
+        return assignment.rows[0]??null;
+      });
+    }
+    // --- Walk-up cash bookings (the only cash channel, crew only) ---
+    if(method==='POST' && path==='/driver/walk-up-bookings') return walkUp(actor,await body(),req.headers.get('idempotency-key'));
+    // --- Operator settlements & withdrawals ---
+    if(method==='GET' && path==='/operator/settlements') return {summary:await settle.summary(actor),entries:await settle.ledger(actor)};
+    if(method==='GET' && path==='/operator/payouts') return settle.list(actor);
+    if(method==='POST' && path==='/operator/payouts') return settle.request(actor,await body(),req.headers.get('idempotency-key'));
+    const operatorPayoutCancel=path.match(/^\/operator\/payouts\/([^/]+)\/cancel$/);
+    if(method==='POST' && operatorPayoutCancel) return settle.cancel(actor,uuid(operatorPayoutCancel[1]));
+    if(method==='GET' && path==='/ops/operator-payouts') return settle.listOps(actor);
+    const operatorPayoutApprove=path.match(/^\/ops\/operator-payouts\/([^/]+)\/approve$/);
+    if(method==='POST' && operatorPayoutApprove) return settle.approve(actor,uuid(operatorPayoutApprove[1]));
+    const operatorPayoutReconcile=path.match(/^\/ops\/operator-payouts\/([^/]+)\/reconcile$/);
+    if(method==='POST' && operatorPayoutReconcile) return settle.reconcile(actor,uuid(operatorPayoutReconcile[1]));
     if(method==='GET' && path==='/driver/earnings') {
       invariant(actor.role==='driver','FORBIDDEN','Driver access required.',403);
       return {summary:await earn.summary(actor),entries:await earn.ledger(actor)};
@@ -222,9 +281,9 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='POST' && reconcile)return pay.reconcile(actor,uuid(reconcile[1]));
     if(method==='PATCH' && path==='/me') return updateProfile(db,actor,await body());
     if(method==='GET' && path==='/ops/provisioning') return provision.catalog(actor);
-    const provisionPath=path.match(/^\/ops\/(operators|drivers|ops-users|places|stops|vehicles|routes|services)$/);
+    const provisionPath=path.match(/^\/ops\/(operators|drivers|convoyeurs|ops-users|places|stops|vehicles|routes|services)$/);
     if(method==='POST' && provisionPath) {
-      const operations={operators:'operator',drivers:'driver','ops-users':'opsUser',places:'place',stops:'stop',vehicles:'vehicle',routes:'route',services:'service'};
+      const operations={operators:'operator',drivers:'driver',convoyeurs:'convoyeur','ops-users':'opsUser',places:'place',stops:'stop',vehicles:'vehicle',routes:'route',services:'service'};
       return provision[operations[provisionPath[1]]](actor,await body(),req.headers.get('idempotency-key'));
     }
     const activation=path.match(/^\/ops\/users\/([^/]+)\/status$/);
