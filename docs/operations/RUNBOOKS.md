@@ -94,7 +94,11 @@ reconciliation or an Ops-privileged, audited action.
    Git Bash: `DATABASE_URL="<production value>" node --env-file=.env.local packages/database/scripts/migrate.js`
 
 3. The runner reports "Migrations validated: N" and is replay-safe: reruns
-   are no-ops. Then re-run `pnpm smoke:prod`.
+   are no-ops. Then re-run `pnpm smoke:prod`. **Verify the target first**:
+   the local `.env.local` database is the development Neon (it contains demo
+   data) — always copy the connection string from Vercel's `DATABASE_URL`
+   itself, never assume the local value is production. Current migrations:
+   001–008.
 4. New deployments must come from git pushes (`main`). Manual dashboard
    deploys of the API project can ship stale source.
 

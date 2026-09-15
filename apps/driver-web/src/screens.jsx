@@ -116,11 +116,44 @@ export function RouteScreen(){
         {p.status==='in_transit' && <button className="btn btn-primary" disabled={busy} onClick={()=>queue.enqueue('parcel',{serviceId:s.id,parcelId:p.id,kind:'arrived'})}>Scanner l’arrivée</button>}
         {(p.status==='loaded'||p.status==='in_transit') && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>act('parcel-problem',p)}>Signaler un problème</button>}
       </div></Card>)}
+    <Card className="stack"><SectionTitle icon={Wallet} title="Vente au comptant (montée directe)"/>
+      <WalkUpForm service={s} onDone={()=>{manifest.reload();service.reload();}}/></Card>
     <Card className="stack"><span className="eyebrow">Actions terrain</span>{s.current_sequence<s.stops.length-1 && <button className="btn btn-primary" disabled={busy} onClick={()=>{setBusy(true);request(`/services/${s.id}/advance`,{method:'POST',body:{sequence:s.current_sequence+1}}).then(()=>{setNotice('Arrêt suivant enregistré.');service.reload();}).catch(e=>setError(e.message)).finally(()=>setBusy(false));}}>Arrivée à l’arrêt suivant</button>}
       <button className="btn btn-soft" disabled={busy} onClick={()=>navigator.geolocation? navigator.geolocation.getCurrentPosition(p=>request(`/services/${s.id}/positions`,{method:'POST',body:{latitude:p.coords.latitude,longitude:p.coords.longitude,observedAt:new Date(p.timestamp).toISOString()}}).then(()=>setNotice('Position partagée.')).catch(e=>setError(e.message)),()=>setError('Position indisponible ou autorisation refusée.')):setError('Géolocalisation indisponible.')}>Partager ma position</button>
     </Card>
     <Card className="stack"><SectionTitle icon={AlertTriangle} title="Signaler un incident"/><form className="stack" onSubmit={async e=>{e.preventDefault();queue.enqueue('incident',{serviceId:s.id,kind:'other',severity:'medium',description:description.trim()});setDescription('');setNotice('Incident enregistré.');if(navigator.onLine)queue.sync();}}><label>Description<textarea className="control" value={description} onChange={e=>setDescription(e.target.value)} maxLength={2000} required/></label><button className="btn btn-danger" disabled={busy || !description.trim()}>Enregistrer l’incident</button></form></Card>
   </>;
+}
+
+// Walk-up cash sales: the only cash channel, restricted to crew on the
+// assigned service. The passenger app never accepts cash.
+function WalkUpForm({service,onDone}){
+  const {request,online}=useSession();
+  const [origin,setOrigin]=useState(''),[destination,setDestination]=useState(''),[name,setName]=useState(''),[phone,setPhone]=useState(''),[amount,setAmount]=useState(''),[reference,setReference]=useState('');
+  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
+  async function submit(e){
+    e.preventDefault();setBusy(true);setError('');setNotice('');
+    try{
+      const result=await request('/driver/walk-up-bookings',{method:'POST',key:'walkup-'+crypto.randomUUID(),body:{serviceId:service.id,
+        origin:Number(origin),destination:Number(destination),passengerName:name,passengerPhone:phone,amountMinor:Number(amount),cashReference:reference.trim()}});
+      setNotice(`Vente enregistrée — ${result.amountMinor.toLocaleString('fr-FR')} FCFA encaissés (recette opérateur).`);setName('');setPhone('');setAmount('');setReference('');onDone?.();
+    }catch(e){setError(e.message);}finally{setBusy(false);}
+  }
+  const stops=service.stops||[];
+  return <form className="stack" onSubmit={submit}>
+    <div className="between wrap">
+      <label className="grow">Montée<select className="control" required value={origin} onChange={e=>setOrigin(e.target.value)}><option value="">Choisir…</option>{stops.map((st,index)=><option key={index} value={index}>{st.city}</option>)}</select></label>
+      <label className="grow">Descente<select className="control" required value={destination} onChange={e=>setDestination(e.target.value)}><option value="">Choisir…</option>{stops.map((st,index)=><option key={index} value={index}>{st.city}</option>)}</select></label>
+    </div>
+    <div className="between wrap">
+      <label className="grow">Nom du passager<input className="control" required minLength={2} value={name} onChange={e=>setName(e.target.value)}/></label>
+      <label className="grow">Téléphone<input className="control" type="tel" required value={phone} onChange={e=>setPhone(e.target.value)}/></label>
+      <label className="grow">Montant (FCFA)<input className="control" type="number" min={1} step={1} required value={amount} onChange={e=>setAmount(e.target.value)}/></label>
+      <label className="grow">Référence du reçu<input className="control" required value={reference} onChange={e=>setReference(e.target.value)}/></label>
+    </div>
+    <button className="btn btn-primary" disabled={busy || !online || !origin || !destination || Number(origin)>=Number(destination)}>{busy?'Enregistrement…':'Encaisser et embarquer'}</button>
+    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+  </form>;
 }
 
 const payoutLabels={requested:'Demandé',processing:'En cours',paid:'Versé',failed:'Échoué',cancelled:'Annulé',reversed:'Annulé (reversé)'};
@@ -129,14 +162,31 @@ const payoutTones={requested:'neutral',processing:'neutral',paid:'success',faile
 export function Earnings(){
   const {user,request,online}=useSession();
   const data=useApi(user?'/driver/earnings':null),payouts=useApi(user?'/driver/payouts':null),destinations=useApi(user?'/driver/payout-destinations':null);
+  const independent=user?.operator_type==='independent' && user?.role==='driver';
+  const operatorData=useApi(independent?'/operator/settlements':null),operatorPayouts=useApi(independent?'/operator/payouts':null);
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const [amount,setAmount]=useState(''),[destinationId,setDestinationId]=useState('');
   const [phone,setPhone]=useState(''),[country,setCountry]=useState('BJ'),[network,setNetwork]=useState('');
+  const [opAmount,setOpAmount]=useState(''),[opPhone,setOpPhone]=useState(user?.phone||'');
   const summary=data.data?.summary || {available:0,reserved:0,paid:0,reversed:0};
-  async function act(path,body,key){setBusy(true);setError('');setNotice('');try{await request(path,{method:'POST',body,key});payouts.reload();destinations.reload();data.reload();setNotice('Action enregistrée.');}catch(e){setError(e.message);}finally{setBusy(false);}}
+  async function act(path,body,key){setBusy(true);setError('');setNotice('');try{await request(path,{method:'POST',body,key});payouts.reload();destinations.reload();data.reload();operatorData.reload?.();operatorPayouts.reload?.();setNotice('Action enregistrée.');}catch(e){setError(e.message);}finally{setBusy(false);}}
   return <>
     <SectionTitle icon={Wallet} title="Mes gains & versements"/>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    {independent && operatorData.data && <Card className="card-success stack"><SectionTitle icon={Wallet} title="Recette de mon activité indépendante"/>
+      <div className="grid grid-3">
+        <StatCard label="Disponible" value={`${(operatorData.data.summary.available).toLocaleString('fr-FR')} FCFA`} tone="success"/>
+        <StatCard label="En attente" value={`${operatorData.data.summary.reserved.toLocaleString('fr-FR')} FCFA`}/>
+        <StatCard label="Versé" value={`${operatorData.data.summary.paid.toLocaleString('fr-FR')} FCFA`}/>
+      </div>
+      {operatorData.data.summary.verificationStatus!=='verified' && <p role="status">Compte en attente de vérification — les retraits seront possibles après validation.</p>}
+      <div className="between wrap">
+        <label className="grow">Montant du retrait (FCFA)<input className="control" type="number" min={1} step={1} value={opAmount} onChange={e=>setOpAmount(e.target.value)}/></label>
+        <label className="grow">Numéro Mobile Money<input className="control" type="tel" inputMode="numeric" value={opPhone} onChange={e=>setOpPhone(e.target.value.replace(/[^0-9]/g,''))}/></label>
+        <button className="btn btn-primary" disabled={busy || !online || operatorData.data.summary.verificationStatus!=='verified' || !Number.isInteger(Number(opAmount)) || Number(opAmount)<=0 || !/^[0-9]{8,15}$/.test(opPhone)} onClick={()=>act('/operator/payouts',{amountMinor:Number(opAmount),phoneNumber:opPhone,country:'BJ',network:null},'oppayout-'+crypto.randomUUID())}>Demander le retrait</button>
+      </div>
+      {(operatorPayouts.data||[]).map(p=><div className="between" key={p.id}><span className="small">{p.amountMinor.toLocaleString('fr-FR')} FCFA · {p.phoneNumber}</span><Badge tone={payoutTones[p.status]}>{payoutLabels[p.status]}</Badge></div>)}
+    </Card>}
     <div className="grid grid-3">
       <StatCard label="Disponible" value={`${summary.available.toLocaleString('fr-FR')} FCFA`} icon={Wallet} tone="success"/>
       <StatCard label="En attente" value={`${summary.reserved.toLocaleString('fr-FR')} FCFA`} icon={RefreshCw}/>
