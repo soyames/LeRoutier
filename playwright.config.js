@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const apps = ['passenger-web', 'driver-web', 'ops-web'];
+// The unified PWA is served alongside the three original apps: both are tested
+// until the old apps are retired, so consolidation cannot silently regress them.
+const apps = ['passenger-web', 'driver-web', 'ops-web', 'web'];
 
 export default defineConfig({
   testDir: './tests/e2e',

@@ -1,7 +1,7 @@
 import { Navigate, useLocation, useNavigate } from 'react-router';
 import { AppShell, SessionPanel } from '@leroutier/ui';
 import { useSession } from '@leroutier/config/client';
-import { Today, Manifest, Scanner, WalkUp, Parcels, Vehicle, Points, Earnings, Profile } from './screens.jsx';
+import { Today, Manifest, Scanner, WalkUp, Parcels, Vehicle, Points, Earnings, Profile } from '@leroutier/screens/crew';
 import { Route, Users, QrCode, Wallet, Package, BusFront, MapPin, UserRound } from 'lucide-react';
 export default function App() {
   const { online, user } = useSession();

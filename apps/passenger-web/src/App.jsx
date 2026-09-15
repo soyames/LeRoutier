@@ -1,7 +1,7 @@
 import { Navigate, useLocation, useNavigate } from 'react-router';
 import { AppShell, SessionPanel } from '@leroutier/ui';
 import { useSession } from '@leroutier/config/client';
-import { Trips, Tickets, Stations, Tracking, Account, Parcels, OnboardingPage } from './screens.jsx';
+import { Trips, Tickets, Stations, Tracking, Account, Parcels, OnboardingPage } from '@leroutier/screens/passenger';
 import { Search, Ticket, Navigation, UserRound, Package, Store } from 'lucide-react';
 const nav=[{id:'trips',label:'Trajets',icon:Search},{id:'tickets',label:'Billets',icon:Ticket},{id:'parcels',label:'Colis',icon:Package},{id:'tracking',label:'Suivi',icon:Navigation},{id:'account',label:'Compte',icon:UserRound}];
 export default function App() {

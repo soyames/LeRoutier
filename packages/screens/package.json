@@ -1,0 +1,30 @@
+{
+  "name": "@leroutier/screens",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./passenger": "./src/passenger.jsx",
+    "./crew": "./src/crew.jsx",
+    "./ops": "./src/ops.jsx",
+    "./journey": "./src/journey.jsx",
+    "./notifications": "./src/notifications.jsx"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "dependencies": {
+    "@leroutier/config": "workspace:*",
+    "@leroutier/geo": "workspace:*",
+    "@leroutier/ui": "workspace:*",
+    "lucide-react": "catalog:",
+    "qr-scanner": "^1.4.2",
+    "qrcode.react": "^4.2.0",
+    "react-router": "catalog:"
+  },
+  "devDependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  }
+}

@@ -54,9 +54,11 @@ export function ApiProvider({baseUrl='',role,children}) {
     try{await auth.client.manager.clearStaleState();await auth.client.manager.signinRedirect();}
     catch{throw new Error('Impossible de démarrer la connexion. Réessayez.');}
   },[auth.client]);
-  const demoLogin=useCallback(async()=>{
+  // The unified app serves every role from one identity, so development login
+  // accepts the role to impersonate; single-role apps keep their first role.
+  const demoLogin=useCallback(async(as=undefined)=>{
     if(!auth.demoLogin)throw new Error('Connexion de développement indisponible.');
-    setSession(await request('/auth/demo',{method:'POST',body:{role:Array.isArray(role)?role[0]:role}}));
+    setSession(await request('/auth/demo',{method:'POST',body:{role:as ?? (Array.isArray(role)?role[0]:role)}}));
   },[request,role,auth.demoLogin]);
   const logout=useCallback(async()=>{
     window.dispatchEvent(new Event('leroutier:logout'));

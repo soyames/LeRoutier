@@ -1,7 +1,7 @@
 import { Navigate, useLocation, useNavigate } from 'react-router';
 import { AppShell, SessionPanel } from '@leroutier/ui';
 import { useSession } from '@leroutier/config/client';
-import { Today, Services, Fleet, Crew, Stations, Parcels, Payments, Settlements, Incidents, Alerts, Settings } from './screens.jsx';
+import { Today, Services, Fleet, Crew, Stations, Parcels, Payments, Settlements, Incidents, Alerts, Settings } from '@leroutier/screens/ops';
 import { Home, Radio, BusFront, Users, MapPin, Package, WalletCards, Wallet, ShieldAlert, Bell, Settings as SettingsIcon } from 'lucide-react';
 const nav=[
   {id:'today',label:'Aujourd’hui',icon:Home},{id:'services',label:'Services',icon:Radio},{id:'fleet',label:'Flotte',icon:BusFront},
