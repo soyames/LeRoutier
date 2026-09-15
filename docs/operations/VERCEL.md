@@ -1,12 +1,29 @@
 # Vercel deployment
 
-Create one Vercel project per application, using the same Git repository:
+The **unified LeRoutier PWA (`apps/web`) is the canonical frontend.** The three
+original apps stay deployed for regression until it has carried real pilot
+journeys — see `../architecture/UNIFIED_PWA.md` for the migration plan.
 
-| Application | Root Directory | Local port |
-| --- | --- | --- |
-| Passenger | `apps/passenger-web` | 3000 |
-| Driver | `apps/driver-web` | 3001 |
-| Regulation | `apps/ops-web` | 3002 |
+| Application | Vercel project | Root Directory | Local port |
+| --- | --- | --- | --- |
+| **LeRoutier (unified)** | `le-routier` | `apps/web` | 3003 |
+| Passenger (legacy) | `le-routier-passenger` | `apps/passenger-web` | 3000 |
+| Driver (legacy) | `le-routier-driver` | `apps/driver-web` | 3001 |
+| Regulation (legacy) | `le-routier-ops` | `apps/ops-web` | 3002 |
+
+## CORS
+
+The API must allow every deployed frontend origin. `CORS_ORIGINS` on
+`le-routier-api` therefore needs the unified origin **added**, with the
+existing three kept until the old apps are retired:
+
+```
+https://le-routier.vercel.app,https://le-routier-passenger.vercel.app,https://le-routier-driver.vercel.app,https://le-routier-ops.vercel.app
+```
+
+A future custom domain is appended the same way. Exact origins only — no
+wildcards. The API admits requests that carry no `Origin` header, which is what
+a same-origin call through the unified app's `/api/v1` rewrite sends.
 
 Select Node.js 22.x and enable **Include source files outside of the Root
 Directory in the Build Step** in each project's Root Directory settings.

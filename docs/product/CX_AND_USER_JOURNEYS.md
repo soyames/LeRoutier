@@ -4,6 +4,29 @@ Canonical product journeys per identity. All screens consume `/api/v1`
 endpoints backed by the shared domain — see `SCREEN_DATA_SOURCES.md` for the
 screen→endpoint→service→table trace.
 
+## One product, several workspaces
+
+LeRoutier is **one** application. A person installs LeRoutier, signs in once
+with one identity, and lands in whichever workspace that identity authorizes.
+Passenger, Independent Owner-Driver, Company Driver, Convoyeur and Ops are
+**use cases inside LeRoutier**, not separate products — a user never needs to
+know which deployment serves them.
+
+| Workspace | Route prefix | Who |
+| --- | --- | --- |
+| Voyageur | `/` | everyone with an account |
+| Mon activité / Conduite / Convoyeur | `/work` | `driver` or `convoyeur` |
+| Exploitation | `/ops` | `ops` |
+
+A workspace switcher appears only when an identity has more than one, and only
+lists workspaces it is actually authorized for. Switching never creates a
+second session. See `../architecture/UNIFIED_PWA.md` for the shell, routing and
+migration plan; the three original apps remain deployed for regression until
+the unified PWA has carried real pilot journeys.
+
+The journeys below are unchanged by that consolidation — they describe the same
+screens, now reached inside one app.
+
 ## Passenger
 
 **Entry**: public landing = trip search (`/trips`) — no account required to
@@ -18,8 +41,22 @@ checkout (online only — cash is never offered) → trusted webhook
 confirmation → ticket (QR + manual code + exact boarding point with map
 link) → trip tracking.
 
-**Key screens**: `/trips`, `/tickets`, `/parcels`, `/tracking`, `/account`,
+**Key screens**: `/` (public home), `/trips`, `/tickets`, `/tickets/:bookingId`
+(end-to-end journey), `/parcels`, `/tracking`, `/account`, `/notifications`,
 `/onboarding` (operator entry).
+
+**First and last mile**: the journey does not begin at the station. After a
+booking exists, `/tickets/:bookingId` shows the exact boarding point, a
+recommended leave-home time derived from the service schedule, and an
+**optional** external handoff to a local provider (Gozem in Benin). LeRoutier
+books no local ride and shows no provider fare or ETA; "J'y vais par mes
+propres moyens" is always available, and the passenger's own location never
+leaves their device. A delay recomputes the advice and supersedes the previous
+recommendation rather than contradicting it. See `FIRST_LAST_MILE.md`.
+
+**Notifications**: booking, payment, ticket, first-mile timing, boarding,
+delay, boarding-point change, arrival and parcel updates arrive in the one
+in-app notification centre. See `../architecture/NOTIFICATIONS.md`.
 
 ## Independent Owner-Driver
 

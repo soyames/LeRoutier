@@ -27,6 +27,12 @@ export function SessionPanel() {
         <button className="btn btn-primary" disabled={busy || !online || !canSignin} onClick={()=>connect(login)}>Se connecter</button>
         {!canSignin && !demoLogin && <p role="status">La connexion sécurisée n’est pas encore configurée.</p>}
         {demoLogin && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>connect(loginDemo)}>Connexion de développement</button>}
+        {/* The unified app serves every role from one identity: in development
+            only, offer each role so a workspace can be opened directly. */}
+        {demoLogin && Array.isArray(role) && role.length>1 && <div className="controls">
+          {role.filter(r=>r!=='convoyeur').map(r=><button key={r} className="control" disabled={busy || !online}
+            onClick={()=>connect(()=>loginDemo(r))}>Développement : {r}</button>)}
+        </div>}
       </>}
       <p className="small muted">Un compte autorisé est nécessaire pour réserver ou effectuer une action.</p>
     </>}
