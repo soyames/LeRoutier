@@ -4,7 +4,8 @@ import { invariant, uuid } from '@leroutier/domain';
 // Service/agent principals are deliberately distinct from Passenger/Driver/Ops
 // users. Tokens are opaque (`lragt_…`), stored only as SHA-256 digests.
 export const SCOPES = ['service.read', 'incident.read', 'incident.manage', 'notification.send',
-  'payment.reconcile', 'payout.review', 'alert.create', 'workflow.run'];
+  'payment.reconcile', 'payout.review', 'alert.create', 'workflow.run',
+  'parcel.read', 'parcel.manage', 'parcel.notify'];
 
 export function hashToken(token) {
   return createHash('sha256').update(token).digest('hex');
