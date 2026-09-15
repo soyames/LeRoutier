@@ -45,7 +45,12 @@ export function verifyFedaPaySignature(raw,header,secret,now=Date.now()){
 
 export function fedapayAdapter(config,http=fetch){
   const {paymentProvider,fedapay:fedapayConfig}=config;
-  const environment=fedapayConfig?.environment,secretKey=fedapayConfig?.secretKey,payoutKey=fedapayConfig?.payoutSecretKey,webhookSecret=fedapayConfig?.webhookSecret;
+  const environment=fedapayConfig?.environment;
+  // Trim terminal-pasted credentials defensively (PowerShell stdin is known to
+  // leak \r into values on this machine); keys never contain edge whitespace.
+  const secretKey=typeof fedapayConfig?.secretKey==='string'?fedapayConfig.secretKey.trim():undefined;
+  const payoutKey=typeof fedapayConfig?.payoutSecretKey==='string'?fedapayConfig.payoutSecretKey.trim():undefined;
+  const webhookSecret=typeof fedapayConfig?.webhookSecret==='string'?fedapayConfig.webhookSecret.trim():undefined;
   if(paymentProvider!=='fedapay')return null;
   // Fail closed: production must be explicitly configured as live.
   if(environment!=='sandbox' && environment!=='live')return null;
@@ -107,6 +112,7 @@ export function fedapayAdapter(config,http=fetch){
       ...(amountMinor!==undefined?{amountMinor}:{}),...(typeof currency==='string'?{currency}:{}),status};
   }
   return {name:'fedapay',environment,
+    payoutsAvailable:!!payoutKey,
     // ---- collections ----
     async initiate({paymentId,bookingId,amountMinor,currency,idempotencyKey}){
       const transaction=await send('/transactions','POST',{description:'Réservation LeRoutier',

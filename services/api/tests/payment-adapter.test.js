@@ -35,6 +35,15 @@ test('adapter fails closed without FedaPay configuration',()=>{
   assert.equal(fedapayAdapter(config({production:true,fedapay:{environment:'live',secretKey:'sk_live_placeholder',payoutSecretKey:'pk_live_placeholder',webhookSecret:'wh_live_placeholder'}}))?.name,'fedapay');
 });
 
+test('pasted credentials are trimmed and payout availability is explicit',()=>{
+  const padded=fedapayAdapter(config({fedapay:{environment:'sandbox',secretKey:'  sk_sandbox_test_placeholder  ',payoutSecretKey:'  pk_sandbox_test_placeholder  ',webhookSecret:'  '+secret+'  '}}));
+  assert.ok(padded,'edge whitespace from terminal pastes is ignored');
+  assert.equal(padded.payoutsAvailable,true);
+  const withoutPayout=fedapayAdapter(config({fedapay:{environment:'sandbox',secretKey:'sk',payoutSecretKey:'   ',webhookSecret:secret}}));
+  assert.ok(withoutPayout,'collections stay available');
+  assert.equal(withoutPayout.payoutsAvailable,false,'whitespace-only payout key disables payouts');
+});
+
 test('initiate creates a transaction with LeRoutier metadata and returns a checkout link',async()=>{
   const adapter=fedapayAdapter(config(),httpFixture());
   const result=await adapter.initiate({paymentId:'00000000-0000-4000-8000-000000000001',bookingId:'00000000-0000-4000-8000-000000000002',amountMinor:2500,currency:'XOF',idempotencyKey:'key-0001'});
