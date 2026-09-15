@@ -62,6 +62,46 @@ export function createWorkflows({ actions }) {
         } },
       ],
     },
+    'parcel-delay': {
+      trigger: 'service.position', description: 'Detect parcels on a delayed service, record parcel.delay events and surface an Ops alert.',
+      steps: [
+        { name: 'detect', run: async (ctx, executor) => {
+          const open = await executor.db.transaction(async tx => (await tx.query(`SELECT id FROM incidents WHERE service_id=$1 AND kind='delay' AND status<>'resolved' ORDER BY created_at DESC LIMIT 1`, [ctx.serviceId])).rows);
+          if (!open.length) return { skip: true };
+          const rows = await executor.db.transaction(async tx => (await tx.query(`SELECT p.id,p.tracking_number,p.operator_id FROM parcels p
+            JOIN parcel_service_assignments a ON a.parcel_id=p.id AND a.status IN ('loaded','in_transit')
+            WHERE p.status IN ('loaded','in_transit') AND a.service_id=$1`, [ctx.serviceId])).rows);
+          return { skip: rows.length === 0, parcels: rows };
+        } },
+        { name: 'mark', when: ctx => !ctx.detect.skip, run: async (ctx, executor) => {
+          for (const parcel of ctx.detect.parcels) {
+            await actions['parcel.delay_notice'].run(executor, { parcelId: parcel.id, reason: 'Retard signalé sur le service de transport.' });
+          }
+          await actions['alert.create'].run(executor, { kind: 'delay', serviceId: ctx.serviceId, message: `Colis retardés : ${ctx.detect.parcels.length} expédition(s) affectée(s).` });
+          return { marked: ctx.detect.parcels.length };
+        } },
+      ],
+    },
+    'parcel-breakdown': {
+      trigger: 'incident.created', description: 'Detect parcels on the affected service, propose a replacement and, after Ops approval, reassign custody and notify.',
+      steps: [
+        { name: 'detect', run: async (ctx, executor) => {
+          const rows = await executor.db.transaction(async tx => (await tx.query(`SELECT p.id,p.tracking_number,p.operator_id FROM parcels p
+            JOIN parcel_service_assignments a ON a.parcel_id=p.id AND a.status IN ('loaded','in_transit')
+            WHERE p.status IN ('loaded','in_transit') AND a.service_id=$1`, [ctx.serviceId])).rows);
+          if (!rows.length) return { skip: true };
+          const candidates = await executor.db.transaction(async tx => (await tx.query(`SELECT s.id,s.departure_at,r.name AS route_name FROM services s JOIN routes r ON r.id=s.route_id
+            WHERE s.operator_id=$1 AND s.status IN ('scheduled','active') AND s.id<>$2 ORDER BY s.departure_at LIMIT 10`, [rows[0].operator_id, ctx.serviceId])).rows);
+          return { skip: candidates.length === 0, parcels: rows, candidates };
+        } },
+        { action: 'parcel.reassign', approval: true, when: ctx => !ctx.detect.skip, input: ctx => ({ parcelId: ctx.detect.parcels[0].id, serviceId: ctx.detect.candidates[0].id }) },
+        { name: 'notify', when: ctx => !ctx.detect.skip, run: async (ctx, executor) => {
+          await actions['parcel.notify'].run(executor, { parcelId: ctx.detect.parcels[0].id, party: 'receiver' });
+          await actions['alert.create'].run(executor, { kind: 'recovery', serviceId: ctx.serviceId, message: 'Colis transféré vers un service de remplacement après incident.' });
+          return { notified: 1 };
+        } },
+      ],
+    },
   };
 }
 
@@ -110,6 +150,16 @@ export function createWorkflowEngine({ db, actions }) {
       const agent = await principal(db, run.principal_id);
       let executor = { id: null, role: agent ? 'agent' : 'system', agent, workflowRunId: runId, db };
       try {
+        // Conditional steps: when the condition is false the step is recorded
+        // as skipped and the run advances without a mutation.
+        if (step.when && !step.when(context)) {
+          await db.transaction(async tx => {
+            await one(tx, 'UPDATE workflow_runs SET context=$2,step=$3,updated_at=now() WHERE id=$1',
+              [runId, JSON.stringify({ ...context, [key]: null }), steps[idx + 1] ? stepKey(steps[idx + 1]) : 'done']);
+            await audit(tx, run.principal_id, 'workflow.step_skipped', runId, { workflow: run.workflow, step: key });
+          });
+          continue;
+        }
         const requiresApproval = !!step.approval || (step.action && actions[step.action]?.approval === 'always');
         if (requiresApproval) {
           const approval = await db.transaction(async tx => {
@@ -177,8 +227,10 @@ export function createWorkflowEngine({ db, actions }) {
       const events = await db.transaction(async tx => (await tx.query('SELECT * FROM outbox WHERE delivered_at IS NULL ORDER BY created_at LIMIT 50 FOR UPDATE SKIP LOCKED')).rows);
       let processed = 0;
       for (const event of events) {
-        const name = Object.keys(definitions).find(key => definitions[key].trigger === event.event_type);
-        if (name) {
+        // One domain event may trigger several workflows; each run is guarded
+        // by its own uniqueness index and every step stays idempotent.
+        const matches = Object.entries(definitions).filter(([, definition]) => definition.trigger === event.event_type);
+        for (const [name] of matches) {
           // outbox.payload is jsonb: the driver already returns an object.
           let payload = {};
           try { payload = typeof event.payload === 'string' ? JSON.parse(event.payload) : (event.payload && typeof event.payload === 'object' ? event.payload : {}); } catch { /* malformed payloads never crash the loop */ }

@@ -12,6 +12,7 @@ import { tickets } from '@leroutier/database/tickets';
 import { driverAction, recordIncident } from '@leroutier/database/driver-actions';
 import { earnings, payouts } from '@leroutier/database/payouts';
 import { recovery } from '@leroutier/database/recovery';
+import { parcels } from '@leroutier/database/parcels';
 import { paymentAdapter } from './payment-adapter.js';
 import { authenticate as authenticateAgent, catalog, createActions, createWorkflowEngine } from '@leroutier/agents';
 
@@ -20,8 +21,8 @@ const API_PREFIX = '/api/v1';
 export function createApi(db, config, keyResolver=undefined, adapter=paymentAdapter(config)) {
   const domain=transport(db), auth=authentication(db,config,keyResolver),provision=provisioning(db,config);
   const pay=payments(db,adapter),ticket=tickets(db);
-  const earn=earnings(db),payout=payouts(db,adapter,config),recover=recovery(db);
-  const actions=createActions({db,domain,payments:pay,payouts:payout,recovery:recover});
+  const earn=earnings(db),payout=payouts(db,adapter,config),recover=recovery(db),parcel=parcels(db);
+  const actions=createActions({db,domain,payments:pay,payouts:payout,recovery:recover,parcels:parcel});
   const workflows=createWorkflowEngine({db,actions});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
   async function limited(subject) {
@@ -45,6 +46,10 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='GET' && path==='/health') {await list('SELECT 1');return {status:'ok'};}
     if(method==='GET' && path==='/auth/config') return publicAuthConfig(config);
     if(method==='GET' && path==='/payments/config') return {available:pay.configured};
+    // Public parcel tracking: safe projection only — no parties, phones or
+    // payment data, ever. Rate limited per client address.
+    const publicTracking=path.match(/^\/public\/parcel-tracking\/(LRP-[0-9A-Fa-f]{8})$/);
+    if(method==='GET' && publicTracking) {await limited('public-tracking:'+((req.headers.get('x-forwarded-for')||'').split(',')[0]||'local'));return parcel.publicTracking(publicTracking[1]);}
     // Dedicated LeRoutier FedaPay webhook. Signature is verified exactly per
     // FedaPay's official spec before anything is correlated or mutated;
     // uncorrelatable events are safely ignored with a 200 response.
@@ -175,6 +180,35 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='POST' && opsApprove) return payout.approve(actor,uuid(opsApprove[1]));
     const opsPayoutReconcile=path.match(/^\/ops\/payouts\/([^/]+)\/reconcile$/);
     if(method==='POST' && opsPayoutReconcile) return payout.reconcile(actor,uuid(opsPayoutReconcile[1]));
+    // --- Parcel Logistics v1 (all routes versioned under /api/v1) ---
+    if(method==='GET' && path==='/parcels/quote') {
+      const weightG=url.searchParams.get('weightG'),declared=url.searchParams.get('declaredValueMinor');
+      return parcel.quote(actor,{originStopId:url.searchParams.get('originStopId'),destinationStopId:url.searchParams.get('destinationStopId'),
+        category:url.searchParams.get('category'),...(weightG?{weightG:Number(weightG)}:{}),...(declared?{declaredValueMinor:Number(declared)}:{}),
+        ...(url.searchParams.get('operatorId')?{operatorId:url.searchParams.get('operatorId')}:{})});
+    }
+    if(method==='POST' && path==='/parcels') return parcel.create(actor,await body(),req.headers.get('idempotency-key'));
+    if(method==='GET' && path==='/me/parcels') return parcel.listMine(actor);
+    if(method==='GET' && path==='/driver/parcels') return parcel.listDriver(actor);
+    if(method==='GET' && path==='/ops/parcels') return parcel.listOps(actor,{status:url.searchParams.get('status')??undefined,q:url.searchParams.get('q')??undefined});
+    if(method==='GET' && path==='/ops/parcel-rate-rules') return parcel.rateRules(actor);
+    if(method==='POST' && path==='/ops/parcel-rate-rules') return parcel.rateRules(actor,await body(),req.headers.get('idempotency-key'));
+    const parcelPath=path.match(/^\/parcels\/([^/]+)(?:\/(label|events|accept|assign|scan|ready|pickup-code|pickup|exceptions|cancel|payments))?$/);
+    if(parcelPath){
+      const id=parcelPath[1],action=parcelPath[2];
+      if(!action && method==='GET') return parcel.get(actor,id);
+      if(action==='label' && method==='GET') return parcel.label(actor,id);
+      if(action==='events' && method==='GET') return parcel.events(actor,id);
+      if(action==='accept' && method==='POST') return parcel.accept(actor,id);
+      if(action==='assign' && method==='POST') return parcel.assign(actor,id,await body());
+      if(action==='scan' && method==='POST') return parcel.scan(actor,id,await body(),req.headers.get('idempotency-key'));
+      if(action==='ready' && method==='POST') return parcel.ready(actor,id);
+      if(action==='pickup-code' && method==='POST') return parcel.issuePickupCode(actor,id);
+      if(action==='pickup' && method==='POST') return parcel.collect(actor,id,await body());
+      if(action==='exceptions' && method==='POST') return parcel.exception(actor,id,await body());
+      if(action==='cancel' && method==='POST') return parcel.cancel(actor,id);
+      if(action==='payments' && method==='POST') return parcel.recordPayment(actor,id,await body(),req.headers.get('idempotency-key'));
+    }
     const ticketPath=path.match(/^\/bookings\/([^/]+)\/ticket$/);
     if(method==='POST' && ticketPath)return ticket.issue(actor,uuid(ticketPath[1]));
     const paymentPath=path.match(/^\/bookings\/([^/]+)\/(payment-intents|payment-status|reconcile-manual)$/);
