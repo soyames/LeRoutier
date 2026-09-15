@@ -248,6 +248,45 @@ export function createActions(ctx) {
         return many(`SELECT e.*,p.tracking_number,p.status AS parcel_status,p.operator_id FROM parcel_exceptions e JOIN parcels p ON p.id=e.parcel_id
           WHERE e.status='open' AND ($1::uuid IS NULL OR p.operator_id=$1) ORDER BY e.created_at LIMIT 100`, [await scopeOperator(executor, null)]);
       } },
+    // --- Onboarding & location state (read-only; mutations go through the API) ---
+    'operator.unverified_detect': { category: 'read', approval: 'never', scope: 'operator.read', description: 'List operators still awaiting verification.',
+      input: {}, async run() {
+        validate(this.input, undefined);
+        return many(`SELECT id,name,type,verification_status,country,created_at FROM operators
+          WHERE verification_status IN ('draft','pending_verification') ORDER BY created_at LIMIT 100`);
+      } },
+    'operator.membership_drift': { category: 'read', approval: 'never', scope: 'operator.read', description: 'Detect crew users with missing or inactive membership profiles.',
+      input: {}, async run() {
+        validate(this.input, undefined);
+        return many(`SELECT u.id,u.display_name,u.role,u.operator_id,u.active,
+          (u.role='driver' AND d.user_id IS NULL) AS missing_driver_profile,
+          (u.role='convoyeur' AND c.user_id IS NULL) AS missing_convoyeur_profile
+          FROM users u LEFT JOIN driver_profiles d ON d.user_id=u.id LEFT JOIN convoyeur_profiles c ON c.user_id=u.id
+          WHERE u.role IN ('driver','convoyeur','ops')
+          AND (u.active=false OR (u.role='driver' AND d.user_id IS NULL) OR (u.role='convoyeur' AND c.user_id IS NULL))
+          ORDER BY u.display_name LIMIT 100`);
+      } },
+    'service.missing_point_detect': { category: 'read', approval: 'never', scope: 'service.read', description: 'Detect operational services without exact boarding/arrival points.',
+      input: {}, async run() {
+        validate(this.input, undefined);
+        return many(`SELECT s.id,s.departure_at,s.status,r.name AS route_name,o.name AS operator_name
+          FROM services s JOIN routes r ON r.id=s.route_id JOIN operators o ON o.id=s.operator_id
+          WHERE s.status IN ('scheduled','active') AND (s.departure_point_id IS NULL OR s.arrival_point_id IS NULL)
+          ORDER BY s.departure_at LIMIT 100`);
+      } },
+    'location.moderation_backlog': { category: 'read', approval: 'never', scope: 'operator.read', description: 'List proposed boarding points awaiting moderation beyond 7 days.',
+      input: {}, async run() {
+        validate(this.input, undefined);
+        return many(`SELECT b.*,p.name AS city FROM boarding_points b JOIN places p ON p.id=b.place_id
+          WHERE b.status='proposed' AND b.created_at<now()-interval '7 days' ORDER BY b.created_at LIMIT 100`);
+      } },
+    'location.nearest_recommend': { category: 'read', approval: 'never', scope: 'service.read', description: 'Recommend verified boarding points in a place for given purposes.',
+      input: { placeId: id, purposes: list }, async run(executor, input) {
+        const { placeId, purposes } = validate(this.input, input);
+        invariant(purposes.length > 0 && purposes.every(p => ['passenger_boarding', 'passenger_alighting', 'parcel_consignment', 'parcel_pickup'].includes(p)), 'INVALID_ACTION_INPUT', 'Invalid purposes.');
+        return many(`SELECT b.*,p.name AS city FROM boarding_points b JOIN places p ON p.id=b.place_id
+          WHERE b.place_id=$1 AND b.status='verified' AND b.purposes @> $2::jsonb ORDER BY b.name LIMIT 50`, [placeId, JSON.stringify(purposes)]);
+      } },
   };
 }
 

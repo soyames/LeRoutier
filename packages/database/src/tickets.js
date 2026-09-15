@@ -23,7 +23,17 @@ export function tickets(db){
         const ticket=await one(tx,`INSERT INTO ticket_credentials(booking_id,version,token_hash,code_hash,expires_at) VALUES($1,1,$2,$3,$4)
           ON CONFLICT(booking_id) DO UPDATE SET version=ticket_credentials.version+1,token_hash=EXCLUDED.token_hash,code_hash=EXCLUDED.code_hash,expires_at=EXCLUDED.expires_at,issued_at=now()
           RETURNING version,expires_at`,[id,hash(token),hash(manualCode),expires]);
-        return {bookingId:b.id,serviceId:b.service_id,token,manualCode,version:ticket.version,expiresAt:ticket.expires_at};
+        // Operational precision: the ticket states the exact boarding and
+        // arrival locations, not only the cities.
+        const points=await one(tx,`SELECT bdp.name AS departure_name,bdp.description AS departure_landmark,bdp.latitude AS departure_latitude,bdp.longitude AS departure_longitude,op.name AS departure_city,
+          bap.name AS arrival_name,bap.description AS arrival_landmark,bap.latitude AS arrival_latitude,bap.longitude AS arrival_longitude,ap.name AS arrival_city
+          FROM services s LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN places op ON op.id=bdp.place_id
+          LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id LEFT JOIN places ap ON ap.id=bap.place_id WHERE s.id=$1`,[s.id]);
+        return {bookingId:b.id,serviceId:b.service_id,token,manualCode,version:ticket.version,expiresAt:ticket.expires_at,
+          departure:{name:points?.departure_name??null,city:points?.departure_city??null,landmark:points?.departure_landmark??null,
+            latitude:points?.departure_latitude??null,longitude:points?.departure_longitude??null},
+          arrival:{name:points?.arrival_name??null,city:points?.arrival_city??null,landmark:points?.arrival_landmark??null,
+            latitude:points?.arrival_latitude??null,longitude:points?.arrival_longitude??null}};
       });
     },
     async verify(actor,input){

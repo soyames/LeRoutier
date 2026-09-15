@@ -131,8 +131,10 @@ export function parcels(db) {
       invariant(actor?.role === 'passenger' || actor?.role === 'ops', 'FORBIDDEN', 'Passenger or Ops access required.', 403);
       idempotencyKey(key);
       invariant(input && Object.keys(input).every(k => ['senderName', 'senderPhone', 'receiverName', 'receiverPhone', 'originStopId', 'destinationStopId',
-        'category', 'quantity', 'weightG', 'dimensions', 'declaredValueMinor', 'notes', 'paymentResponsibility', 'operatorId'].includes(k)),
+        'category', 'quantity', 'weightG', 'dimensions', 'declaredValueMinor', 'notes', 'paymentResponsibility', 'operatorId', 'consignmentPointId', 'pickupPointId'].includes(k)),
       'INVALID_PARCEL', 'Unexpected parcel fields.');
+      if (input.consignmentPointId) uuid(input.consignmentPointId);
+      if (input.pickupPointId) uuid(input.pickupPointId);
       const party = (name, phone) => {
         invariant(typeof name === 'string' && name.trim().length >= 2 && name.length <= 100, 'INVALID_PARCEL', 'Sender and receiver names are required.');
         invariant(typeof phone === 'string' && /^\+?[0-9 ()-]{6,25}$/.test(phone), 'INVALID_PARCEL', 'A valid sender/receiver phone is required.');
@@ -165,14 +167,23 @@ export function parcels(db) {
         if (prior) { invariant(prior.request_fingerprint === fingerprint, 'IDEMPOTENCY_CONFLICT', 'Key was used for a different request.', 409); return publicParcel(prior, await loadParties(tx, prior.id)); }
         const category = await one(tx, 'SELECT * FROM parcel_categories WHERE name=$1', [input.category]);
         invariant(category && category.accepted, 'RESTRICTED_CATEGORY', 'Cette catégorie de colis n’est pas acceptée pour le moment.', 409);
+        // Operational precision: parcel points reuse the canonical registry.
+        if (input.consignmentPointId) {
+          invariant(await one(tx, "SELECT id FROM boarding_points WHERE id=$1 AND status='verified' AND purposes @> '[\"parcel_consignment\"]'::jsonb", [input.consignmentPointId]),
+            'INVALID_POINT', 'Point de remise colis invalide.', 409);
+        }
+        if (input.pickupPointId) {
+          invariant(await one(tx, "SELECT id FROM boarding_points WHERE id=$1 AND status='verified' AND purposes @> '[\"parcel_pickup\"]'::jsonb", [input.pickupPointId]),
+            'INVALID_POINT', 'Point de retrait colis invalide.', 409);
+        }
         const carrier = await findCarrier(tx, input.originStopId, input.destinationStopId, actor?.role === 'ops' ? (input.operatorId ?? actor.operator_id) : input.operatorId ?? null);
         const rate = await rateFor(tx, { operatorId: carrier.operator_id, originStopId: input.originStopId, destinationStopId: input.destinationStopId, category: input.category, weightG: weightG ?? 0, declaredValueMinor: declaredValue ?? 0 });
         const number = await trackingNumber(tx);
         const row = await one(tx, `INSERT INTO parcels(tracking_number,operator_id,origin_stop_id,destination_stop_id,category,quantity,weight_g,dimensions,
-          declared_value_minor,notes,payment_responsibility,price_minor,status,idempotency_key,request_fingerprint,created_by,eta_at)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'created',$13,$14,$15,NULL) RETURNING *`,
+          declared_value_minor,notes,payment_responsibility,price_minor,status,idempotency_key,request_fingerprint,created_by,eta_at,consignment_point_id,pickup_point_id)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'created',$13,$14,$15,NULL,$16,$17) RETURNING *`,
         [number, carrier.operator_id, input.originStopId, input.destinationStopId, input.category, quantity, weightG, dimensions === null ? null : JSON.stringify(dimensions),
-          declaredValue, notes, responsibility, rate.amountMinor, key, fingerprint, actor.id]);
+          declaredValue, notes, responsibility, rate.amountMinor, key, fingerprint, actor.id, input.consignmentPointId ?? null, input.pickupPointId ?? null]);
         await tx.query('INSERT INTO parcel_parties(parcel_id,role,name,phone) VALUES($1,$2,$3,$4),($1,$5,$6,$7)',
           [row.id, 'sender', sender.name, sender.phone, 'receiver', receiver.name, receiver.phone]);
         await addEvent(tx, { parcelId: row.id, kind: 'created', actor, stopId: input.originStopId });
@@ -459,9 +470,12 @@ export function parcels(db) {
     async publicTracking(trackingNumberValue) {
       invariant(typeof trackingNumberValue === 'string' && /^LRP-[0-9A-F]{8}$/i.test(trackingNumberValue.trim()), 'NOT_FOUND', 'Tracking number not found.', 404);
       return db.transaction(async tx => {
-        const row = await one(tx, `SELECT p.*,op.name AS origin_city,dp.name AS destination_city
+        const row = await one(tx, `SELECT p.*,op.name AS origin_city,dp.name AS destination_city,
+          cbp.name AS consignment_name,cpp.name AS pickup_name,
+          cbp.description AS consignment_landmark,cpp.description AS pickup_landmark
           FROM parcels p JOIN stops o ON o.id=p.origin_stop_id JOIN stops d ON d.id=p.destination_stop_id
           JOIN places op ON op.id=o.place_id JOIN places dp ON dp.id=d.place_id
+          LEFT JOIN boarding_points cbp ON cbp.id=p.consignment_point_id LEFT JOIN boarding_points cpp ON cpp.id=p.pickup_point_id
           WHERE p.tracking_number=$1`, [trackingNumberValue.trim().toUpperCase()]);
         invariant(row, 'NOT_FOUND', 'Tracking number not found.', 404);
         const last = await one(tx, 'SELECT * FROM parcel_events WHERE parcel_id=$1 ORDER BY created_at DESC LIMIT 1', [row.id]);
@@ -476,6 +490,8 @@ export function parcels(db) {
           status: row.status,
           origin: { city: row.origin_city },
           destination: { city: row.destination_city },
+          consignmentPoint: row.consignment_name ? { name: row.consignment_name, landmark: row.consignment_landmark, city: row.origin_city } : null,
+          pickupPoint: row.pickup_name ? { name: row.pickup_name, landmark: row.pickup_landmark, city: row.destination_city } : null,
           lastMilestone: last ? { kind: last.kind, at: last.created_at } : null,
           pickupReady: row.status === 'ready_for_pickup',
           eta: row.eta_at,
