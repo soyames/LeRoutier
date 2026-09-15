@@ -32,26 +32,29 @@ flow (transaction + token), not the client-side Checkout.js integration.
 Verify live state without touching secrets:
 `GET /api/v1/payments/config` → `{available:true, payouts:{available:true}}`.
 
-## 1. Database schema
+## 1. Database schema — done (2026-09-16)
 
 Migrations are never applied automatically on deploy, and nothing below works
 until the production schema is current. `DATABASE_URL` is a **Sensitive**
 Vercel variable, so it cannot be pulled with the CLI — copy it from the Vercel
 or Neon dashboard into a git-ignored `.env.production.local` alongside
-`DATABASE_SCHEMA=leroutier`. See "Data routes return 503 after a deploy" in
-`RUNBOOKS.md` for the exact commands and the schema pitfall.
+`DATABASE_SCHEMA=leroutier`. Production and development share one Neon
+database and differ only by schema, so the schema *is* the environment. See
+"Data routes return 503 after a deploy" in `RUNBOOKS.md`.
 
-- [ ] `status.js` against production reports `No demo identities` (never run a
+- [x] `status.js` against production reports `No demo identities` (never run a
   migration against a target that reports demo identities — that is the
-  development database).
-- [ ] `migrate.js` reports "Migrations validated: 8".
-- [ ] `status.js` reports `8/8 applied; 0 declared table(s) absent`.
-- [ ] `pnpm smoke:prod` passes 10/10.
-- [ ] Delete `.env.production.local`.
+  development schema).
+- [x] `migrate.js` reports "Migrations validated: 9".
+- [x] `status.js` reports `9/9 applied; 0 declared table(s) absent`.
+- [x] `validate.js` passes replay, checksums and occupation invariants.
+- [x] `pnpm smoke:prod` passes 14/14.
+- [x] Delete `.env.production.local`.
 
-Applying migrations creates empty tables only. No operator, route, service,
-vehicle, driver, passenger or parcel is seeded — every row below is created
-through the real onboarding and Ops flows.
+Applying migrations created empty tables plus reference configuration only
+(6 parcel categories, 52 notification policies, 1 mobility provider). No
+operator, route, service, vehicle, driver, passenger or parcel was seeded —
+every row below is created through the real onboarding and Ops flows.
 
 ## 2. Auth provider setup
 

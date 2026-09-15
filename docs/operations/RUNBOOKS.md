@@ -89,8 +89,15 @@ reconciliation or an Ops-privileged, audited action.
 2. Obtain the production connection string. `DATABASE_URL` is marked
    **Sensitive** on the Vercel project, so it is write-only: `vercel env pull`
    and the REST API return `[SENSITIVE]`, never the value. Copy it from the
-   Vercel or Neon dashboard. Never guess it, and never assume the local value
-   is production.
+   Vercel or Neon dashboard. Never guess it.
+
+   > **Production and development share one Neon database.** They are separated
+   > only by `DATABASE_SCHEMA`: production is `leroutier`, local development is
+   > `leroutier_dev`, and automated tests create throwaway `lr_test_*` schemas
+   > in the same database. The connection string alone therefore tells you
+   > nothing about which environment you are touching — **the schema is the
+   > environment.** Always confirm with `status.js` before writing.
+
 3. Put it in a reviewed, git-ignored file — `.env.production.local` — holding
    **only** these two names:
 
@@ -102,31 +109,57 @@ reconciliation or an Ops-privileged, audited action.
    Do **not** reuse `--env-file=.env.local` with a shell override. A shell
    variable does win over `--env-file`, but `.env.local` also sets
    `DATABASE_SCHEMA=leroutier_dev`; overriding only `DATABASE_URL` would apply
-   the migrations to a `leroutier_dev` schema **on the production database**,
+   the migrations to a `leroutier_dev` schema instead of the production one,
    leaving the API (which reads `leroutier`) still broken. Production sets no
    `DATABASE_SCHEMA`, so it uses the `leroutier` default.
+
+   Prefer `DATABASE_URL_UNPOOLED` (the direct endpoint) for migrations; the
+   pooled URL reaches the same database and is what the API uses at runtime.
 4. Confirm the target before writing anything. `db:status` is read-only and
    prints no connection string, host or credential:
 
    `node --env-file=.env.production.local packages/database/scripts/status.js`
 
-   Production must report `No demo identities` and list 005–008 as `Pending`.
-   If it reports `Demo identities present`, it is the development database —
-   stop.
+   Production must report `No demo identities` and list the pending migrations.
+   If it reports `Demo identities present`, you are pointed at the development
+   schema — stop and fix `DATABASE_SCHEMA`.
+
+   Cross-check against the live API, which is an independent signal: before
+   migrating, `GET /api/v1/routes` returns `200 []` while a route backed by a
+   missing table returns 503. Afterwards the 503 becomes a proper 404.
 5. Apply, then re-check:
 
    `node --env-file=.env.production.local packages/database/scripts/migrate.js`
 
    The runner reports "Migrations validated: N", takes an advisory lock, runs
    in one transaction, verifies checksums of applied files and is replay-safe:
-   reruns are no-ops. Re-run the `status.js` command; it must report `8/8
-   applied; 0 declared table(s) absent`. Then `pnpm smoke:prod` (10/10).
+   reruns are no-ops. Re-run the `status.js` command; it must report `9/9
+   applied; 0 declared table(s) absent`. Optionally run `validate.js`, which
+   replays the migrations, re-verifies checksums and checks the seat-occupation
+   invariants. Then `pnpm smoke:prod` (14/14).
 6. Delete `.env.production.local` when finished.
-7. Current migrations: 001–008. Applying them creates empty tables only —
-   production business data is created solely through the real onboarding and
-   Ops flows, never by a seed.
+7. Current migrations: 001–009, all applied in production as of 2026-09-16.
+   Applying them creates empty tables plus reference configuration only —
+   parcel categories, notification policies and the mobility provider row.
+   Production business data is created solely through the real onboarding and
+   Ops flows, never by a seed. `seed()` refuses any schema that is not
+   `*_dev` or `lr_test_*`, so production cannot be seeded by accident.
 8. New deployments must come from git pushes (`main`). Manual dashboard
    deploys of the API project can ship stale source.
+
+## Leftover `lr_test_*` schemas
+
+`pnpm test:database` and `pnpm test:live` create a throwaway schema per run and
+drop it on completion — **in the same Neon database as production.** An
+interrupted run leaves its schema behind. They hold only fixture data and are
+safe to drop, but they are on the production instance, so treat removal as a
+deliberate maintenance action rather than routine cleanup:
+
+```sql
+SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'lr\_test\_%';
+```
+
+Never drop `leroutier` (production) or `leroutier_dev` (development).
 
 ## Auth outage (OIDC unavailable)
 
