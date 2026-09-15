@@ -21,6 +21,11 @@ export function Dashboard(){
   const payouts=useApi(user?'/ops/payouts':null),approvals=useApi(user?'/agent/approvals':null);
   const diagnostics=useApi(user?'/ops/diagnostics':null);
   const rateRules=useApi(user?'/ops/parcel-rate-rules':null);
+  const operatorsList=useApi(user && !user.operator_id?'/operators':null);
+  const proposals=useApi(user && !user.operator_id?'/boarding-points?includeProposed=true':null);
+  const points=useApi(user?'/boarding-points':null);
+  const operatorPayouts=useApi(user?'/ops/operator-payouts':null);
+  const [stationName,setStationName]=useState(''),[stationPoint,setStationPoint]=useState('');
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[reference,setReference]=useState(''),[notice,setNotice]=useState('');
   const [parcelQ,setParcelQ]=useState(''),[parcelsList,setParcelsList]=useState(null),[assignments,setAssignments]=useState({});
   const [ruleBase,setRuleBase]=useState(''),[rulePerKg,setRulePerKg]=useState(''),[ruleBp,setRuleBp]=useState('');
@@ -102,5 +107,25 @@ export function Dashboard(){
       <label>Valeur déclarée (‱)<input className="control" type="number" min={0} value={ruleBp} onChange={e=>setRuleBp(e.target.value)}/></label>
       <button className="btn btn-soft" disabled={busy || !online || ruleBase===''} onClick={()=>act('/ops/parcel-rate-rules',{baseMinor:Number(ruleBase),perKgMinor:Number(rulePerKg||0),declaredValueBp:Number(ruleBp||0)},'POST','rule-'+crypto.randomUUID())}>Ajouter la règle</button>
     </div></Card>
+    {user && !user.operator_id && <><SectionTitle icon={ShieldCheck} title="Vérification des opérateurs"/>
+    {operatorsList.loading || operatorsList.error || !operatorsList.data?.length ? <ApiState resource={operatorsList} empty="Aucun opérateur enregistré."/> : operatorsList.data.map(o=><Card key={o.id} className="between wrap"><div className="stack"><h3>{o.name}</h3><span className="small muted">{o.type==='independent'?'Indépendant':'Compagnie'} · {o.verification_status} · {new Date(o.created_at).toLocaleDateString('fr-FR')}</span></div>
+      <div className="controls">{o.verification_status!=='verified' && <button className="btn btn-primary" disabled={busy || !online} onClick={()=>act(`/operators/${o.id}/verification`,{decision:'verified'})}>Vérifier</button>}
+      {['pending_verification','verified'].includes(o.verification_status) && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>act(`/operators/${o.id}/verification`,{decision:'suspended'})}>Suspendre</button>}
+      {o.verification_status==='pending_verification' && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>act(`/operators/${o.id}/verification`,{decision:'rejected'})}>Refuser</button>}</div></Card>)}
+    <SectionTitle icon={Package} title="Points d’embarquement proposés"/>
+    {proposals.loading || proposals.error ? <ApiState resource={proposals}/> : (proposals.data||[]).filter(p=>p.status==='proposed').length===0 ? <ApiState resource={proposals} empty="Aucune proposition en attente."/> : proposals.data.filter(p=>p.status==='proposed').map(p=><Card key={p.id} className="between wrap"><div className="stack"><h3>{p.name}</h3><span className="small muted">{p.city} · {p.type} · {p.description||''}</span></div>
+      <div className="controls"><button className="btn btn-primary" disabled={busy || !online} onClick={()=>act(`/boarding-points/${p.id}/moderate`,{decision:'verified'})}>Approuver</button>
+      <button className="btn btn-soft" disabled={busy || !online} onClick={()=>act(`/boarding-points/${p.id}/moderate`,{decision:'rejected'})}>Refuser</button></div></Card>)}
+    </>}
+    {user && user.operator_id && <Card className="stack"><SectionTitle icon={Package} title="Station de l’opérateur"/>
+      <div className="between wrap">
+        <label className="grow">Nom de la station<input className="control" value={stationName} onChange={e=>setStationName(e.target.value)}/></label>
+        <label className="grow">Lieu vérifié<select className="control" value={stationPoint} onChange={e=>setStationPoint(e.target.value)}><option value="">Choisir…</option>{(points.data||[]).filter(p=>p.status==='verified').map(p=><option key={p.id} value={p.id}>{p.name} · {p.city}</option>)}</select></label>
+        <button className="btn btn-primary" disabled={busy || !online || !stationName.trim() || !stationPoint} onClick={()=>act(`/operators/${user.operator_id}/stations`,{name:stationName.trim(),boardingPointId:stationPoint,purposes:['passenger_boarding','passenger_alighting']})}>Créer la station</button>
+      </div></Card>}
+    <SectionTitle icon={WalletCards} title="Retraits opérateurs (indépendants)"/>
+    {operatorPayouts.loading || operatorPayouts.error || !operatorPayouts.data?.length ? <ApiState resource={operatorPayouts} empty="Aucun retrait opérateur."/> : operatorPayouts.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.operatorName} · {p.amountMinor.toLocaleString('fr-FR')} FCFA</h3><Badge tone={payoutTones[p.status]}>{payoutLabels[p.status]}</Badge></div><span className="small muted">{new Date(p.createdAt).toLocaleString('fr-FR')} · {p.phoneNumber} · {p.operatorType}</span></div>
+      <div className="controls">{(p.status==='requested'||p.status==='failed') && <button className="btn btn-primary" disabled={busy || !online} onClick={()=>act(`/ops/operator-payouts/${p.id}/approve`)}>{p.status==='failed'?'Relancer':'Valider et envoyer'}</button>}
+      {p.status==='processing' && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>act(`/ops/operator-payouts/${p.id}/reconcile`)}>Vérifier auprès du prestataire</button>}</div></Card>)}
   </>;
 }
