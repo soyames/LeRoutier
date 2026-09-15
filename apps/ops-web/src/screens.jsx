@@ -19,11 +19,12 @@ export function Dashboard(){
   const [paymentStatus,setPaymentStatus]=useState('failed');
   const payments=useApi(user?`/ops/payments?status=${paymentStatus}`:null);
   const payouts=useApi(user?'/ops/payouts':null),approvals=useApi(user?'/agent/approvals':null);
+  const diagnostics=useApi(user?'/ops/diagnostics':null);
   const rateRules=useApi(user?'/ops/parcel-rate-rules':null);
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[reference,setReference]=useState(''),[notice,setNotice]=useState('');
   const [parcelQ,setParcelQ]=useState(''),[parcelsList,setParcelsList]=useState(null),[assignments,setAssignments]=useState({});
   const [ruleBase,setRuleBase]=useState(''),[rulePerKg,setRulePerKg]=useState(''),[ruleBp,setRuleBp]=useState('');
-  async function act(path,body,method='POST',key=undefined){setBusy(true);setError('');setNotice('');try{await request(path,{method,body,key});fleet.reload();incidents.reload();bookings.reload();payments.reload();payouts.reload();approvals.reload();rateRules.reload();if(parcelsList!==null)setParcelsList(await request('/ops/parcels?q='+encodeURIComponent(parcelQ)));setNotice('Action enregistrée.');}catch(e){setError(e.message);}finally{setBusy(false);}}
+  async function act(path,body,method='POST',key=undefined){setBusy(true);setError('');setNotice('');try{await request(path,{method,body,key});fleet.reload();incidents.reload();bookings.reload();payments.reload();payouts.reload();approvals.reload();rateRules.reload();diagnostics.reload();if(parcelsList!==null)setParcelsList(await request('/ops/parcels?q='+encodeURIComponent(parcelQ)));setNotice('Action enregistrée.');}catch(e){setError(e.message);}finally{setBusy(false);}}
   async function searchParcels(e){e.preventDefault();setError('');try{setParcelsList(await request('/ops/parcels?q='+encodeURIComponent(parcelQ)));}catch(e){setError(e.message);}}
   const services=fleet.data?.services || [],vehicles=fleet.data?.vehicles || [];
   return <>
@@ -52,6 +53,24 @@ export function Dashboard(){
     {payouts.loading || payouts.error || !payouts.data?.length ? <ApiState resource={payouts} empty="Aucun versement demandé."/> : payouts.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.driverName} · {p.amountMinor.toLocaleString('fr-FR')} {p.currency}</h3><Badge tone={payoutTones[p.status]}>{payoutLabels[p.status]}</Badge></div><span className="small muted">{new Date(p.createdAt).toLocaleString('fr-FR')} · destination {p.destinationPhone} · réf. prestataire {p.provider_reference ?? '—'}</span></div>
       <div className="controls">{(p.status==='requested'||p.status==='failed') && <button className="btn btn-primary" disabled={busy || !online} onClick={()=>act(`/ops/payouts/${p.id}/approve`)}>{p.status==='failed'?'Relancer le versement':'Valider et envoyer'}</button>}
       {p.status==='processing' && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>act(`/ops/payouts/${p.id}/reconcile`)}>Vérifier auprès du prestataire</button>}</div></Card>)}
+    <SectionTitle icon={ShieldAlert} title="Diagnostics opérationnels"/>
+    {diagnostics.loading || diagnostics.error || !diagnostics.data ? <ApiState resource={diagnostics} empty="Diagnostics indisponibles."/> : <>
+      <div className="kpi-scroll">
+        <StatCard label="Paiements échoués" value={diagnostics.data.payments.failed} icon={WalletCards} tone="danger"/>
+        <StatCard label="Versements échoués" value={diagnostics.data.payouts.failed} icon={WalletCards} tone="danger"/>
+        <StatCard label="Incidents ouverts" value={diagnostics.data.incidents.open} icon={ShieldAlert}/>
+        <StatCard label="Suivi véhicule obsolète" value={diagnostics.data.services.staleTracking} icon={BusFront} tone={diagnostics.data.services.staleTracking?'warning':'default'}/>
+        <StatCard label="Anomalies paiement (7j)" value={diagnostics.data.payments.anomalies7d} icon={WalletCards} tone={diagnostics.data.payments.anomalies7d?'danger':'default'}/>
+        <StatCard label="Workflows échoués" value={diagnostics.data.workflows.failed} icon={ShieldCheck} tone={diagnostics.data.workflows.failed?'danger':'default'}/>
+        <StatCard label="Exceptions colis" value={diagnostics.data.parcels.openExceptions} icon={Package} tone={diagnostics.data.parcels.openExceptions?'warning':'default'}/>
+        <StatCard label="Colis non retirés (24h+)" value={diagnostics.data.parcels.uncollected} icon={Package} tone={diagnostics.data.parcels.uncollected?'warning':'default'}/>
+      </div>
+      {diagnostics.data.workflows.failedRuns.length>0 && <Card className="stack"><h3>Workflows en échec</h3>
+        {diagnostics.data.workflows.failedRuns.map(run=><div className="between wrap" key={run.id}><span className="small">{run.workflow} · {run.step}{run.failure_code?` · ${run.failure_code}`:''} · tentative {run.attempts}/3</span>
+          <button className="btn btn-soft" disabled={busy || !online || run.attempts>=3} onClick={()=>act(`/workflows/${run.id}/retry`)}>Relancer</button></div>)}
+      </Card>}
+      {diagnostics.data.fedapay && <p className="small muted">FedaPay : collections {diagnostics.data.fedapay.collections?'actives':'indisponibles'} · versements {diagnostics.data.fedapay.payouts?'configurés':'non configurés'}{diagnostics.data.fedapay.environment?` · ${diagnostics.data.fedapay.environment}`:''}</p>}
+    </>}
     <SectionTitle icon={ShieldCheck} title="Approbations agentiques"/>
     {approvals.loading || approvals.error || !approvals.data?.length ? <ApiState resource={approvals} empty="Aucune approbation en attente."/> : approvals.data.map(a=><Card key={a.id} className="stack"><div className="between"><h3>{a.workflow} · {a.action}</h3><Badge tone="warning">approbation requise</Badge></div><p className="small muted">{a.rationale}</p><div className="controls"><button className="btn btn-primary" disabled={busy || !online} onClick={()=>act(`/agent/approvals/${a.id}`,{decision:'approved'})}>Approuver</button><button className="btn btn-soft" disabled={busy || !online} onClick={()=>act(`/agent/approvals/${a.id}`,{decision:'rejected'})}>Refuser</button></div></Card>)}
     <SectionTitle icon={Package} title="Colis & fret"/>
