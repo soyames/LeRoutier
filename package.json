@@ -19,6 +19,7 @@
     "db:validate": "node --env-file=.env.local packages/database/scripts/validate.js",
     "db:bootstrap": "node --env-file=.env.local packages/database/scripts/bootstrap.js",
     "secrets:check": "node scripts/check-secrets.mjs",
+    "smoke:prod": "node scripts/prod-smoke.mjs",
     "test:live": "node --env-file=.env.local scripts/test-live.mjs"
   },
   "engines": {
