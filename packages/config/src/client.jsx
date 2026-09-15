@@ -8,13 +8,14 @@ export function ApiProvider({baseUrl='',role,children}) {
   const [callbackUrl]=useState(()=>window.location.pathname==='/auth/callback'?window.location.href:null);
   const [callbackPending,setCallbackPending]=useState(!!callbackUrl);
   const online=useSyncExternalStore(subscribe,()=>navigator.onLine,()=>true),base=baseUrl.replace(/\/$/,'');
+  // All API calls use the versioned transport (/api/v1); the domain stays shared.
   const request=useCallback(async(path,{method='GET',body=undefined,key=undefined,signal=undefined,token=session?.token}={})=>{
     if(!base) throw new Error('API non configurée.');
     if(!navigator.onLine) throw new Error('Hors ligne. Réessayez après reconnexion.');
-    const response=await fetch(base+path,{method,signal,cache:'no-store',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{}),...(key?{'idempotency-key':key}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+    const response=await fetch(base+'/api/v1'+path,{method,signal,cache:'no-store',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{}),...(key?{'idempotency-key':key}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
     let payload;
     try { payload=await response.json(); } catch { throw new Error('Le service est indisponible.'); }
-    if(!response.ok){if(response.status===401 && token)setSession(null);throw new Error(payload.error?.message || 'Le service est indisponible.');}
+    if(!response.ok){if(response.status===401 && token)setSession(null);throw Object.assign(new Error(payload.error?.message || 'Le service est indisponible.'),{status:response.status,code:payload.error?.code});}
     return payload.data;
   },[base,session?.token]);
   useEffect(()=>{
@@ -22,7 +23,7 @@ export function ApiProvider({baseUrl='',role,children}) {
     async function initialize(){
       try {
         if(!base)throw new Error();
-        const response=await fetch(base+'/auth/config',{cache:'no-store'});
+        const response=await fetch(base+'/api/v1/auth/config',{cache:'no-store'});
         if(!response.ok)throw new Error();
         const {data}=await response.json(),client=oidcClient(base,data.oidc);
         if(cancelled)return;
@@ -30,7 +31,7 @@ export function ApiProvider({baseUrl='',role,children}) {
         if(callbackUrl){
           if(!client)throw new Error();
           const identity=await finishSignin(client,callbackUrl);
-          const me=await fetch(base+'/me',{cache:'no-store',headers:{authorization:'Bearer '+identity.access_token}});
+          const me=await fetch(base+'/api/v1/me',{cache:'no-store',headers:{authorization:'Bearer '+identity.access_token}});
           if(!me.ok){await client.manager.removeUser();throw new Error();}
           const {data:user}=await me.json();
           if(!cancelled)setSession({token:identity.access_token,user});
@@ -58,6 +59,7 @@ export function ApiProvider({baseUrl='',role,children}) {
     setSession(await request('/auth/demo',{method:'POST',body:{role}}));
   },[request,role,auth.demoLogin]);
   const logout=useCallback(async()=>{
+    window.dispatchEvent(new Event('leroutier:logout'));
     setSession(null);
     if(auth.client){
       await auth.client.manager.removeUser();
