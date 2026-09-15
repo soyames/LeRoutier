@@ -27,4 +27,14 @@ export async function mockApi(page) {
   await page.route('**/driver/earnings',r=>r.fulfill({json:{data:{summary:{available:0,reserved:0,paid:0,reversed:0,currency:'XOF'},entries:[]}}}));
   await page.route('**/driver/payouts',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/driver/payout-destinations',r=>r.fulfill({json:{data:[]}}));
+  // Parcel logistics (API routes only — navigation URLs must never be mocked)
+  await page.route('**/api/v1/me/parcels',r=>r.fulfill({json:{data:[{id:id(50),trackingNumber:'LRP-12345678',category:'documents',quantity:1,weightG:null,priceMinor:1000,status:'created',paymentResponsibility:'sender',createdAt:'2026-09-15T00:00:00Z',originStopId:id(200),destinationStopId:id(201)}]}}));
+  await page.route('**/api/v1/parcels/quote*',r=>r.fulfill({json:{data:{amountMinor:1000,currency:'XOF',operatorName:'Opérateur démo'}}}));
+  await page.route('**/api/v1/public/parcel-tracking/*',r=>r.fulfill({json:{data:{trackingNumber:'LRP-12345678',status:'in_transit',origin:{city:'Cotonou'},destination:{city:'Parakou'},lastMilestone:{kind:'departed',at:'2026-09-15T10:00:00Z'},pickupReady:false,eta:null,location:{latitude:7.18,longitude:2.11,observedAt:'2026-09-15T10:30:00Z',derivedFromVehicle:true},updatedAt:'2026-09-15T10:30:00Z'}}}));
+  await page.route('**/api/v1/parcels',r=>r.fulfill({json:{data:{id:id(50),trackingNumber:'LRP-12345678',category:'documents',quantity:1,priceMinor:1000,status:'created',paymentResponsibility:'sender',createdAt:'2026-09-15T00:00:00Z'}}}));
+  await page.route('**/api/v1/parcels/*/label',r=>r.fulfill({json:{data:{trackingNumber:'LRP-12345678',token:'LRP1.fixture',barcode:'LRP-12345678',version:1}}}));
+  await page.route('**/api/v1/parcels/*/scan',r=>r.fulfill({json:{data:{id:id(50),trackingNumber:'LRP-12345678',status:'loaded'}}}));
+  await page.route('**/api/v1/driver/parcels',r=>r.fulfill({json:{data:[{id:id(50),trackingNumber:'LRP-12345678',category:'documents',quantity:1,status:'manifested',originCity:'Cotonou',destinationCity:'Parakou',notes:null}]}}));
+  await page.route('**/api/v1/ops/parcels*',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/ops/parcel-rate-rules',r=>r.fulfill({json:{data:[]}}));
 }
