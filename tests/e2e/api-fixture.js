@@ -4,29 +4,29 @@ const service={id:id(30),route_name:'DEMO Cotonou → Parakou',operator_name:'Op
   availability:{origin:0,destination:3,available:12,capacity:12,stops,fare:{amountMinor:7500,currency:'XOF'},segments:[0,1,2].map(sequence=>({sequence,available:12,occupied:0}))}};
 export async function mockApi(page) {
   const token=role=>`fixture-session-${role}`;
-  await page.route('**/auth/config',r=>r.fulfill({json:{data:{demoLogin:true}}}));
-  await page.route('**/auth/demo',r=>r.fulfill({json:{data:{token:token(r.request().postDataJSON().role),user:{id:id(2),role:r.request().postDataJSON().role,display_name:'Compte Démo'}}}}));
-  await page.route('**/me',r=>{const role=(r.request().headers()['authorization']||'').replace('Bearer ','').split('-').at(-1)||'passenger';
+  await page.route('**/api/v1/auth/config',r=>r.fulfill({json:{data:{demoLogin:true}}}));
+  await page.route('**/api/v1/auth/demo',r=>r.fulfill({json:{data:{token:token(r.request().postDataJSON().role),user:{id:id(2),role:r.request().postDataJSON().role,display_name:'Compte Démo'}}}}));
+  await page.route('**/api/v1/me',r=>{const role=(r.request().headers()['authorization']||'').replace('Bearer ','').split('-').at(-1)||'passenger';
     return r.fulfill({json:{data:{id:id(2),role,display_name:'Compte Démo',operator_id:role==='passenger'?null:id(1)}}});});
-  await page.route('**/routes',r=>r.fulfill({json:{data:[{id:id(10),stops}]}}));
-  await page.route('**/stops',r=>r.fulfill({json:{data:stops}}));
-  await page.route('**/services?*',r=>r.fulfill({json:{data:[service]}}));
-  await page.route('**/me/bookings',r=>r.fulfill({json:{data:[]}}));
-  await page.route('**/driver/service',r=>r.fulfill({json:{data:service}}));
-  await page.route('**/services/*/manifest',r=>r.fulfill({json:{data:[]}}));
-  await page.route('**/ops/fleet',r=>r.fulfill({json:{data:{services:[service],vehicles:[{id:id(20),registration:'DEMO-BUS-01',capacity:12,status:'active'}]}}}));
-  await page.route('**/ops/bookings',r=>r.fulfill({json:{data:[]}}));
-  await page.route('**/ops/provisioning',r=>r.fulfill({json:{data:{operators:[],users:[],routes:[],vehicles:[],places:[],stops:[]}}}));
-  await page.route('**/incidents',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/routes',r=>r.fulfill({json:{data:[{id:id(10),stops}]}}));
+  await page.route('**/api/v1/stops',r=>r.fulfill({json:{data:stops}}));
+  await page.route('**/api/v1/services?*',r=>r.fulfill({json:{data:[service]}}));
+  await page.route('**/api/v1/me/bookings',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/driver/service',r=>r.fulfill({json:{data:service}}));
+  await page.route('**/api/v1/services/*/manifest',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/ops/fleet',r=>r.fulfill({json:{data:{services:[service],vehicles:[{id:id(20),registration:'DEMO-BUS-01',capacity:12,status:'active'}]}}}));
+  await page.route('**/api/v1/ops/bookings',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/ops/provisioning',r=>r.fulfill({json:{data:{operators:[],users:[],routes:[],vehicles:[],places:[],stops:[]}}}));
+  await page.route('**/api/v1/incidents',r=>r.fulfill({json:{data:[]}}));
   // FedaPay / payouts / agentic Ops sections
-  await page.route('**/payments/config',r=>r.fulfill({json:{data:{available:true}}}));
-  await page.route('**/ops/payments*',r=>r.fulfill({json:{data:[]}}));
-  await page.route('**/ops/payouts',r=>r.fulfill({json:{data:[]}}));
-  await page.route('**/agent/approvals',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/payments/config',r=>r.fulfill({json:{data:{available:true}}}));
+  await page.route('**/api/v1/ops/payments*',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/ops/payouts',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/agent/approvals',r=>r.fulfill({json:{data:[]}}));
   // Driver earnings/payouts
-  await page.route('**/driver/earnings',r=>r.fulfill({json:{data:{summary:{available:0,reserved:0,paid:0,reversed:0,currency:'XOF'},entries:[]}}}));
-  await page.route('**/driver/payouts',r=>r.fulfill({json:{data:[]}}));
-  await page.route('**/driver/payout-destinations',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/driver/earnings',r=>r.fulfill({json:{data:{summary:{available:0,reserved:0,paid:0,reversed:0,currency:'XOF'},entries:[]}}}));
+  await page.route('**/api/v1/driver/payouts',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/driver/payout-destinations',r=>r.fulfill({json:{data:[]}}));
   // Ops diagnostics
   await page.route('**/api/v1/ops/diagnostics',r=>r.fulfill({json:{data:{database:'ok',fedapay:{collections:true,payouts:true,environment:'live'},payments:{failed:0,anomalies7d:0},payouts:{failed:0,processing:0},incidents:{open:0},services:{staleTracking:0},workflows:{failed:0,awaitingApproval:0,failedRuns:[]},parcels:{openExceptions:0,uncollected:0,readyForPickup:0}}}}));
   // Onboarding & locations
@@ -44,4 +44,49 @@ export async function mockApi(page) {
   await page.route('**/api/v1/driver/parcels',r=>r.fulfill({json:{data:[{id:id(50),trackingNumber:'LRP-12345678',category:'documents',quantity:1,status:'manifested',originCity:'Cotonou',destinationCity:'Parakou',notes:null}]}}));
   await page.route('**/api/v1/ops/parcels*',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/api/v1/ops/parcel-rate-rules',r=>r.fulfill({json:{data:[]}}));
+  // Notifications, first/last mile and journey timeline. The provider is an
+  // external suggestion: the fixture mirrors the API's honest flags exactly.
+  await page.route('**/api/v1/notifications/preferences',r=>r.fulfill({json:{data:{
+    channels:[{channel:'in_app',available:true},{channel:'web_push',available:false},{channel:'sms',available:false},{channel:'whatsapp',available:false},{channel:'email',available:false}],
+    categories:[
+      {category:'critical',locked:true,channels:[{channel:'in_app',enabled:true},{channel:'sms',enabled:true}]},
+      {category:'operational',locked:false,channels:[{channel:'in_app',enabled:true},{channel:'sms',enabled:true}]},
+      {category:'marketing',locked:false,channels:[{channel:'in_app',enabled:true},{channel:'sms',enabled:true}]},
+    ]}}}));
+  await page.route('**/api/v1/notifications/*/read',r=>r.fulfill({json:{data:{id:id(60),read:true}}}));
+  await page.route('**/api/v1/notifications*',r=>r.fulfill({json:{data:[
+    {id:id(60),eventType:'service.rescheduled',category:'critical',severity:'warning',template:'service_delayed',
+      data:{serviceId:id(30),departureAt:'2026-09-16T08:00:00Z'},entityType:'service',entityId:id(30),read:false,
+      createdAt:'2026-09-15T12:00:00Z',channels:{in_app:'pending',sms:'unavailable'}},
+    {id:id(61),eventType:'booking.held',category:'operational',severity:'info',template:'booking_created',
+      data:{bookingId:id(40)},entityType:'booking',entityId:id(40),read:true,
+      createdAt:'2026-09-15T11:00:00Z',channels:{in_app:'sent'}},
+  ]}}));
+  await page.route('**/api/v1/mobility/providers*',r=>r.fulfill({json:{data:[{id:'gozem',name:'Gozem',country:'BJ',
+    capabilities:['first_mile','last_mile'],integrationStatus:'suggested_external',handoff:'external_link',
+    launchUrl:'https://gozem.co',booksRide:false,providesFareEstimate:false,providesEta:false}]}}));
+  await page.route('**/api/v1/mobility/handoff',r=>r.fulfill({json:{data:{id:id(70),leg:'first_mile',kind:'handoff_clicked',recordedAt:'2026-09-15T12:00:00Z',rideCompleted:false}}}));
+  const provider={id:'gozem',name:'Gozem',integrationStatus:'suggested_external',handoff:'external_link',
+    launchUrl:'https://gozem.co',booksRide:false,providesFareEstimate:false,providesEta:false};
+  const departurePoint={name:'Gare de Jonquet',city:'Cotonou',landmark:'En face du marché',latitude:6.3654,longitude:2.4183,
+    directionsUrl:'https://www.openstreetmap.org/?mlat=6.3654&mlon=2.4183#map=17/6.3654/2.4183'};
+  await page.route('**/api/v1/journeys/*/timeline*',r=>r.fulfill({json:{data:{
+    bookingId:id(40),serviceId:id(30),status:'confirmed',serviceStatus:'scheduled',operatorName:'Opérateur démo',
+    departurePoint,arrivalPoint:null,
+    plan:{departureAt:'2026-09-16T07:30:00Z',arrivalAt:null,arrivalScheduled:false,boardingOpensAt:'2026-09-16T07:10:00Z',
+      boardingClosesAt:'2026-09-16T07:25:00Z',beThereBy:'2026-09-16T07:15:00Z',leaveBy:'2026-09-16T06:40:00Z',
+      travelMinutes:25,safetyBufferMinutes:10,travelSource:'policy_default',estimated:true},
+    steps:[
+      {key:'booking_created',state:'done',at:'2026-09-15T11:00:00Z'},
+      {key:'payment',state:'done',at:null},
+      {key:'ticket_ready',state:'done',at:null},
+      {key:'leave_for_boarding_point',state:'advice',at:'2026-09-16T06:40:00Z',estimated:true},
+      {key:'boarding_opens',state:'upcoming',at:'2026-09-16T07:10:00Z',estimated:true},
+      {key:'departure',state:'upcoming',at:'2026-09-16T07:30:00Z'},
+      {key:'arrival',state:'upcoming',at:null,scheduled:false},
+    ],
+    firstMile:{optional:true,boardingPoint:departurePoint,provider,directionsUrl:departurePoint.directionsUrl,
+      leaveBy:'2026-09-16T06:40:00Z',travelMinutes:25,travelSource:'policy_default',estimated:true},
+    lastMile:{optional:true,arrivalPoint:null,provider,directionsUrl:null,available:false},
+  }}}));
 }

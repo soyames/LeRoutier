@@ -4,14 +4,17 @@ import { Logo } from './logo.jsx';
 /**
  * @typedef {import('react').ReactNode} ReactNode
  * @typedef {import('lucide-react').LucideIcon} Icon
- * @param {{ role: string, title: string, subtitle?: string, nav?: { id: string, label: string, icon: Icon }[], active?: string, onNavigate?: (id: string) => void, children: ReactNode, online?: boolean, actions?: ReactNode }} props
+ * @param {{ role: string, title: string, subtitle?: string, nav?: { id: string, label: string, icon: Icon }[], active?: string, onNavigate?: (id: string) => void, children: ReactNode, online?: boolean, actions?: ReactNode, onNotifications?: () => void, unread?: number }} props
  */
-export function AppShell({ role, title, subtitle, nav = [], active, onNavigate, children, online = true, actions }) {
+export function AppShell({ role, title, subtitle, nav = [], active, onNavigate, children, online = true, actions, onNotifications, unread = 0 }) {
   return <div className="lr-app">
     <header className="lr-header">
       <div className="lr-header-main">
         <div className="lr-brand-wrap"><Logo className="lr-logo"/><div className="lr-page-title"><strong>{title}</strong><span>{subtitle || role}</span></div></div>
-        <div className="lr-header-actions"><Badge tone={online ? 'success' : 'neutral'}>{online ? <Wifi size={14}/> : <WifiOff size={14}/>} {online ? 'En ligne' : 'Hors-ligne'}</Badge>{actions}<button className="icon-btn" aria-label="Notifications"><Bell size={19}/></button><div className="avatar">LR</div></div>
+        <div className="lr-header-actions"><Badge tone={online ? 'success' : 'neutral'}>{online ? <Wifi size={14}/> : <WifiOff size={14}/>} {online ? 'En ligne' : 'Hors-ligne'}</Badge>{actions}
+          <button className="icon-btn" aria-label={unread > 0 ? `Notifications (${unread} non lues)` : 'Notifications'} onClick={onNotifications} disabled={!onNotifications}>
+            <Bell size={19}/>{unread > 0 && <span className="icon-badge" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>}
+          </button><div className="avatar">LR</div></div>
       </div>
       <div className="lr-role-strip"><span>{role}</span><small>LeRoutier · mobilité interurbaine</small></div>
     </header>

@@ -12,9 +12,9 @@
   },
   "dependencies": {
     "@leroutier/config": "workspace:*",
+    "@leroutier/screens": "workspace:*",
     "@leroutier/ui": "workspace:*",
     "lucide-react": "catalog:",
-    "qr-scanner": "^1.4.2",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-router": "catalog:"

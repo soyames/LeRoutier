@@ -37,7 +37,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [passenger-web, driver-web, ops-web]
+        # web is the canonical unified PWA; the other three stay until retired.
+        app: [web, passenger-web, driver-web, ops-web]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
