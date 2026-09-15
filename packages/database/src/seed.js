@@ -28,6 +28,8 @@ export async function seed(db, { capacity = 12 } = {}) {
     await tx.query('INSERT INTO service_stops(service_id,sequence,stop_id) SELECT $1,sequence,stop_id FROM route_stops WHERE route_id=$2', [demo.service,demo.route]);
     await tx.query('INSERT INTO service_segments(service_id,sequence,fare_minor) SELECT $1,sequence,fare_to_next FROM route_stops WHERE route_id=$2 AND sequence<3', [demo.service,demo.route]);
     await tx.query('INSERT INTO service_seats(service_id,seat_number) SELECT $1,generate_series(1,$2::integer)',[demo.service,capacity]);
+    // Demo parcel pricing fixture: explicit operator-configured rate rule only.
+    await tx.query('INSERT INTO parcel_rate_rules(operator_id,base_minor,per_kg_minor,declared_value_bp) VALUES($1,1000,500,0) ON CONFLICT DO NOTHING',[demo.operator]);
   });
   return demo;
 }
