@@ -33,7 +33,9 @@
     "db:bootstrap": "node --env-file=.env.local packages/database/scripts/bootstrap.js",
     "secrets:check": "node scripts/check-secrets.mjs",
     "smoke:prod": "node scripts/prod-smoke.mjs",
-    "test:live": "node --env-file=.env.local scripts/test-live.mjs"
+    "test:live": "node --env-file=.env.local scripts/test-live.mjs",
+    "release:check": "node scripts/release-check.mjs",
+    "docs:check": "node scripts/check-docs.mjs"
   },
   "engines": {
     "node": ">=22.13.0"
