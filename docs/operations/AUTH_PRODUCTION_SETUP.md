@@ -83,6 +83,102 @@ Two supported shapes:
 If sign-in succeeds in the browser but `/api/v1/me` returns 401, the access
 token audience does not match `AUTH_AUDIENCE`. That is the first thing to check.
 
+**A multi-valued `aud` is fine.** The verifier matches by membership, so a token
+whose `aud` is an array is accepted as long as `AUTH_AUDIENCE` is one of its
+values. Covered by test.
+
+## ZITADEL
+
+The selected production provider. Everything below is from ZITADEL's own
+documentation; nothing here is a guess, and no value is invented.
+
+### Create the application
+
+In the ZITADEL Console, inside your project: **Applications → New**.
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Type | **User Agent** | ZITADEL's SPA type — browser-only, **no client secret** |
+| Authentication method | **PKCE** | Authorization Code + PKCE, which is what the client already does |
+| Redirect URI | `https://le-routier.vercel.app/auth/callback` | exact; no wildcards |
+| Post-logout URI | `https://le-routier.vercel.app/` | exact |
+| **Token Settings → Token Type** | **JWT** | ⚠️ **the setting that matters most** |
+
+> If ZITADEL asks you for a **client secret**, the application was created as
+> the wrong type. A User Agent app has none. Stop and recreate it.
+
+**Why the token type matters.** ZITADEL's claims table states that `sub`, `iss`,
+`aud`, `exp` and `iat` appear in the access token **"When JWT"** only. Left on
+the default *Bearer Token (Opaque)*, the access token carries no claims, and
+LeRoutier rejects every request — after a sign-in that appeared to succeed.
+
+### The audience
+
+ZITADEL's own documentation for the `aud` claim:
+
+> "The audience of the token, by default all client id's and the project id are
+> included."
+
+So `aud` is normally an **array**, and `AUTH_AUDIENCE` may be **either** the
+client id **or** the project id. **Use the project id**: client ids change if the
+application is ever recreated, the project id does not.
+
+To guarantee it rather than rely on the default, add ZITADEL's reserved
+audience scope, which is why `OIDC_SCOPE` is configurable:
+
+```
+OIDC_SCOPE=openid profile urn:zitadel:iam:org:project:id:{projectId}:aud
+```
+
+> "By adding this scope, the requested project id will be added to the audience
+> of the access token."
+
+**Leave `OIDC_RESOURCE` unset.** ZITADEL uses that reserved scope, not RFC 8707
+`resource`.
+
+### Issuer and JWKS — read them, don't type them
+
+ZITADEL serves discovery at `${YOUR_DOMAIN}/.well-known/openid-configuration`.
+Take `issuer` and `jwks_uri` from that document rather than assembling paths:
+
+```bash
+curl -s https://<your-instance>/.well-known/openid-configuration | \
+  node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.issuer,d.jwks_uri)"
+```
+
+### Production variables
+
+All on **`le-routier-api`**, none on `le-routier`:
+
+```
+AUTH_ISSUER=<issuer from discovery>
+AUTH_JWKS_URL=<jwks_uri from discovery>
+AUTH_AUDIENCE=<ZITADEL project id>
+OIDC_CLIENT_ID=<User Agent application client id>
+OIDC_REDIRECT_URIS=https://le-routier.vercel.app/auth/callback
+OIDC_SCOPE=openid profile urn:zitadel:iam:org:project:id:<projectId>:aud
+```
+
+There is **no `OIDC_CLIENT_SECRET`**, and there must never be one.
+
+### Verify before announcing
+
+```bash
+node --env-file=<reviewed env file> scripts/verify-oidc.mjs
+```
+
+Checks configuration completeness, fetches discovery, and confirms the
+configured issuer and JWKS match the provider's own metadata, that RS256/ES256
+is offered and that PKCE S256 is advertised.
+
+Then sign in once and pipe the access token in to settle the audience question
+empirically — the script verifies signature, issuer, audience and expiry exactly
+as the API does, prints the claims, and **never prints the token**:
+
+```bash
+node --env-file=<reviewed env file> scripts/verify-oidc.mjs < token.txt
+```
+
 ## Scopes
 
 Default `openid profile`. LeRoutier reads only `sub` and `iss` from the token:

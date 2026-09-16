@@ -1,3 +1,23 @@
+/**
+ * The identity slice, on its own.
+ *
+ * Extracted so a tool can inspect an auth configuration without also demanding
+ * a database URL it has no use for — and so there is exactly one place that
+ * turns these environment variables into configuration. Two parsers would
+ * eventually disagree, and the one that disagreed would be the one deciding
+ * whether sign-in works.
+ */
+export function authConfig(env = process.env) {
+  return {
+    demoLogin: env.ALLOW_DEMO_LOGIN === 'true' && !env.VERCEL && env.NODE_ENV !== 'production',
+    issuer: env.AUTH_ISSUER, audience: env.AUTH_AUDIENCE, jwksUrl: env.AUTH_JWKS_URL,
+    oidcClientId: env.OIDC_CLIENT_ID,
+    oidcScope: env.OIDC_SCOPE || 'openid profile',
+    oidcResource: env.OIDC_RESOURCE,
+    oidcRedirectUris: (env.OIDC_REDIRECT_URIS || '').split(',').map(s => s.trim()).filter(Boolean),
+  };
+}
+
 export function serverConfig(env = process.env) {
   const schema = env.DATABASE_SCHEMA || 'leroutier';
   if (!/^[a-z][a-z0-9_]{0,62}$/.test(schema)) throw new Error('Invalid database schema configuration.');
@@ -5,12 +25,8 @@ export function serverConfig(env = process.env) {
   return {
     databaseUrl: env.DATABASE_URL, schema,
     production: env.NODE_ENV === 'production' || env.VERCEL === '1',
-    demoLogin: env.ALLOW_DEMO_LOGIN === 'true' && !env.VERCEL && env.NODE_ENV !== 'production',
+    ...authConfig(env),
     corsOrigins: (env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
-    issuer: env.AUTH_ISSUER, audience: env.AUTH_AUDIENCE, jwksUrl: env.AUTH_JWKS_URL,
-    oidcClientId: env.OIDC_CLIENT_ID,
-    oidcScope: env.OIDC_SCOPE || 'openid profile',
-    oidcResource: env.OIDC_RESOURCE,
     // Server-only payment configuration. FEDAPAY_ENVIRONMENT must be 'sandbox' or 'live';
     // production never falls back to sandbox. Payout credentials are modelled separately:
     // payouts stay unavailable when FEDAPAY_PAYOUT_SECRET_KEY is absent instead of reusing the
@@ -29,7 +45,6 @@ export function serverConfig(env = process.env) {
     payoutApprovalRequired: env.PAYOUT_APPROVAL_REQUIRED !== 'false',
     payoutMinMinor: env.PAYOUT_MIN_MINOR !== undefined && env.PAYOUT_MIN_MINOR !== '' ? Number(env.PAYOUT_MIN_MINOR) : undefined,
     payoutMaxMinor: env.PAYOUT_MAX_MINOR !== undefined && env.PAYOUT_MAX_MINOR !== '' ? Number(env.PAYOUT_MAX_MINOR) : undefined,
-    oidcRedirectUris: (env.OIDC_REDIRECT_URIS || '').split(',').map(s=>s.trim()).filter(Boolean),
     // Outbound notification providers. None is invented: a channel is only
     // available when its real credentials are present, and stays unavailable
     // otherwise rather than silently dropping or faking a delivery.
