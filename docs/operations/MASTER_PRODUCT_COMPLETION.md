@@ -92,18 +92,18 @@ bus, no second authorization model, no direct database access for agents.
 | 21 | Audit | DONE (pre-existing) | `audit_events` for every agent mutation. |
 | 22 | Agentic threat model | DONE | Agentic surface section of `THREAT_MODEL.md`. |
 | 23 | Prompt-injection defence | DONE | Structural: no free-form command path. Test asserts injected payload text creates no action. |
-| 24 | Data minimization | PLANNED | Safe structured projections. |
-| 25 | Model provider abstraction | PLANNED | Interface only; deterministic workflows stay deterministic. |
-| 26 | Deterministic before generative | DONE | No model on any critical path; invariants are code. |
-| 27 | Cost control | PLANNED | Invocation/token/retry limits. |
-| 28 | Agent observability | PLANNED | Execution, retry, approval and override metrics. |
+| 24 | Data minimization | DONE | Allowlist projections, proven by `unsafeFields()` rather than trusted. Never a name, phone, coordinate, pickup code or payout destination. |
+| 25 | Model provider abstraction | DONE | [`../architecture/MODEL_PROVIDERS.md`](../architecture/MODEL_PROVIDERS.md) — OpenRouter and a local MiniCPM behind one interface; an unrecognised name selects nothing. |
+| 26 | Deterministic before generative | DONE | No invariant lives in a prompt. A booking completes through payment while the provider throws on every call. |
+| 27 | Cost control | DONE | Daily and per-workflow ceilings in the database, plus duplicate suppression. Never called on routine events. |
+| 28 | Agent observability | PARTIAL | `agent_model_calls` records provider, task, requested and actual model, status and latency. No aggregated dashboard yet. |
 | 29 | Agentic UI status | IN PROGRESS | Ops shows recommendation/approval states. |
 | 30 | Multi-tenancy | DONE (pre-existing) | Operator binding enforced server-side and tested. |
 | 31 | Offline operations | DONE (pre-existing) | Crew queue syncs, then domain events fire. |
-| 32 | Agentic support | PLANNED | Constrained; never a general chatbot. |
+| 32 | Agentic support | PARTIAL | `incident.triage` and `parcel.triage` exist with narrow menus. No customer-facing assistant, by design. |
 | 33 | Agentic pilot mode | DONE | `observe` autonomy: reads run, mutations are recorded as proposals, run completes, `workflow.step_observed` audited. |
 | 34 | Autonomy policy | DONE | Per-workflow autonomy; an unrecognised value resolves to the safest level, never the loosest. |
-| 35 | Agentic tests | PARTIAL | 17 agentic tests including autonomy, injection, disabled principal and unsupported action. Load cases outstanding. |
+| 35 | Agentic tests | PARTIAL | 37 model tests plus 17 agentic tests. Load cases outstanding. |
 | 36 | Agentic load/scale | PLANNED | Local/Docker only. |
 | 37 | Agentic documentation | DONE | `AGENTIC_WORKFLOWS.md` extended with autonomy, untrusted content and the parcel workflows. |
 | 38 | Agentic readiness gate | DONE | Section 7 of `PRODUCTION_READINESS.md`. |
