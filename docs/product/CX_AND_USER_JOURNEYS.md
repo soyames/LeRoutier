@@ -58,6 +58,12 @@ propres moyens" is always available, and the passenger's own location never
 leaves their device. A delay recomputes the advice and supersedes the previous
 recommendation rather than contradicting it. See `FIRST_LAST_MILE.md`.
 
+**Live vehicle tracking**: once a ticket is active, `/tickets/:bookingId` shows
+the vehicle on the real road route with progress, next stop and an arrival
+estimate whose confidence is stated. "Suivi en direct" appears only while GPS is
+actually arriving; otherwise the screen says "Dernière position connue" or
+"Suivi indisponible". See `../architecture/MAPS_ROUTING_AND_TRACKING.md`.
+
 **Notifications**: booking, payment, ticket, first-mile timing, boarding,
 delay, boarding-point change, arrival and parcel updates arrive in the one
 in-app notification centre. See `../architecture/NOTIFICATIONS.md`.
