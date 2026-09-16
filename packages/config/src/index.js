@@ -42,6 +42,16 @@ export function serverConfig(env = process.env) {
     // First-mile timing policy: one configurable default, documented in
     // docs/product/FIRST_LAST_MILE.md, instead of buffers invented per screen.
     firstMile: firstMilePolicy(env),
+    // How long a collectable parcel may wait before the receiver is reminded,
+    // and then before the station is asked to act. Operators differ; neither
+    // threshold is invented in code.
+    parcelPickup: {
+      reminderHours: positiveMinutes(env.PARCEL_UNCOLLECTED_REMINDER_HOURS, 24),
+      escalationHours: positiveMinutes(env.PARCEL_UNCOLLECTED_ESCALATION_HOURS, 72),
+    },
+    // Per-workflow autonomy. Unfamiliar and high-risk workflows default to
+    // recommending rather than acting; see AGENTIC_WORKFLOWS.md.
+    agentAutonomy: agentAutonomy(env),
     // Road routing engine. Unset means routes simply have no road geometry and
     // every surface says so — a straight line is never substituted. The public
     // OSRM/Valhalla demo servers forbid production use, so no default endpoint
@@ -57,6 +67,39 @@ export function serverConfig(env = process.env) {
 function positiveMinutes(value, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 600 ? parsed : fallback;
+}
+
+/**
+ * Autonomy levels, in increasing order of what an agent may do without a human.
+ *
+ *   observe            — read and record what it would do; mutate nothing.
+ *   recommend          — every mutating step becomes an approval request.
+ *   auto_low_risk      — read and low-risk steps run; privileged and financial
+ *                        steps still wait for a human.
+ *   approval_required  — every step waits for a human, including reads.
+ *
+ * Deliberately not a single global switch: "turn autonomy on" is exactly the
+ * decision that should never be made once, for everything, in one place.
+ */
+export const AUTONOMY_LEVELS = ['observe', 'recommend', 'auto_low_risk', 'approval_required'];
+
+export function agentAutonomy(env = process.env) {
+  // An unrecognised level is treated as the safest one rather than ignored: a
+  // typo in configuration must never widen what an agent may do.
+  const level = value => (AUTONOMY_LEVELS.includes(value) ? value : null);
+  const fallback = level(env.AGENT_AUTONOMY_DEFAULT) ?? 'auto_low_risk';
+  let perWorkflow = {};
+  try {
+    const parsed = env.AGENT_AUTONOMY ? JSON.parse(env.AGENT_AUTONOMY) : {};
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const [workflow, value] of Object.entries(parsed)) {
+        // An unknown value pins that workflow to observe — the safest level —
+        // rather than silently inheriting a permissive default.
+        perWorkflow[workflow] = level(value) ?? 'observe';
+      }
+    }
+  } catch { perWorkflow = {}; }
+  return { default: fallback, workflows: perWorkflow };
 }
 
 export function firstMilePolicy(env = process.env) {
