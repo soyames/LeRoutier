@@ -27,21 +27,21 @@ the agent architecture.
 | H | Database environment model | DONE | [`DATABASE_ENVIRONMENTS.md`](DATABASE_ENVIRONMENTS.md); local dev/test on Docker, production Neon untouched. |
 | I | Migration compatibility | DONE | `pnpm test:migrate:fresh` — 10/10 from empty, 70 tables, replay changes no `applied_at`. |
 | J | Production database guards | DONE | `packages/database/src/guards.js`; loopback-only TLS exemption cannot apply to Neon. |
-| K | Release-grade CI | IN PROGRESS | Postgres service container + fresh-migration + database suite + secret scan. |
-| L | Repository security hardening | IN PROGRESS | Secret scan now covers every `apps/*/dist` including the canonical PWA. |
-| M | Formal threat model | PLANNED | `docs/security/THREAT_MODEL.md`. |
-| N | Authorization matrix | PLANNED | Server-enforced, test-backed. |
-| O | Privacy & retention | PLANNED | `docs/security/PRIVACY_AND_RETENTION.md`. |
-| P | Security headers | PLANNED | Must not break OIDC, tiles, FedaPay redirect, API rewrite. |
-| Q | Dependency / supply chain | PLANNED | Audit, Dependabot, SBOM. |
-| R | Repository protection | PLANNED | `SECURITY.md`; branch protection documented if not applicable. |
-| S | API security hardening | PLANNED | Per-route audit of `/api/v1`. |
-| T | Financial safety | PLANNED | Ledger conservation invariants. |
-| U | Capacity & concurrency | PLANNED | Oversell invariant under concurrency, on Docker. |
-| V | GPS security & scale | PLANNED | Ingestion authorization, retention, indexes. |
+| K | Release-grade CI | DONE | CI runs lint, typecheck, build, unit, API, browser, fresh migration, 168 database tests, live journeys, secret scan — all green on `main`. |
+| L | Repository security hardening | DONE | Secret scan covers every `apps/*/dist`, the diff and full history; 285 checks clean. |
+| M | Formal threat model | DONE | [`../security/THREAT_MODEL.md`](../security/THREAT_MODEL.md) — 12 actors, STRIDE per surface, residual risk per row. |
+| N | Authorization matrix | DONE | [`../security/AUTHORIZATION_MATRIX.md`](../security/AUTHORIZATION_MATRIX.md) — capability matrix with an enforcement point and a test per row. |
+| O | Privacy & retention | PARTIAL | [`../security/PRIVACY_AND_RETENTION.md`](../security/PRIVACY_AND_RETENTION.md). Retention periods remain open and are flagged for legal review. |
+| P | Security headers | DONE | CSP verified live: OSM and CARTO tiles allowed, an unlisted host blocked, Leaflet inline styles allowed. |
+| Q | Dependency / supply chain | PARTIAL | Dependabot alerts, security updates and grouped weekly PRs enabled; CodeQL security-extended. SBOM not yet generated. |
+| R | Repository protection | DONE | `main` protected (no force-push, no deletion, CI required, admin not locked out); secret scanning and push protection on; `SECURITY.md` added. |
+| S | API security hardening | PARTIAL | Anonymous catalogue now rate limited; headers hardened. Per-route audit recorded in the authorization matrix. |
+| T | Financial safety | PARTIAL | Webhook authority, replay safety, approval gates and reserve release all tested. No standing ledger-conservation invariant. |
+| U | Capacity & concurrency | PARTIAL | `capacity.test.js` covers concurrent oversell on real PostgreSQL. No sustained load test. |
+| V | GPS security & scale | PARTIAL | Ingestion authorization, stale rejection and accuracy filtering tested. No server-side per-service write limit; no GPS retention policy. |
 | W | Map/routing production strategy | DONE | [`../architecture/MAPS_ROUTING_AND_TRACKING.md`](../architecture/MAPS_ROUTING_AND_TRACKING.md) — canonical; covers rendering, data, providers, limits, fallback. |
-| X | Observability | PLANNED | Structured logs, correlation IDs, no PII. |
-| Y | SLOs | PLANNED | `docs/operations/SLO_AND_MONITORING.md`. |
+| X | Observability | PARTIAL | Structured errors with a requestId, Ops diagnostics, audit trail. No correlation id, no alert routing, no log shipping. |
+| Y | SLOs | DONE | [`SLO_AND_MONITORING.md`](SLO_AND_MONITORING.md) — 10 objectives, error budget, severity model, and the measurement gaps named. |
 | Z | Database performance | PLANNED | Index review against real access patterns. |
 | AA | Load testing | PLANNED | Local/Docker only. |
 | AB | Backup & recovery | PLANNED | Documented; restore never tested against production. |
@@ -55,9 +55,9 @@ the agent architecture.
 | AJ | Legal/customer-facing basics | PLANNED | Placeholders, clearly marked for legal review. |
 | AK | Support & incident management | PLANNED | Severity, escalation, postmortem. |
 | AL | Analytics without surveillance | PLANNED | Aggregate operational events only. |
-| AM | Documentation consolidation | PLANNED | README must describe one PWA. |
-| AN | Production readiness checklist | PLANNED | `docs/operations/PRODUCTION_READINESS.md`. |
-| AO | Release gate | PLANNED | `pnpm release:check`. |
+| AM | Documentation consolidation | DONE | README rewritten (it still described three apps); [`../README.md`](../README.md) index added; `pnpm docs:check` enforces links and indexing. |
+| AN | Production readiness checklist | DONE | [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) — 11 sections, every row with evidence or a named action. |
+| AO | Release gate | DONE | `pnpm release:check` — 11 gates; a gate that cannot run is reported SKIPPED and fails the check. |
 | AP | Final validation | PLANNED | All gates. |
 | AQ | Vercel final verification | IN PROGRESS | Canonical projects verified; legacy retirement pending. |
 | AR | Secret ownership principle | DONE | Enforced and documented: frontend = public config, API = secrets. |
@@ -71,18 +71,18 @@ bus, no second authorization model, no direct database access for agents.
 | --- | --- | --- | --- |
 | 1 | No direct DB access for agents | DONE (pre-existing) | Agents act through domain services; verified by `packages/database/tests/agentic.test.js`. |
 | 2 | Agent principals | DONE (pre-existing) | `agent_principals`, `agent_scopes` (migration 006), `lragt_…` tokens stored as digests. |
-| 3 | Scopes | IN PROGRESS | Existing scope list; extension for tracking/parcel scopes under review. |
+| 3 | Scopes | DONE | Scopes enforced server-side per action; operator binding holds across every scope. |
 | 4 | Action catalog | DONE (pre-existing) | `packages/agents/src/actions.js` — typed, schema-validated, no free-form commands. |
 | 5 | Risk classes | DONE (pre-existing) | `read` / `low_risk` / `privileged` / `financial`. |
 | 6 | Domain events | DONE (pre-existing) | Single outbox; no second event system. |
 | 7 | Workflow engine | DONE (pre-existing) | `packages/agents/src/workflows.js` — trigger, steps, retries, approval, audit. |
-| 8 | Service delay agent | IN PROGRESS | `delay-management` exists; ETA recalculation integration pending. |
+| 8 | Service delay agent | PARTIAL | `delay-management` notifies and surfaces; ETA recalculation still derives from the tracking endpoint on read. |
 | 9 | Breakdown/recovery agent | DONE (pre-existing) | `breakdown-recovery`, Ops approval required. |
 | 10 | Passenger journey agent | IN PROGRESS | First-mile recomputation exists; reminder suppression to verify. |
 | 11 | Payment agent | DONE (pre-existing) | `payment-reconciliation`, approval-gated, cannot fabricate success. |
 | 12 | Payout agent | DONE (pre-existing) | `driver-payout`, approval required by default. |
-| 13 | Parcel agent | IN PROGRESS | `parcel-delay`, `parcel-exception`, `parcel-breakdown` exist. |
-| 14 | Uncollected parcel workflow | PLANNED | Thresholds must be configurable, never invented. |
+| 13 | Parcel agent | DONE | `parcel-delay`, `parcel-exception`, `parcel-breakdown`, `parcel-uncollected-*`. |
+| 14 | Uncollected parcel workflow | DONE | Thresholds configurable; clock runs from the `ready_for_pickup` event; each stage fires once per arrival. Tested. |
 | 15 | Notification agent | IN PROGRESS | Channel availability honest; retry/dead-letter to complete. |
 | 16 | Ops copilot experience | PLANNED | Proactive summaries with evidence and action. |
 | 17 | Explainability | PLANNED | Operational reasons, never chain-of-thought. |
@@ -90,23 +90,23 @@ bus, no second authorization model, no direct database access for agents.
 | 19 | Agent failure behaviour | DONE (pre-existing) | Domain transaction safety independent of agent availability. |
 | 20 | Idempotency | DONE (pre-existing) | `agent_action_receipts`, one open run per (workflow, aggregate, trigger). |
 | 21 | Audit | DONE (pre-existing) | `audit_events` for every agent mutation. |
-| 22 | Agentic threat model | PLANNED | Section of `THREAT_MODEL.md`. |
-| 23 | Prompt-injection defence | PLANNED | Untrusted free text must never become policy. |
+| 22 | Agentic threat model | DONE | Agentic surface section of `THREAT_MODEL.md`. |
+| 23 | Prompt-injection defence | DONE | Structural: no free-form command path. Test asserts injected payload text creates no action. |
 | 24 | Data minimization | PLANNED | Safe structured projections. |
 | 25 | Model provider abstraction | PLANNED | Interface only; deterministic workflows stay deterministic. |
-| 26 | Deterministic before generative | DONE | No LLM is on any critical path today; invariants are code. |
+| 26 | Deterministic before generative | DONE | No model on any critical path; invariants are code. |
 | 27 | Cost control | PLANNED | Invocation/token/retry limits. |
 | 28 | Agent observability | PLANNED | Execution, retry, approval and override metrics. |
 | 29 | Agentic UI status | IN PROGRESS | Ops shows recommendation/approval states. |
 | 30 | Multi-tenancy | DONE (pre-existing) | Operator binding enforced server-side and tested. |
 | 31 | Offline operations | DONE (pre-existing) | Crew queue syncs, then domain events fire. |
 | 32 | Agentic support | PLANNED | Constrained; never a general chatbot. |
-| 33 | Agentic pilot mode | PLANNED | Observe/recommend before autonomy. |
-| 34 | Autonomy policy | PLANNED | Per-workflow autonomy level. |
-| 35 | Agentic tests | IN PROGRESS | Existing coverage in `agentic.test.js`; 20-point list being completed. |
+| 33 | Agentic pilot mode | DONE | `observe` autonomy: reads run, mutations are recorded as proposals, run completes, `workflow.step_observed` audited. |
+| 34 | Autonomy policy | DONE | Per-workflow autonomy; an unrecognised value resolves to the safest level, never the loosest. |
+| 35 | Agentic tests | PARTIAL | 17 agentic tests including autonomy, injection, disabled principal and unsupported action. Load cases outstanding. |
 | 36 | Agentic load/scale | PLANNED | Local/Docker only. |
-| 37 | Agentic documentation | IN PROGRESS | `AGENTIC_WORKFLOWS.md` exists and is being extended. |
-| 38 | Agentic readiness gate | PLANNED | Section of the production gate. |
+| 37 | Agentic documentation | DONE | `AGENTIC_WORKFLOWS.md` extended with autonomy, untrusted content and the parcel workflows. |
+| 38 | Agentic readiness gate | DONE | Section 7 of `PRODUCTION_READINESS.md`. |
 
 ## Decisions worth carrying
 
