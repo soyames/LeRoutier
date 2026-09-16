@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { screen, paginate, enforceLimit, withNotice, gsmLength, MAX_RESPONSE_CHARS } from '../src/render.js';
-import { normalizeMsisdn, hashMsisdn, maskMsisdn, latestInput, adapterFor, sandboxAdapter, hmacAdapter } from '../src/adapters.js';
+import { normalizeMsisdn, hashMsisdn, maskMsisdn, latestInput, adapterFor, sandboxAdapter, hmacAdapter, mtnAdapter } from '../src/adapters.js';
 import { translator, fcfa, clock } from '../src/messages.js';
 import { requestFingerprint } from '../src/sessions.js';
 import { bookingReference } from '../src/engine.js';
@@ -186,4 +186,64 @@ test('the same input at the same step fingerprints identically, and differently 
   assert.notEqual(requestFingerprint('s', 3, '1'), requestFingerprint('s', 4, '1'));
   assert.notEqual(requestFingerprint('s', 3, '1'), requestFingerprint('s', 3, '2'));
   assert.notEqual(requestFingerprint('s', 3, '1'), requestFingerprint('t', 3, '1'));
+});
+
+// ------------------------------------------------------------------ MTN ----
+// MTN's shape is not the CON/END convention. These tests pin every field name
+// the adapter depends on, so confirming the mapping against the portal's own
+// Swagger is a single diff rather than an investigation.
+test('the MTN contract is pinned, and marked unconfirmed until checked against the portal', () => {
+  assert.deepEqual(mtnAdapter.contract.inbound, ['sessionId', 'messageType', 'msisdn', 'serviceCode', 'ussdString']);
+  assert.deepEqual(mtnAdapter.contract.messageTypes,
+    { begin: 0, continue: 1, end: 2, notification: 3, cancel: 4, timeout: 5 });
+  assert.equal(mtnAdapter.contract.confirmed, false,
+    'flip this only after checking the downloaded specification');
+  assert.equal(mtnAdapter.metadata().contractConfirmed, false);
+});
+
+test('MTN Begin carries the dialled shortcode, which is not an answer', () => {
+  // *1234*356# is what the caller dialled, not a menu choice. Reading it as
+  // input would skip the first screen.
+  const begin = mtnAdapter.parse({ sessionId: 'm-1', messageType: 0, msisdn: '22961000001', serviceCode: '*1234*356#', ussdString: '*1234*356#' });
+  assert.equal(begin.input, '', 'the first screen receives no input');
+  assert.equal(begin.sessionId, 'm-1');
+  assert.equal(begin.msisdn, '+22961000001');
+  assert.equal(begin.terminated, false);
+});
+
+test('MTN Continue carries the latest keypress', () => {
+  const step = mtnAdapter.parse({ sessionId: 'm-1', messageType: 1, msisdn: '22961000001', ussdString: '1*2*3' });
+  assert.equal(step.input, '3');
+});
+
+test('MTN End, Cancel and Timeout terminate the session', () => {
+  for (const messageType of [2, 4, 5]) {
+    assert.equal(mtnAdapter.parse({ sessionId: 'm-1', messageType, msisdn: '22961000001', ussdString: '' }).terminated,
+      true, `messageType ${messageType} must end the call`);
+  }
+  for (const messageType of [0, 1, 3]) {
+    assert.equal(mtnAdapter.parse({ sessionId: 'm-1', messageType, msisdn: '22961000001', ussdString: '1' }).terminated, false);
+  }
+});
+
+test('MTN replies with a message type, not a CON/END prefix', () => {
+  const carry = JSON.parse(mtnAdapter.render({ text: 'Menu', continues: true }).body);
+  assert.deepEqual(carry, { messageType: 1, ussdString: 'Menu' });
+  const done = JSON.parse(mtnAdapter.render({ text: 'Merci', continues: false }).body);
+  assert.deepEqual(done, { messageType: 2, ussdString: 'Merci' });
+  assert.equal(/^(CON|END) /.test(mtnAdapter.render({ text: 'x', continues: true }).body), false);
+});
+
+test('the MTN verification scheme is not guessed, and fails closed', () => {
+  const raw = '{"sessionId":"m-1"}';
+  const good = createHmac('sha256', 'shared').update(raw).digest('hex');
+  assert.equal(mtnAdapter.verify(raw, new Headers({ 'x-ussd-signature': good }), 'shared'), true);
+  assert.equal(mtnAdapter.verify(raw, new Headers(), 'shared'), false);
+  assert.equal(mtnAdapter.verify(raw, new Headers({ 'x-ussd-signature': good }), undefined), false);
+});
+
+test('MTN carries the ARCEP-approved session limits as defaults', () => {
+  const meta = mtnAdapter.metadata();
+  assert.equal(meta.maxSessionSeconds, 120);
+  assert.equal(meta.maxResponseSeconds, 60);
 });
