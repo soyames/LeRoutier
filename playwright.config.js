@@ -12,7 +12,9 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: 3,
   reporter: 'list',
-  use: { trace: 'retain-on-failure' },
+  // Times are rendered in the viewer's locale, so the suite pins a timezone:
+  // otherwise every departure assertion depends on where CI happens to run.
+  use: { trace: 'retain-on-failure', timezoneId: 'UTC', locale: 'fr-FR' },
   projects: [
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
     { name: 'mobile', use: { ...devices['Pixel 7'] } },

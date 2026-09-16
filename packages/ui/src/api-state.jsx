@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSession } from '@leroutier/config/client';
 import { Card } from './shell.jsx';
+import { SkeletonCards, ErrorState } from './states.jsx';
 
 function isDriverApp(role){return Array.isArray(role)?role.includes('driver')||role.includes('convoyeur'):role==='driver';}
 export function SessionPanel() {
@@ -50,8 +51,19 @@ export function ProfileForm(){
     {error && <p role="alert">{error}</p>}{saved && <p role="status">Profil enregistré.</p>}
   </form>;
 }
-export function ApiState({resource,empty='Aucune donnée disponible.'}) {
-  if(resource.loading) return <Card><p role="status">Chargement…</p></Card>;
-  if(resource.error) return <Card className="stack"><p role="alert">{resource.error}</p><button className="btn btn-soft" onClick={resource.reload}>Réessayer</button></Card>;
-  return <Card><p role="status">{empty}</p></Card>;
+/**
+ * Loading / error / empty for one API resource.
+ * `skeleton` shapes the placeholder; `title` and `action` turn an empty result
+ * into a next step instead of a dead end.
+ * @param {{ resource: any, empty?: string, emptyTitle?: string, action?: import('react').ReactNode, skeleton?: number, errorText?: string }} props
+ */
+export function ApiState({resource,empty='Aucune donnée disponible.',emptyTitle,action,skeleton=2,errorText}) {
+  if(resource.loading) return <SkeletonCards count={skeleton}/>;
+  if(resource.error) return <ErrorState text={errorText || resource.error} onRetry={resource.reload}/>;
+  if(!empty && !emptyTitle) return null;
+  return <Card className="stack empty-inline">
+    {emptyTitle && <strong>{emptyTitle}</strong>}
+    <p className="small muted" role="status">{empty}</p>
+    {action && <div className="controls">{action}</div>}
+  </Card>;
 }

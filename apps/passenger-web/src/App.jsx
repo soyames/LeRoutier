@@ -8,11 +8,15 @@ export default function App() {
   const { online } = useSession();
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const page = pathname.replace(/\/$/, '').slice(1) || 'trips';
+  // Booking now deep-links to /tickets/:id. This legacy shell has one screen
+  // per section, so it resolves the section and ignores the trailing id; the
+  // unified app is where the deep link renders the full journey.
+  const segments = pathname.split('/').filter(Boolean);
+  const page = segments[0] || 'trips', focusId = segments[1];
   if (page === 'onboarding') {
     return <AppShell online={online} role="Devenir opérateur" title="Rejoindre LeRoutier" subtitle="Compagnie ou chauffeur indépendant" nav={[{id:'trips',label:'Retour aux trajets',icon:Search}]} active="" onNavigate={()=>navigate('/trips')}><OnboardingPage/></AppShell>;
   }
-  const screens = { trips: <Trips />, tickets: <Tickets />, stations: <Stations />, parcels: <Parcels />, tracking: <Tracking />, account: <Account /> };
+  const screens = { trips: <Trips />, tickets: <Tickets focusId={focusId} />, stations: <Stations />, parcels: <Parcels />, tracking: <Tracking />, account: <Account /> };
   const titles = { trips: 'Recherche de trajets', tickets: 'Mes billets', stations: 'Gares & arrêts', parcels: 'Colis & fret', tracking: 'Suivi du voyage', account: 'Mon compte' };
   if (!Object.hasOwn(screens, page)) return <Navigate to="/" replace />;
   const navWithOnboarding = [...nav];

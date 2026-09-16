@@ -13,23 +13,25 @@ test('the unified PWA carries a real database-backed journey across workspaces',
 
   // 1. One public entry point, anonymous, backed by real data.
   await passenger.goto(APP + '/');
-  await expect(passenger.getByRole('button', { name: /Rechercher un trajet/ })).toBeVisible();
-  await passenger.getByRole('button', { name: /Rechercher un trajet/ }).click();
-  await expect(passenger).toHaveURL(/\/trips$/);
+  await expect(passenger.getByRole('button', { name: 'Rechercher' })).toBeVisible();
+  await passenger.getByRole('button', { name: 'Rechercher' }).click();
+  // The home search carries its criteria into the results URL.
+  await expect(passenger).toHaveURL(/\/trips\?from=/);
   // First real round trip to Neon after mount: allow for the query, not for a
   // flaky retry loop.
   await expect(passenger.getByText('DEMO - Corridor Benin')).toBeVisible({ timeout: 20000 });
-  await expect(passenger.getByText('DEMO-BUS-01').first()).toBeVisible();
+  await expect(passenger.getByRole('button', { name: 'Se connecter pour réserver' }).first()).toBeVisible();
   // Anonymous search works; cash is never offered to a passenger.
   await expect(passenger.getByRole('button', { name: 'Se connecter pour réserver' }).first()).toBeEnabled();
   await expect(passenger.getByText(/espèces/i)).toHaveCount(0);
 
   // 2. Login happens at the action, and books against the real domain.
   await signIn(passenger, 'passenger');
-  await passenger.getByLabel('Arrivée').selectOption({ label: 'Bohicon · Zakpo (démo)' });
-  await passenger.getByRole('button', { name: 'Réserver une place' }).click();
-  await expect(passenger).toHaveURL(/\/tickets$/);
-  await expect(passenger.getByText('Option en attente de paiement')).toBeVisible();
+  await passenger.getByLabel('Arrivée',{exact:true}).selectOption({ label: 'Bohicon' });
+  await passenger.getByRole('button', { name: 'Choisir ce trajet' }).click();
+  // Booking lands on that booking, not on a generic list.
+  await expect(passenger).toHaveURL(/\/tickets\//);
+  await expect(passenger.getByText('À payer')).toBeVisible();
 
   // 3. The Ops workspace, same PWA, records the counter cash payment.
   await ops.goto(APP + '/ops/payments');
@@ -41,15 +43,15 @@ test('the unified PWA carries a real database-backed journey across workspaces',
 
   // 4. Passenger confirms, issues a real ticket, and sees the end-to-end
   //    journey: exact boarding point plus the optional first-mile handoff.
-  await passenger.getByRole('button', { name: 'Confirmer la réservation' }).click();
+  await passenger.getByRole('button', { name: 'Confirmer ma réservation' }).click();
   await expect(passenger.getByText('Confirmé', { exact: true })).toBeVisible();
-  await passenger.getByRole('button', { name: 'Obtenir mon billet (QR)' }).click();
+  await passenger.getByRole('button', { name: 'Afficher mon billet' }).click();
   await expect(passenger.getByText(/LR-[0-9A-F]{4}-[0-9A-F]{4}/)).toBeVisible();
 
   // 5. The Ops workspace and the crew workspace live in the same product.
   await crew.goto(APP + '/work/today');
   await signIn(crew, 'driver');
-  await expect(crew.getByText('DEMO-BUS-01').first()).toBeVisible();
+  await expect(crew.getByText('à bord').first()).toBeVisible();
   await crew.getByRole('navigation').getByRole('button', { name: 'Manifeste' }).click();
   await expect(crew).toHaveURL(/\/work\/manifest$/);
   await expect(crew.getByText('Passager Démo')).toBeVisible();

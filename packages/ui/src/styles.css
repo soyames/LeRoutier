@@ -8,6 +8,96 @@
 .note-row{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start;padding:11px;border-radius:13px;background:#fff;border:1px solid var(--line);width:100%;text-align:left;font:inherit;cursor:pointer}.note-row.unread{border-color:var(--primary);background:var(--primary-soft)}.note-row.urgent{border-color:#ffb4a8}
 .home-actions{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.home-action{display:flex;align-items:center;gap:10px;text-align:left;border:1px solid var(--line);border-radius:16px;padding:14px;background:#fff;font:inherit;font-size:13px;font-weight:800;color:var(--navy);cursor:pointer}.home-action small{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-top:2px}
 
+/* ── Accessibility ────────────────────────────────────────────────────────
+   A visible focus ring on every interactive element, and a skip target for
+   keyboard users. Nothing relies on colour alone to convey state. */
+:where(button,a,input,select,textarea,[tabindex]):focus-visible{outline:3px solid var(--primary-strong);outline-offset:2px;border-radius:10px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.skip-link{position:absolute;left:-9999px;top:0;z-index:100;background:var(--navy);color:#fff;padding:10px 14px;border-radius:0 0 12px 0;font-size:12px;font-weight:800}
+.skip-link:focus{left:0}
+.lr-brand-btn{border:0;background:transparent;padding:0;cursor:pointer;display:flex;align-items:center;min-height:auto}
+/* Comfortable touch targets for one-handed field use. */
+.btn,.control,.icon-btn{min-height:44px}
+.lr-bottom-nav button{min-height:56px}
+
+/* ── Loading ──────────────────────────────────────────────────────────────
+   Skeletons show the shape of the answer. They never show invented content. */
+.skeleton{display:flex;flex-direction:column;gap:9px}
+.skeleton-line{height:12px;border-radius:99px;background:linear-gradient(90deg,#eef2f7 25%,#e2e8f2 37%,#eef2f7 63%);background-size:400% 100%;animation:skeleton 1.4s ease infinite}
+@keyframes skeleton{0%{background-position:100% 50%}100%{background-position:0 50%}}
+@media(prefers-reduced-motion:reduce){.skeleton-line{animation:none}*{scroll-behavior:auto!important}}
+.empty-inline{text-align:left}
+
+/* ── Trip search ──────────────────────────────────────────────────────────
+   The hero task: where are you going, and when. */
+.trip-search{display:grid;gap:10px}
+.trip-search .field{display:flex;flex-direction:column;gap:4px}
+.trip-search label,.field>span{font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.trip-endpoints{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:end}
+.swap-btn{width:44px;height:44px;border:1px solid var(--line);border-radius:50%;background:#fff;color:var(--navy);display:grid;place-items:center;cursor:pointer;align-self:end;margin-bottom:1px}
+.swap-btn:hover{background:var(--soft)}
+@media(max-width:560px){.trip-endpoints{grid-template-columns:1fr;gap:6px}.swap-btn{justify-self:end;margin:-4px 0}}
+
+/* ── Trip result card ─────────────────────────────────────────────────────
+   Times first, then places, then price. No plates, no internal identifiers. */
+.trip-card{display:flex;flex-direction:column;gap:12px}
+.trip-times{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.trip-times strong{font-size:22px;letter-spacing:-.5px}
+.trip-times .arrow{color:var(--muted)}
+.trip-duration{font-size:11px;font-weight:800;color:var(--muted);background:var(--soft);border-radius:99px;padding:4px 9px}
+.trip-leg{display:grid;grid-template-columns:14px 1fr;gap:10px;align-items:start}
+.trip-dot{width:10px;height:10px;border-radius:50%;background:var(--primary);margin-top:5px}
+.trip-dot.end{background:var(--navy)}
+.trip-rail{width:2px;background:#d7deea;margin:0 auto;height:100%;min-height:14px}
+.trip-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px}
+.trip-price{font-size:21px;font-weight:800;color:var(--primary-strong);line-height:1}
+
+/* ── Step flow (booking, shipment) ───────────────────────────────────────── */
+.steps{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;font-weight:800}
+.steps .step{display:flex;align-items:center;gap:6px;color:var(--muted)}
+.steps .step .num{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--soft);color:var(--muted);font-size:10px}
+.steps .step.active{color:var(--navy)}.steps .step.active .num{background:var(--primary);color:#fff}
+.steps .step.done{color:var(--green)}.steps .step.done .num{background:var(--green-soft);color:var(--green)}
+.steps .sep{color:#cbd5e1}
+
+/* ── Summary rail kept visible through a flow ─────────────────────────────── */
+.summary{background:var(--soft);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:6px}
+.summary .row{display:flex;justify-content:space-between;gap:12px;font-size:12px}
+.summary .row span:first-child{color:var(--muted);font-weight:700}
+.summary .row span:last-child{font-weight:700;text-align:right}
+
+/* ── Ticket ───────────────────────────────────────────────────────────────
+   The QR is the point of the screen: it leads, it is not hidden behind a tap. */
+.ticket-qr{display:grid;place-items:center;gap:10px;background:#fff;border-radius:16px;padding:16px;border:1px solid var(--line)}
+.ticket-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;font-weight:800;letter-spacing:1px}
+.ticket-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.ticket-grid>div>span{display:block;font-size:10.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.ticket-grid>div>strong{font-size:14px}
+
+/* ── Operational hero for crew ────────────────────────────────────────────
+   Big, glanceable, low-density: readable at a stop, one-handed. */
+.duty{display:flex;flex-direction:column;gap:12px}
+.duty-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.duty-time{font-size:30px;font-weight:800;letter-spacing:-1px;line-height:1}
+.duty-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.duty-metric{background:rgba(255,255,255,.12);border-radius:13px;padding:10px;text-align:center}
+.duty-metric strong{display:block;font-size:19px;line-height:1.2}
+.duty-metric span{font-size:10px;font-weight:700;opacity:.85}
+.big-actions{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.big-actions .btn{min-height:62px;font-size:14px}
+
+/* ── Setup checklist ──────────────────────────────────────────────────────── */
+.checklist{display:flex;flex-direction:column;gap:8px}
+.checklist button{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left;border:1px solid var(--line);border-radius:13px;padding:12px;background:#fff;font:inherit;font-size:12.5px;font-weight:700;color:var(--navy);cursor:pointer}
+.checklist button.done{background:var(--green-soft);border-color:#c9f0df;color:#065f46}
+.checklist button:disabled{cursor:default}
+.checklist .idx{width:24px;height:24px;border-radius:50%;background:var(--soft);display:grid;place-items:center;font-size:11px;font-weight:800;flex:0 0 auto}
+.checklist button.done .idx{background:#fff;color:var(--green)}
+
+/* ── Safe areas / standalone PWA ──────────────────────────────────────────── */
+.lr-main{padding-left:max(18px,env(safe-area-inset-left));padding-right:max(18px,env(safe-area-inset-right))}
+@media(display-mode:standalone){.lr-header{padding-top:env(safe-area-inset-top)}}
+
 /* Keep real stop names and ticket identifiers inside narrow mobile layouts. */
 .search-panel{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
 .search-place,.manifest-row>div{min-width:0}

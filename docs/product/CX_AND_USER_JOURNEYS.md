@@ -27,6 +27,10 @@ the unified PWA has carried real pilot journeys.
 The journeys below are unchanged by that consolidation — they describe the same
 screens, now reached inside one app.
 
+Navigation, primary actions per screen, the status system, form conventions and
+the loading/empty/error standard are specified in
+[`UI_INFORMATION_ARCHITECTURE.md`](UI_INFORMATION_ARCHITECTURE.md).
+
 ## Passenger
 
 **Entry**: public landing = trip search (`/trips`) — no account required to
