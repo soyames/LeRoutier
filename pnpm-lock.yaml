@@ -59,6 +59,9 @@ importers:
       globals:
         specifier: ^16.5.0
         version: 16.5.0
+      jose:
+        specifier: ^6.2.12
+        version: 6.2.12
       terser:
         specifier: ^5.51.2
         version: 5.51.2
