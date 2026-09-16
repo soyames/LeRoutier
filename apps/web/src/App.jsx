@@ -166,5 +166,8 @@ export default function App() {
       </div>);
     }
   }
-  return shell(<><SessionPanel/>{scoped.screens[page]}</>);
+  // The public home leads with the task, not with a sign-in card: authentication
+  // is offered at the action that needs it, and from Compte.
+  const home = workspace === PASSENGER && page === '';
+  return shell(<>{!home && <SessionPanel/>}{scoped.screens[page]}</>);
 }
