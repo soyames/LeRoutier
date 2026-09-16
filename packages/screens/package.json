@@ -8,7 +8,9 @@
     "./crew": "./src/crew.jsx",
     "./ops": "./src/ops.jsx",
     "./journey": "./src/journey.jsx",
-    "./notifications": "./src/notifications.jsx"
+    "./notifications": "./src/notifications.jsx",
+    "./map": "./src/map.jsx",
+    "./tracking": "./src/tracking.jsx"
   },
   "peerDependencies": {
     "react": "^19.1.1",
@@ -21,10 +23,13 @@
     "lucide-react": "catalog:",
     "qr-scanner": "^1.4.2",
     "qrcode.react": "^4.2.0",
-    "react-router": "catalog:"
+    "react-router": "catalog:",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^5.0.0"
   },
   "devDependencies": {
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "@types/leaflet": "^1.9.20"
   }
 }

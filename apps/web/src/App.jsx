@@ -6,6 +6,7 @@ import { Trips, Tickets, Stations, Tracking, Account, Parcels as PassengerParcel
 import { Today as CrewToday, Manifest, Scanner, WalkUp, Parcels as CrewParcels, Vehicle, Points, Earnings, Profile } from '@leroutier/screens/crew';
 import { Today as OpsToday, Services, Fleet, Crew, Stations as OpsStations, Parcels as OpsParcels, Payments, Settlements, Incidents, Alerts, Settings } from '@leroutier/screens/ops';
 import { JourneyTimeline } from '@leroutier/screens/journey';
+import { JourneyTracking } from '@leroutier/screens/tracking';
 import { NotificationCentre, useUnreadCount } from '@leroutier/screens/notifications';
 import { Home } from './home.jsx';
 import { PASSENGER, WORK, OPS, workspacesFor, capabilities, workspaceOf, isAuthorized } from './workspaces.js';
@@ -18,7 +19,13 @@ import {
 // journey view — first mile, boarding, departure, arrival.
 function TicketsRoute() {
   const { id } = useParams();
-  return <div className="stack"><Tickets focusId={id}/>{id && <JourneyTimeline bookingId={id}/>}</div>;
+  return <div className="stack">
+    <Tickets focusId={id}/>
+    {/* Live vehicle tracking sits with the journey it belongs to: the map, the
+        progress and the first-mile advice are one screen, not three. */}
+    {id && <JourneyTracking bookingId={id}/>}
+    {id && <JourneyTimeline bookingId={id}/>}
+  </div>;
 }
 
 // /parcels/track is public; /parcels (sending) needs an account.

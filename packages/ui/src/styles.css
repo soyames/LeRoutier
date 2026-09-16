@@ -106,3 +106,12 @@
 .manifest-row{grid-template-columns:48px minmax(0,1fr) auto;overflow-wrap:anywhere}
 .ticket-body{overflow-wrap:anywhere}
 button:disabled{opacity:.55;cursor:not-allowed}
+
+/* ── Transport map ────────────────────────────────────────────────────────
+   Leaflet supplies its own stylesheet; these rules only fit it into the
+   LeRoutier surface and style the vehicle marker. */
+.lr-map{border-radius:16px;overflow:hidden;border:1px solid var(--line);background:var(--soft)}
+.lr-map .leaflet-container{font:inherit;background:var(--soft)}
+.lr-map .leaflet-control-attribution{font-size:10px;background:rgba(255,255,255,.85)}
+.lr-vehicle-marker span{display:block;width:22px;height:22px;border-radius:50%;background:var(--primary);border:3px solid #fff;box-shadow:0 2px 8px rgba(15,23,42,.35)}
+.journey-step.active{background:var(--primary-soft);border-color:#ffdfba}

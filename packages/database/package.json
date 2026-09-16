@@ -5,7 +5,9 @@
     "@leroutier/domain": "workspace:*",
     "@leroutier/config": "workspace:*",
     "@leroutier/agents": "workspace:*",
-    "@leroutier/notifications": "workspace:*"
+    "@leroutier/notifications": "workspace:*",
+    "@leroutier/geo": "workspace:*",
+    "@leroutier/routing": "workspace:*"
   },
   "version": "0.1.0",
   "private": true,
