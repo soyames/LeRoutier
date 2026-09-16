@@ -117,6 +117,16 @@ Run `pnpm release:check` for the mechanical half of this page.
 
 ### Model-assisted reasoning
 
+| | |
+| --- | --- |
+| Gemini provider | **READY** |
+| Model | `gemini-3.6-flash` |
+| Billing | **DISABLED**, and must remain so |
+| Free-tier quota | **LIMITED** — opportunistic, not guaranteed |
+| AI criticality | **OPTIONAL** |
+| Fallback | OpenRouter free |
+| Core product dependency on AI | **NONE** |
+
 | Requirement | Status | Evidence | Action |
 | --- | --- | --- | --- |
 | Gemini provider implemented | `DONE` | Developer API + OAuth bearer, behind the same provider interface | — |
@@ -134,11 +144,13 @@ Run `pnpm release:check` for the mechanical half of this page.
 | No reasoning trace requested or stored | `DONE` | `thinkingBudget: 0`, measured at 0 thought tokens; only validated fields are persisted | — |
 | Usage ceilings enforced | `DONE` | daily and per-workflow caps in the database; duplicate suppression; cooldown after a quota error | — |
 | CI never spends quota | `DONE` | every provider call uses an injected fetch, and the Gemini suite makes a real network call fail the test | — |
-| Gemini credentials stored as Sensitive | `DONE` | client secret and refresh token re-added as Sensitive, Production-only; client id and project id remain identifiers | — |
+| Gemini credential stored as Sensitive | `DONE` | one atomic `GOOGLE_GEMINI_CREDENTIALS` ADC document, Sensitive, Production-only; the three split variables are removed | — |
+| Quota exhaustion is a handled state | `DONE` | shared cooldown in `agent_model_cooldowns`, `Retry-After`/`RetryInfo` honoured, recorded as `unavailable` with `quota_exhausted` and `cooldown_until` | — |
+| Quota exhaustion cannot reach a passenger | `DONE` | tested: booking, cancellation and the deterministic recovery workflow are unaffected while Gemini is exhausted | — |
 | **Triage wired into a workflow** | `DONE` | `incident-triage` on `incident.created` at `recommend` autonomy, behind a deterministic threshold | watch `fallback_from` and rejection rates during the pilot |
 | **OpenRouter key stored as Sensitive** | `NOT_DONE` | `OPENROUTER_API_KEY` is a **Config** variable, unlike `DATABASE_URL` and `FEDAPAY_*` | re-add as Sensitive, Production-only — see [`VERCEL.md`](VERCEL.md) |
 | Model latency suitable for a request path | `NOT_DONE` | Gemini 1.5 s, OpenRouter 6.5–49 s on the free tier | keep model calls in the workflow tick; never in a user request |
-| Free-tier quota sufficient for the pilot | `NOT_DONE` | `429 RESOURCE_EXHAUSTED` after a handful of calls in quick succession | measure real incident volume before relying on it; billing stays disabled |
+| Free-tier quota sufficient for the pilot | `NOT_DONE` | `429 RESOURCE_EXHAUSTED` on the third consecutive live run — capacity is opportunistic | measure real incident volume against `quota_exhausted` in `ops/model-usage`; billing stays disabled either way |
 
 ## 8. Security
 

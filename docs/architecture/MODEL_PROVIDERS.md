@@ -49,7 +49,7 @@ environment is not consent to send situations there; only
 | `AGENT_MODEL_PROVIDER` | `gemini`, `openrouter`, `local`, or unset |
 | `AGENT_MODEL_FALLBACK_PROVIDER` | same vocabulary; unset means no second chance |
 | `GEMINI_AUTH_MODE` | `oauth` — the only implemented mode; see below |
-| `GOOGLE_GEMINI_CLIENT_ID/_CLIENT_SECRET/_REFRESH_TOKEN` | the OAuth credential; server-side only |
+| `GOOGLE_GEMINI_CREDENTIALS` | the whole ADC document, as one **Sensitive** value |
 | `GOOGLE_GEMINI_PROJECT_ID` | quota attribution (`x-goog-user-project`) |
 | `GEMINI_MODEL` | default `gemini-3.6-flash`, verified against the free tier |
 | `GEMINI_BASE_URL` | default `https://generativelanguage.googleapis.com/v1beta` |
@@ -93,6 +93,24 @@ Three things this deliberately is not:
 `oauth` withholds the credential and leaves the provider unconfigured, so
 someone who sets it to `api_key` gets no model rather than a quietly different
 trust model.
+
+### One credential, not three parts
+
+`GOOGLE_GEMINI_CREDENTIALS` holds the whole Application Default Credentials
+document — the file `gcloud auth application-default login` writes — as a single
+Sensitive value.
+
+It used to be three variables, and that was a mistake: three parts can be
+two-thirds configured. A rotation that updates the client secret and forgets the
+refresh token leaves something that *looks* configured and fails on every call.
+A single JSON value is atomic — it is the credential or it is nothing, and a
+test asserts that removing any one field yields nothing.
+
+Only `type: authorized_user` is accepted. A service-account document would mean
+a private key sitting in an environment variable, which is precisely the shape
+this design exists to avoid. Anything malformed — bad JSON, wrong type, missing
+field — leaves the model unavailable and **never** stops the API starting;
+parsing happens while the server is being constructed.
 
 ### The token manager
 
@@ -230,20 +248,25 @@ where every instance can see it.
   workflow cannot drain the budget for everything else.
 - **Duplicate suppression**: the same situation within the window reuses the
   previous conclusion instead of paying for it twice.
-- **Cooldown**: a `429` puts that provider down for `AGENT_MODEL_COOLDOWN_MINUTES`,
-  and three consecutive hard failures do the same. A model answering *badly*
-  never trips it — that is the model's fault, not the provider being down. The
-  window is per serverless instance, which is the honest limit of doing this
-  without another shared store; it still removes the retry storm inside one
-  instance, which is where a single event fanning out produces it.
+- **Cooldown**: a `429` puts that provider down, and three consecutive hard
+  failures do the same. A model answering *badly* never trips it — that is the
+  model's fault, not the provider being down.
 - **The model is never called on routine events** — not per GPS update, per
   booking, per scan, per payment callback or per notification. Deterministic
   logic identifies a reasoning-worthy case first.
 
-What is stored: provider that *answered*, the provider it fell back from, task,
-requested and actual model, status, latency, a **hash** of the input, and the
-validated recommendation. What is not stored: the prompt, the completion text,
-any reasoning trace, or any party data.
+What is stored: provider that *answered*, the provider it fell back from,
+whether quota was exhausted, the cooldown window it ends in, task, requested and
+actual model, status, latency, a **hash** of the input, and the validated
+recommendation. What is not stored: the prompt, the completion text, any
+reasoning trace, any credential, or any party data.
+
+Quota is filed as `unavailable` rather than `error`, because it is a capacity
+state that ends by itself rather than a fault anyone should investigate.
+`GET /api/v1/ops/model-usage` reports today's `quota_exhausted` and
+`fallback_used` counts alongside the current `cooldownUntil`, so "no
+recommendations today" can be read correctly — an exhausted free tier looks
+nothing like a broken integration, and Ops should not have to guess which it is.
 
 ## When it fails
 
@@ -253,6 +276,41 @@ code that must proceed exactly as it did before this feature existed.
 
 A test holds a booking through payment to confirmation while the provider
 throws on every call: **model availability must never gate a core journey.**
+
+### Free-tier capacity is opportunistic
+
+Treat Gemini as a provider that will sometimes decline, because it does. This is
+a **measured** production constraint, not a hypothetical: `429
+RESOURCE_EXHAUSTED` arrived on the third consecutive live run.
+
+So there is no state in which LeRoutier is waiting on Gemini:
+
+| When | What happens |
+| --- | --- |
+| Quota exhausted (`429`) | cooldown starts; the task falls back if it is allowed to, otherwise there is no recommendation |
+| Cooling down | the provider is not called at all — the fallback, or nothing |
+| Both providers unavailable | no recommendation; the run completes normally |
+
+**The cooldown is shared through the database** (`agent_model_cooldowns`, one
+row per provider). An in-process window is forgotten the moment a serverless
+instance recycles, and the next cold instance calls a provider that has already
+refused — which is how a rate limit becomes a rate-limit storm at exactly the
+moment capacity is scarcest. The in-process window is kept as a free first
+check; the shared one is what actually holds.
+
+The store is **best-effort by construction**. If it cannot be read or written,
+the in-process window still applies and the call still happens: a bookkeeping
+table must never be able to take the model layer down.
+
+**When Google says how long to wait, that is believed** — `Retry-After` (seconds
+or an HTTP date) and the `RetryInfo` detail in the error body are both read, and
+the longer wins. It cuts both ways: it stops LeRoutier hammering a longer window
+*and* stops it sulking for ten minutes when Google asked for thirty seconds.
+Absurd values are ignored rather than trusted.
+
+A passenger never sees any of this. Booking, payment, boarding, parcels, GPS,
+USSD and authentication do not consult a model and cannot be affected by one
+being out of quota.
 
 ### Falling back
 

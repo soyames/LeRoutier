@@ -61,6 +61,11 @@ try {
     // control, so it is matched by shape rather than by filename.
     if (/"type"\s*:\s*"service_account"/.test(text)) failures++;
     if (/"private_key(?:_id)?"\s*:\s*"/.test(text)) failures++;
+    // An Application Default Credentials file. It is a real credential — the
+    // refresh token inside it mints Gemini access tokens until revoked — and
+    // it lives in a predictable place on every developer machine, so it is the
+    // easiest of all of these to copy into a repo by accident.
+    if (/"type"\s*:\s*"authorized_user"/.test(text)) failures++;
     if (/\bGOCSPX-[A-Za-z0-9_-]{10,}/.test(text)) failures++;
     // A Google OAuth refresh credential mints access tokens for as long as
     // nobody revokes it, and a live access token does the same for an hour.
@@ -74,6 +79,10 @@ try {
     // in a bundle would mean the server config module reached the browser,
     // which is the step before its values do.
     if (isBundle && /GOOGLE_GEMINI_|oauth2\.googleapis\.com\/token/.test(text)) failures++;
+    // Application Default Credentials live at a predictable path on every
+    // machine. A tracked file pointing at one is a file that will eventually
+    // be read by something that should not read it.
+    if (/gcloud[/\\]application_default_credentials\.json/.test(text)) failures++;
   }
 
   for (const file of files) {

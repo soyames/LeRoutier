@@ -11,7 +11,7 @@ import { payments } from '../src/payments.js';
 import { earnings, payouts } from '../src/payouts.js';
 import { recovery } from '../src/recovery.js';
 import { recordIncident } from '../src/driver-actions.js';
-import { bootstrap, authenticate, createActions, createWorkflowEngine, createReasoning, createModelProvider, unsafeFields, ModelUnavailable, MODEL_REASONS } from '@leroutier/agents';
+import { bootstrap, authenticate, createActions, createWorkflowEngine, createReasoning, createModelProvider, unsafeFields, withCooldown, databaseCooldownStore, ModelUnavailable, MODEL_REASONS } from '@leroutier/agents';
 import { createApi } from '../../../services/api/src/app.js';
 
 const config={...serverConfig(),schema:'lr_test_'+randomUUID().replaceAll('-',''),demoLogin:true};
@@ -464,6 +464,64 @@ test('a model that is down, slow or over quota changes nothing at all',async()=>
   // And the deterministic workflow reacting to the same event is untouched.
   const recovery=await one("SELECT * FROM workflow_runs WHERE workflow='breakdown-recovery'");
   assert.equal(recovery.status,'awaiting_approval','breakdown recovery never consulted a model and still ran');
+});
+
+test('an exhausted quota is remembered across instances, and ends by itself',async()=>{
+  const store=databaseCooldownStore(db);
+  let calls=0;
+  const exhausted=()=>{throw new ModelUnavailable(MODEL_REASONS.rateLimited,'quota');};
+  const build=()=>withCooldown({name:'gemini',model:'gemini-3.6-flash',configured:true,
+    async complete(){calls++;return exhausted();},
+    async health(){return {provider:'gemini',configured:true,reachable:true,status:'ok'};}},
+  {cooldownMs:600_000,store});
+
+  await assert.rejects(build().complete({}),(/** @type {any} */ e)=>e.reason===MODEL_REASONS.rateLimited);
+  assert.equal(calls,1);
+
+  // A second engine, as a cold serverless instance would be: no memory of its
+  // own, and it must still not call a provider that has already refused.
+  await assert.rejects(build().complete({}),(/** @type {any} */ e)=>e.reason===MODEL_REASONS.rateLimited);
+  assert.equal(calls,1,'the window is shared through the database, not per instance');
+
+  const row=await one("SELECT provider,reason,until_at>now() AS active FROM agent_model_cooldowns WHERE provider='gemini'");
+  assert.equal(row.active,true);
+  assert.equal(row.reason,'rate_limited');
+  assert.equal(/client_secret|refresh_token|Bearer/.test(JSON.stringify(row)),false,'the cooldown row holds no credential');
+
+  // Expire it the way time would, and the provider is reachable again.
+  await db.transaction(tx=>tx.query("UPDATE agent_model_cooldowns SET until_at=now()-interval '1 second' WHERE provider='gemini'"));
+  await assert.rejects(build().complete({}),(/** @type {any} */ e)=>e.reason===MODEL_REASONS.rateLimited);
+  assert.equal(calls,2,'a cooldown expires rather than latching the provider off');
+  await db.transaction(tx=>tx.query('DELETE FROM agent_model_cooldowns'));
+});
+
+test('a quota-exhausted incident surfaces nothing and breaks nothing',async()=>{
+  const booking=await withPassenger();
+  const store=databaseCooldownStore(db);
+  const exhausted=withCooldown({name:'gemini',model:'gemini-3.6-flash',configured:true,
+    async complete(){throw new ModelUnavailable(MODEL_REASONS.rateLimited,'quota');},
+    async health(){return {provider:'gemini',configured:true,reachable:true,status:'ok'};}},
+  {cooldownMs:600_000,store});
+  const engineWithModel=createWorkflowEngine({db,actions,reasoning:createReasoning({db,provider:exhausted,actions}),
+    autonomy:{default:'auto_low_risk',workflows:{'incident-triage':'recommend'}}});
+
+  await recordIncident(db,driver,{serviceId:demo.service,kind:'breakdown',severity:'high',description:'Quota exhausted'});
+  await engineWithModel.processOutbox();
+
+  const run=await triageRun();
+  assert.equal(run.status,'completed','no recommendation is a normal ending');
+  assert.equal(run.context.triage.available,false);
+  const call=await one('SELECT status,quota_exhausted,cooldown_until FROM agent_model_calls ORDER BY created_at DESC LIMIT 1');
+  assert.equal(call.status,'unavailable');
+  assert.equal(call.quota_exhausted,true);
+  assert.ok(call.cooldown_until,'when it may be tried again is recorded, not guessed at later');
+
+  // The passenger-facing world is entirely unaffected.
+  assert.equal((await domain.booking(passenger,booking.id)).status,'held');
+  assert.equal((await domain.transition(passenger,booking.id,'cancel')).status,'cancelled');
+  const recovery=await one("SELECT status FROM workflow_runs WHERE workflow='breakdown-recovery'");
+  assert.equal(recovery.status,'awaiting_approval','the deterministic recovery workflow never noticed');
+  await db.transaction(tx=>tx.query('DELETE FROM agent_model_cooldowns'));
 });
 
 test('with no provider configured the product behaves as it did before the feature existed',async()=>{

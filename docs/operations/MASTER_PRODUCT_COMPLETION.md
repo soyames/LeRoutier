@@ -88,6 +88,17 @@ different claims, and only the first is true today.
 Extends the existing outbox/workflow/approval architecture — no second event
 bus, no second authorization model, no direct database access for agents.
 
+| | |
+| --- | --- |
+| Primary remote model | Gemini Flash (`gemini-3.6-flash`), Google OAuth |
+| Authentication | one `authorized_user` ADC document, Sensitive, server-side |
+| Fallback | OpenRouter free, low-risk tasks only, named explicitly |
+| Local | MiniCPM, for data that must not leave the machine |
+| Billing | **DISABLED** on Google Cloud and Firebase, and must remain so |
+| Free-tier quota | **LIMITED** — treated as opportunistic, never as a dependency |
+| AI criticality | **OPTIONAL / NOT PRODUCT-AUTHORITATIVE** |
+| Core product dependency on AI | **NONE** |
+
 | § | Workstream | Status | Evidence |
 | --- | --- | --- | --- |
 | 1 | No direct DB access for agents | DONE (pre-existing) | Agents act through domain services; verified by `packages/database/tests/agentic.test.js`. |
@@ -108,7 +119,7 @@ bus, no second authorization model, no direct database access for agents.
 | 16 | Ops copilot experience | PLANNED | Proactive summaries with evidence and action. |
 | 17 | Explainability | DONE | Stored: classification, severity, one-sentence reason, proposed action, provider, model, latency, validation result. Never a reasoning trace — `thinkingBudget: 0`, measured at 0 thought tokens. |
 | 18 | Human approval queue | DONE (pre-existing) | `workflow_approvals`, exactly-once decisions. |
-| 19 | Agent failure behaviour | DONE (pre-existing) | Domain transaction safety independent of agent availability. |
+| 19 | Agent failure behaviour | DONE | Domain transaction safety independent of agent availability. Tested with Gemini quota-exhausted: booking, cancellation and the deterministic recovery workflow are untouched, and nothing reaches a passenger. |
 | 20 | Idempotency | DONE (pre-existing) | `agent_action_receipts`, one open run per (workflow, aggregate, trigger). |
 | 21 | Audit | DONE (pre-existing) | `audit_events` for every agent mutation. |
 | 22 | Agentic threat model | DONE | Agentic surface section of `THREAT_MODEL.md`. |
@@ -116,15 +127,15 @@ bus, no second authorization model, no direct database access for agents.
 | 24 | Data minimization | DONE | Allowlist projections, proven by `unsafeFields()` rather than trusted. Never a name, phone, coordinate, pickup code or payout destination. |
 | 25 | Model provider abstraction | DONE | [`../architecture/MODEL_PROVIDERS.md`](../architecture/MODEL_PROVIDERS.md) — Gemini Flash (primary, OAuth), OpenRouter (named fallback), local MiniCPM, none. An unrecognised name selects nothing, and the fallback is never inferred from a key. |
 | 26 | Deterministic before generative | DONE | No invariant lives in a prompt. A booking completes through payment while the provider throws on every call. |
-| 27 | Cost control | DONE | Daily and per-workflow ceilings in the database, duplicate suppression, and a cooldown after a quota error. Never called on routine events; a deterministic threshold gates the one workflow that asks. |
-| 28 | Agent observability | PARTIAL | `agent_model_calls` records the provider that *answered*, the one it fell back from (migration 013), task, requested and actual model, status and latency. No aggregated dashboard yet. |
+| 27 | Cost control | DONE | Daily and per-workflow ceilings in the database, duplicate suppression by input fingerprint, and a **shared** cooldown after a quota error that honours Google's own `Retry-After`. Never called on routine events; a deterministic threshold gates the one workflow that asks. |
+| 28 | Agent observability | PARTIAL | `agent_model_calls` records the provider that *answered*, the one it fell back from (013), whether quota was exhausted and the window it ends in (014), task, requested and actual model, status and latency. `ops/model-usage` aggregates today. No historical dashboard yet. |
 | 29 | Agentic UI status | IN PROGRESS | Ops shows recommendation/approval states. |
 | 30 | Multi-tenancy | DONE (pre-existing) | Operator binding enforced server-side and tested. |
 | 31 | Offline operations | DONE (pre-existing) | Crew queue syncs, then domain events fire. |
 | 32 | Agentic support | PARTIAL | `incident.triage` and `parcel.triage` exist with narrow menus, and `incident-triage` now wires triage into a real workflow at `recommend` autonomy. No customer-facing assistant, by design. |
 | 33 | Agentic pilot mode | DONE | `observe` autonomy: reads run, mutations are recorded as proposals, run completes, `workflow.step_observed` audited. |
 | 34 | Autonomy policy | DONE | Per-workflow autonomy; an unrecognised value resolves to the safest level, never the loosest. |
-| 35 | Agentic tests | PARTIAL | 72 model tests plus 24 agentic tests, including OAuth refresh, cooldown, fallback and the wired workflow. Load cases outstanding. |
+| 35 | Agentic tests | PARTIAL | 83 model tests plus 26 agentic tests, covering OAuth refresh, credential atomicity, retry metadata, shared cooldown, fallback and the wired workflow. No test reaches a provider: the Gemini suite makes a real network call fail. Load cases outstanding. |
 | 36 | Agentic load/scale | PLANNED | Local/Docker only. |
 | 37 | Agentic documentation | DONE | `AGENTIC_WORKFLOWS.md` extended with autonomy, untrusted content and the parcel workflows. |
 | 38 | Agentic readiness gate | DONE | Section 7 of `PRODUCTION_READINESS.md`. |
