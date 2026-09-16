@@ -5,21 +5,36 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege by default; no job below needs more.
 permissions:
   contents: read
 
+# A superseded push should not keep burning runners.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Node 24 matches local development and the Vercel projects. Testing on an
+  # older runtime than production runs on proves less than it appears to.
+  NODE_VERSION: '24'
+
 jobs:
-  validate:
+  # Static gates and the suites that need no database or browser.
+  quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          node-version: 22
+          # The secret scan walks the whole history looking for a leaked
+          # credential, so a shallow clone would quietly check almost nothing.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm lint
       - name: Typecheck
@@ -28,22 +43,98 @@ jobs:
         env:
           VITE_API_URL: http://127.0.0.1:4000
         run: pnpm build
+      - name: Unit tests
+        run: pnpm test:unit
+      - name: API tests
+        run: pnpm test:api
+      - name: Secret scan
+        # Runs in pattern-only mode here: the owner's credential reference is
+        # deliberately not available to CI. Every pattern check still runs, and
+        # the output states which mode it used.
+        run: pnpm secrets:check
+
+  # The browser suites, against built previews of all four apps.
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build
+        env:
+          VITE_API_URL: http://127.0.0.1:4000
+        run: pnpm build
       - name: Install browser
         run: pnpm exec playwright install --with-deps chromium
-      - name: Test production apps
-        run: pnpm test
+      - name: Browser tests
+        run: pnpm test:frontend
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
 
+  # Migrations and the database suites, against a disposable PostgreSQL that
+  # matches production's major version. Production Neon is never reachable from
+  # CI: no production credential is available to this workflow.
+  database:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: leroutier
+          POSTGRES_PASSWORD: leroutier_local_dev
+          POSTGRES_DB: leroutier_dev
+        # Port 55432 so the committed docker/postgres.env works unchanged, and
+        # CI exercises exactly the configuration a developer runs locally.
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U leroutier -d leroutier_dev"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Migrate a brand-new database
+        # The case an incrementally-migrated database can never exercise.
+        run: pnpm test:migrate:fresh
+      - name: Database tests
+        run: pnpm test:database:local
+      - name: Build
+        env:
+          VITE_API_URL: http://127.0.0.1:4000
+        run: pnpm build
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Live journeys (real API, real PostgreSQL, real browser)
+        run: pnpm test:live:local
+
+  # Each app must still build the way Vercel builds it, from its own root.
   app-root-build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         # web is the canonical unified PWA; the other three stay until retired.
         app: [web, passenger-web, driver-web, ops-web]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
       - run: corepack enable
       - name: Run the Vercel install command from the app directory
         working-directory: apps/${{ matrix.app }}
