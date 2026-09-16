@@ -6,8 +6,38 @@ const tomorrow=new Date(Date.now()+86400_000).toISOString().slice(0,10);
 export const DEPARTURE_AT=`${tomorrow}T07:30:00.000Z`, ARRIVAL_AT=`${tomorrow}T13:40:00.000Z`;
 const service={id:id(30),route_name:'DEMO Cotonou → Parakou',operator_name:'Opérateur démo',registration:'DEMO-BUS-01',driver_name:'Conducteur Démo',status:'active',capacity:12,current_sequence:0,departure_at:DEPARTURE_AT,arrival_at:ARRIVAL_AT,departure_point_name:'Godomey – Carrefour',departure_point_landmark:'Au carrefour principal',departure_point_latitude:6.37,departure_point_longitude:2.39,arrival_point_name:'Parakou – Gare centrale',arrival_point_landmark:null,arrival_point_latitude:null,arrival_point_longitude:null,is_demo:true,stops,
   availability:{origin:0,destination:3,available:12,capacity:12,stops,fare:{amountMinor:7500,currency:'XOF'},segments:[0,1,2].map(sequence=>({sequence,available:12,occupied:0}))}};
+// A stretch of RNIE 2 — Cotonou → Abomey-Calavi → Allada → Bohicon →
+// Dassa-Zoumè → Savè → Parakou — as GeoJSON [longitude, latitude], the order a
+// routing engine returns. Real Benin coordinates, so the fixture exercises the
+// same projection maths as production rather than a synthetic square.
+export const RNIE2=[[2.4183,6.3654],[2.3899,6.4102],[2.3556,6.4486],[2.2712,6.5521],[2.1511,6.6656],
+  [2.1188,6.8402],[2.0876,7.0195],[2.0667,7.1783],[2.1004,7.3925],[2.1562,7.5688],[2.1833,7.7500],
+  [2.3402,7.9011],[2.4833,8.0333],[2.5389,8.4127],[2.5901,8.7903],[2.6104,9.0512],[2.6300,9.3370]];
+
+const TRACKED_STOPS=[['Cotonou',6.3654,2.4183,'passed'],['Bohicon',7.1783,2.0667,'passed'],
+  ['Dassa-Zoumè',7.7500,2.1833,'next'],['Parakou',9.3370,2.6300,'upcoming']]
+  .map(([city,latitude,longitude,state],sequence)=>({sequence,name:`Gare de ${city}`,city,state,latitude,longitude}));
+
+/** A tracking payload shaped exactly like the API's, with per-test overrides. */
+export const trackingFixture=(overrides={})=>({
+  serviceId:id(30),serviceStatus:'active',bookingId:id(40),boardingSequence:0,destinationSequence:3,
+  route:{available:true,coordinates:RNIE2,distanceM:360_000,provider:'osrm',generatedAt:'2026-09-16T05:00:00Z'},
+  position:{latitude:7.3925,longitude:2.1004,observedAt:'2026-09-16T09:00:00Z',accuracyM:12},
+  signal:'live',signalAgeSeconds:30,
+  progress:{distanceAlongM:130_000,remainingM:230_000,totalM:360_000,fraction:0.36},
+  stops:TRACKED_STOPS,nextStop:{sequence:2,name:'Gare de Dassa-Zoumè',city:'Dassa-Zoumè'},
+  offRoute:false,offRouteM:null,
+  eta:{at:'2026-09-16T13:40:00Z',confidence:'live',speedMps:19.4,roundedToMinutes:5},
+  ...overrides});
+
 export async function mockApi(page) {
   const token=role=>`fixture-session-${role}`;
+  // Map tiles are never fetched in tests: the suite must not depend on a tile
+  // server being online, and a blocked tile is indistinguishable to Leaflet
+  // from a slow one. The container, route line and markers still render.
+  await page.route(/tile\.openstreetmap\.org|basemaps\.cartocdn\.com/,r=>r.fulfill({
+    status:200,contentType:'image/png',
+    body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==','base64')}));
   await page.route('**/api/v1/auth/config',r=>r.fulfill({json:{data:{demoLogin:true}}}));
   await page.route('**/api/v1/auth/demo',r=>r.fulfill({json:{data:{token:token(r.request().postDataJSON().role),user:{id:id(2),role:r.request().postDataJSON().role,display_name:'Compte Démo'}}}}));
   await page.route('**/api/v1/me',r=>{const role=(r.request().headers()['authorization']||'').replace('Bearer ','').split('-').at(-1)||'passenger';
@@ -66,6 +96,14 @@ export async function mockApi(page) {
       data:{bookingId:id(40)},entityType:'booking',entityId:id(40),read:true,
       createdAt:'2026-09-15T11:00:00Z',channels:{in_app:'sent'}},
   ]}}));
+  // Maps, routing geometry and live vehicle tracking. Declared here so no spec
+  // reaches the network for them; tracking.spec.js overrides them per case.
+  await page.route('**/api/v1/journeys/*/tracking',r=>r.fulfill({json:{data:trackingFixture()}}));
+  await page.route('**/api/v1/services/*/tracking',r=>r.fulfill({json:{data:trackingFixture()}}));
+  await page.route('**/api/v1/ops/fleet-tracking',r=>r.fulfill({json:{data:[trackingFixture()]}}));
+  await page.route('**/api/v1/routes/*/geometry',r=>r.fulfill({json:{data:{available:true,coordinates:RNIE2,
+    distanceM:360_000,provider:'osrm',generatedAt:'2026-09-16T05:00:00Z',stale:false}}}));
+  await page.route('**/api/v1/services/*/positions',r=>r.fulfill({json:{data:{accepted:true}}}));
   await page.route('**/api/v1/mobility/providers*',r=>r.fulfill({json:{data:[{id:'gozem',name:'Gozem',country:'BJ',
     capabilities:['first_mile','last_mile'],integrationStatus:'suggested_external',handoff:'external_link',
     launchUrl:'https://gozem.co',booksRide:false,providesFareEstimate:false,providesEta:false}]}}));

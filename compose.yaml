@@ -1,0 +1,48 @@
+# Local PostgreSQL for LeRoutier development and tests.
+#
+# The point of this file is isolation, not containerising the product: local
+# work and the test suites must never need — or be able to reach — the
+# production Neon database. The apps and the API still run on the host.
+#
+#   pnpm docker:up            start it and wait until it is genuinely ready
+#   pnpm db:local:migrate     apply the same migration chain production uses
+#   pnpm db:local:seed        demo data (refused against a production schema)
+#   pnpm test:database:local  the database suite, against this container
+#   pnpm docker:reset         destroy the volume and start clean
+#
+# The image tracks production: Neon runs PostgreSQL 18, so migrations are
+# exercised against the same major version rather than a convenient older one.
+name: leroutier
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: leroutier-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: leroutier
+      # Local-only credential. It reaches nothing but this container on this
+      # machine; production credentials never appear in this repository.
+      POSTGRES_PASSWORD: leroutier_local_dev
+      POSTGRES_DB: leroutier_dev
+      # Pinned so the named volume keeps working across image major versions,
+      # which have moved the default data directory more than once.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      # 55432, not 5432: a PostgreSQL already installed on the host keeps its
+      # port, and nothing connects to LeRoutier's database by accident.
+      - '127.0.0.1:55432:5432'
+    volumes:
+      - leroutier-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `pg_isready` alone reports ready during the init bootstrap restart, so
+      # the check also runs a real query.
+      test: ['CMD-SHELL', 'pg_isready -U leroutier -d leroutier_dev -q && psql -U leroutier -d leroutier_dev -c "SELECT 1" >/dev/null']
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  leroutier-pgdata:
+    name: leroutier-pgdata
