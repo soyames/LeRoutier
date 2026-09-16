@@ -1,6 +1,10 @@
 const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const stops=['Cotonou','Bohicon','Dassa-Zoumè','Parakou'].map((city,sequence)=>({id:id(200+sequence),stopId:id(200+sequence),stop_id:id(200+sequence),city,name:'Gare démo',sequence,latitude:6.3,longitude:2.4}));
-const service={id:id(30),route_name:'DEMO Cotonou → Parakou',operator_name:'Opérateur démo',registration:'DEMO-BUS-01',driver_name:'Conducteur Démo',status:'active',capacity:12,current_sequence:0,departure_at:'2026-09-15T06:30:00Z',is_demo:true,stops,
+// A departure tomorrow, so the fixture never drifts into the past and the
+// arrival time / trip duration are exercised like a real service.
+const tomorrow=new Date(Date.now()+86400_000).toISOString().slice(0,10);
+export const DEPARTURE_AT=`${tomorrow}T07:30:00.000Z`, ARRIVAL_AT=`${tomorrow}T13:40:00.000Z`;
+const service={id:id(30),route_name:'DEMO Cotonou → Parakou',operator_name:'Opérateur démo',registration:'DEMO-BUS-01',driver_name:'Conducteur Démo',status:'active',capacity:12,current_sequence:0,departure_at:DEPARTURE_AT,arrival_at:ARRIVAL_AT,departure_point_name:'Godomey – Carrefour',departure_point_landmark:'Au carrefour principal',departure_point_latitude:6.37,departure_point_longitude:2.39,arrival_point_name:'Parakou – Gare centrale',arrival_point_landmark:null,arrival_point_latitude:null,arrival_point_longitude:null,is_demo:true,stops,
   availability:{origin:0,destination:3,available:12,capacity:12,stops,fare:{amountMinor:7500,currency:'XOF'},segments:[0,1,2].map(sequence=>({sequence,available:12,occupied:0}))}};
 export async function mockApi(page) {
   const token=role=>`fixture-session-${role}`;

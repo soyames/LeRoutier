@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
-import { Card, Badge, StatCard, SectionTitle, ApiState } from '@leroutier/ui';
+import { Card, Badge, StatCard, SectionTitle, ApiState, ErrorState, SkeletonCards } from '@leroutier/ui';
+import { status, fcfa, time, untilLabel } from '@leroutier/ui';
 import { createSyncQueue } from '@leroutier/config/offline';
 import QrScanner from 'qr-scanner';
-import { Users, Route, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw, Package, MapPin, Navigation } from 'lucide-react';
+import { Users, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw, Package, MapPin, Navigation } from 'lucide-react';
 
 // Board/alight/incident actions flow through the offline queue: the server
 // deduplicates by Idempotency-Key, so retries are always safe.
@@ -55,49 +57,137 @@ function useService(){
 function VerificationBanner(){
   const {user}=useSession();
   if(!user || user.verification_status==='verified') return null;
-  const copy={pending_verification:'Votre compte opérateur est en attente de vérification. Les services et les retraits seront disponibles après validation.',
-    rejected:'Votre dossier a été refusé. Mettez à jour votre profil ou contactez LeRoutier.',
-    suspended:'Votre compte est suspendu. Contactez LeRoutier.',draft:'Complétez votre dossier pour lancer la vérification.'};
-  return <Card className="card-success stack"><Badge tone="warning">Statut : {user.verification_status}</Badge><p className="small">{copy[user.verification_status]||copy.pending_verification}</p></Card>;
+  const state=status('verification',user.verification_status);
+  const copy={pending_verification:'Nous vérifions votre dossier. Vous pourrez publier des services et retirer vos recettes dès validation.',
+    rejected:'Votre dossier a été refusé. Mettez à jour vos informations ou contactez LeRoutier.',
+    suspended:'Votre compte est suspendu. Contactez LeRoutier pour le rétablir.',
+    draft:'Complétez votre dossier pour lancer la vérification.'};
+  return <Card className="stack"><div className="between wrap"><strong>{state.label}</strong><Badge tone={state.tone}>{state.label}</Badge></div>
+    <p className="small">{copy[user.verification_status]||copy.pending_verification}</p></Card>;
 }
+
+// What a queued action means to the person who performed it.
+const ACTION_LABELS={board:'Embarquement',alight:'Débarquement',incident:'Incident signalé',parcel:'Colis scanné'};
+
 function QueueStatus({queue}){
   const {online}=useSession();
-  const pending=queue.rows.filter(r=>['pending','syncing','failed'].includes(r.state));
-  if(!pending.length && online) return null;
-  return <Card className="stack"><div className="between"><h3>Actions hors ligne</h3>{pending.length>0 && <Badge tone="warning"><RefreshCw size={13}/>{pending.length} en attente</Badge>}</div>
-    {!online && <p role="status">Hors ligne — les actions seront synchronisées à la reconnexion.</p>}
-    {pending.map(row=><div className="between wrap" key={row.id}><span className="small">{row.type} · {row.state}{row.error?` · ${row.error}`:''}</span><div>{['failed','conflict'].includes(row.state)&&<button className="btn btn-soft" onClick={()=>row.state==='failed'?queue.retry(row.id):queue.discard(row.id)}>{row.state==='failed'?'Réessayer':'Ignorer'}</button>}</div></div>)}
-    {!online && <button className="btn btn-soft" onClick={queue.sync}>Synchroniser maintenant</button>}
+  const waiting=queue.rows.filter(r=>['pending','syncing'].includes(r.state));
+  const failed=queue.rows.filter(r=>r.state==='failed');
+  const conflicts=queue.rows.filter(r=>r.state==='conflict');
+  if(!waiting.length && !failed.length && !conflicts.length && online) return null;
+  return <Card className="stack">
+    <div className="between wrap">
+      <strong>{!online?'Hors ligne':'Synchronisation'}</strong>
+      {waiting.length>0 && <Badge tone="warning"><RefreshCw size={13}/>{waiting.length} action{waiting.length>1?'s':''} en attente</Badge>}
+      {!waiting.length && !failed.length && !conflicts.length && <Badge tone="success">À jour</Badge>}
+    </div>
+    {!online && <p className="small" role="status">Vos scans sont enregistrés sur l’appareil et partiront automatiquement dès le retour du réseau.</p>}
+    {conflicts.length>0 && <p className="small" role="status">{conflicts.length} action{conflicts.length>1?'s demandent':' demande'} votre attention : la situation a changé entre-temps.</p>}
+    {[...failed,...conflicts].map(row=><div className="between wrap" key={row.id}>
+      <span className="small">{ACTION_LABELS[row.type]||'Action'} · {row.state==='failed'?'non envoyé':'à vérifier'}</span>
+      <button className="btn btn-soft" onClick={()=>row.state==='failed'?queue.retry(row.id):queue.discard(row.id)}>
+        {row.state==='failed'?'Réessayer':'Ignorer'}</button>
+    </div>)}
+    {online && waiting.length>0 && <button className="btn btn-soft" onClick={queue.sync}>Synchroniser maintenant</button>}
   </Card>;
 }
 
+// The crew home screen answers, at a glance and one-handed: what am I running,
+// how full is it, what is next, and what do I press now. Dense tables, revenue
+// and long forms belong elsewhere.
 export function Today(){
-  const {user,request}=useSession();
-  const {service,s,manifest}=useService();
+  const {user,request,online}=useSession();
+  const navigate=useNavigate();
+  const {service,s,manifest,cargo}=useService();
   const queue=useDriverQueue(user?.id,request);
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
-  if(!user || service.loading || service.error) return <><VerificationBanner/><SectionTitle title="Aujourd’hui"/><ApiState resource={service} empty={user?'Aucun service ne vous est affecté aujourd’hui. Contactez votre opérateur si cela vous semble anormal.':'Connectez-vous pour voir votre affectation.'}/></>;
-  if(!s) return <><VerificationBanner/><SectionTitle title="Aujourd’hui"/><Card><p role="status">Aucun service ne vous est affecté aujourd’hui. Contactez votre opérateur si cela vous semble anormal.</p></Card></>;
-  const stop=s.stops.find(stop=>stop.sequence===s.current_sequence);
+  const [incidentOpen,setIncidentOpen]=useState(false);
+  const convoyeur=user?.role==='convoyeur';
+
+  if(!user) return <><SectionTitle title="Aujourd’hui"/><Card className="stack"><strong>Connectez-vous</strong>
+    <p className="small muted">Votre service du jour s’affiche ici.</p></Card></>;
+  if(service.loading) return <><VerificationBanner/><SectionTitle title="Aujourd’hui"/><SkeletonCards count={2} lines={4}/></>;
+  if(service.error) return <><VerificationBanner/><SectionTitle title="Aujourd’hui"/>
+    <ErrorState text="Impossible de charger votre service." onRetry={service.reload}/></>;
+  if(!s) return <><VerificationBanner/><SectionTitle title="Aujourd’hui"/>
+    <Card className="stack"><strong>Aucun service aujourd’hui</strong>
+      <p className="small muted">Aucun départ ne vous est affecté. Prévenez votre exploitation si cela vous semble anormal.</p></Card></>;
+
+  const stops=s.stops||[];
+  const stop=stops.find(x=>x.sequence===s.current_sequence);
+  const next=stops.find(x=>x.sequence===s.current_sequence+1);
+  const aboard=(manifest.data||[]).filter(b=>b.status==='boarded').length;
+  const expected=(manifest.data||[]).filter(b=>['confirmed','boarded'].includes(b.status)).length;
+  const parcels=(cargo.data||[]).length;
+  const state=status('service',s.status);
+  const countdown=untilLabel(s.departure_at);
+
   return <>
     <VerificationBanner/>
-    <Card className="card-dark stack"><div className="between wrap"><div><span className="eyebrow">{s.status}</span><h2>{s.route_name}</h2></div><Badge>{s.registration}</Badge></div>
-      <strong>Arrêt courant : {stop?.city}</strong>
-      {s.departure_point_name && <span className="small">Embarquement : {s.departure_point_name}{s.departure_point_landmark?` (${s.departure_point_landmark})`:''}</span>}
-      {s.arrival_point_name && <span className="small">Terminus : {s.arrival_point_name}{s.arrival_point_landmark?` (${s.arrival_point_landmark})`:''}</span>}
+    {/* One glanceable operational header. */}
+    <Card className="card-dark duty">
+      <div className="duty-top">
+        <div>
+          <span className="eyebrow" style={{color:'#fff',opacity:.8}}>{convoyeur?'Mon service':'Ma feuille de route'}</span>
+          <div className="duty-time">{time(s.departure_at)}</div>
+          <strong>{stops[0]?.city} → {stops.at(-1)?.city}</strong>
+        </div>
+        <Badge tone={state.tone}>{state.label}</Badge>
+      </div>
+      <div className="duty-metrics">
+        <div className="duty-metric"><strong>{aboard}/{expected||0}</strong><span>à bord</span></div>
+        <div className="duty-metric"><strong>{Math.max(0,(s.capacity??0)-aboard)}</strong><span>places libres</span></div>
+        <div className="duty-metric"><strong>{parcels}</strong><span>colis</span></div>
+      </div>
+      <span className="small">
+        {stop?`Arrêt actuel : ${stop.city}`:''}{next?` · Prochain : ${next.city}`:''}{countdown?` · Départ ${countdown}`:''}
+      </span>
     </Card>
-    <div className="grid grid-3"><StatCard label="À bord" value={manifest.data?.filter(b=>b.status==='boarded').length || 0} icon={Users} tone="success"/><StatCard label="Places véhicule" value={s.capacity} icon={BusFront}/><StatCard label="Arrêt" value={s.current_sequence+1} icon={Route}/></div>
+
     <QueueStatus queue={queue}/>
-    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    <Card className="stack"><span className="eyebrow">Actions terrain</span>
-      {s.current_sequence<s.stops.length-1 && <button className="btn btn-primary" disabled={busy} onClick={()=>{setBusy(true);request(`/services/${s.id}/advance`,{method:'POST',body:{sequence:s.current_sequence+1}}).then(()=>{setNotice('Arrêt suivant enregistré.');service.reload();}).catch(e=>setError(e.message)).finally(()=>setBusy(false));}}>Arrivée à l’arrêt suivant</button>}
-      <button className="btn btn-soft" disabled={busy} onClick={()=>navigator.geolocation? navigator.geolocation.getCurrentPosition(p=>request(`/services/${s.id}/positions`,{method:'POST',body:{latitude:p.coords.latitude,longitude:p.coords.longitude,observedAt:new Date(p.timestamp).toISOString()}}).then(()=>setNotice('Position partagée.')).catch(e=>setError(e.message)),()=>setError('Position indisponible ou autorisation refusée.')):setError('Géolocalisation indisponible.')}>Partager ma position</button>
+    {error && <ErrorState title="Action impossible" text={error}/>}
+    {notice && <div className="notice" role="status">{notice}</div>}
+
+    {/* Two or three big targets, usable without looking closely. */}
+    <div className="big-actions">
+      <button className="btn btn-primary" onClick={()=>navigate('/work/scanner')}><QrCode size={20}/>Scanner un billet</button>
+      <button className="btn btn-dark" onClick={()=>navigate('/work/walk-up')}><Wallet size={20}/>Vendre une place</button>
+      <button className="btn btn-soft" onClick={()=>navigate('/work/parcels')}><Package size={20}/>Colis</button>
+    </div>
+
+    <Card className="stack">
+      {s.current_sequence<stops.length-1 && <button className="btn btn-primary" disabled={busy||!online} onClick={()=>{
+        setBusy(true);setError('');
+        request(`/services/${s.id}/advance`,{method:'POST',body:{sequence:s.current_sequence+1}})
+          .then(()=>{setNotice(`Arrivée à ${next?.city??'l’arrêt suivant'} enregistrée.`);service.reload();})
+          .catch(e=>setError(e.message)).finally(()=>setBusy(false));
+      }}>Je suis arrivé à {next?.city??'l’arrêt suivant'}</button>}
+      <button className="btn btn-soft" disabled={busy} onClick={()=>navigator.geolocation
+        ? navigator.geolocation.getCurrentPosition(
+          p=>request(`/services/${s.id}/positions`,{method:'POST',body:{latitude:p.coords.latitude,longitude:p.coords.longitude,observedAt:new Date(p.timestamp).toISOString()}})
+            .then(()=>setNotice('Position partagée avec les passagers.')).catch(e=>setError(e.message)),
+          ()=>setError('Position indisponible ou autorisation refusée.'))
+        : setError('La géolocalisation n’est pas disponible sur cet appareil.')}><Navigation size={16}/>Partager ma position</button>
     </Card>
-    <Card className="stack"><SectionTitle icon={AlertTriangle} title="Signaler un incident"/>
-      <form className="stack" onSubmit={async e=>{e.preventDefault();const f=new FormData(e.target);queue.enqueue('incident',{serviceId:s.id,kind:'other',severity:'medium',description:String(f.get('description')||'')});e.target.reset();setNotice('Incident enregistré.');if(navigator.onLine)queue.sync();}}>
-        <label>Description<textarea className="control" name="description" maxLength={2000} required/></label>
-        <button className="btn btn-danger" disabled={busy}>Enregistrer l’incident</button>
-      </form></Card>
+
+    {/* Reporting is deliberately behind one tap: it is a stopped-vehicle task. */}
+    <Card className="stack">
+      {!incidentOpen
+        ? <button className="btn btn-soft" onClick={()=>setIncidentOpen(true)}><AlertTriangle size={16}/>Signaler un problème</button>
+        : <form className="stack" onSubmit={e=>{
+          e.preventDefault();const f=new FormData(e.target);
+          queue.enqueue('incident',{serviceId:s.id,kind:'other',severity:'medium',description:String(f.get('description')||'')});
+          e.target.reset();setIncidentOpen(false);setNotice('Problème signalé à l’exploitation.');if(navigator.onLine)queue.sync();
+        }}>
+          <label>Que se passe-t-il ?<textarea className="control" name="description" maxLength={2000} required rows={3}
+            placeholder="Panne, retard, route bloquée…"/></label>
+          <div className="controls">
+            <button className="btn btn-danger">Envoyer le signalement</button>
+            <button type="button" className="btn btn-soft" onClick={()=>setIncidentOpen(false)}>Annuler</button>
+          </div>
+          <p className="small muted">Fonctionne hors ligne : le signalement partira dès le retour du réseau.</p>
+        </form>}
+    </Card>
   </>;
 }
 
@@ -180,38 +270,66 @@ export function Scanner(){
   </>;
 }
 
+// Selling a seat at the roadside must take well under a minute: the fare comes
+// from the service itself rather than the crew's memory, and the receipt
+// reference is pre-filled but stays editable for a paper receipt book.
 export function WalkUp(){
-  const {request,online}=useSession();
+  const {user,request,online}=useSession();
   const {s,manifest}=useService();
-  const [origin,setOrigin]=useState(''),[destination,setDestination]=useState(''),[name,setName]=useState(''),[phone,setPhone]=useState(''),[amount,setAmount]=useState(''),[reference,setReference]=useState('');
-  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
+  const [destination,setDestination]=useState(''),[name,setName]=useState(''),[phone,setPhone]=useState('');
+  const [receipt,setReceipt]=useState(()=>'ESP-'+Date.now().toString(36).toUpperCase());
+  const [error,setError]=useState(''),[done,setDone]=useState(null),[busy,setBusy]=useState(false);
+  // Boarding always happens where the vehicle is now.
+  const origin=s?.current_sequence ?? 0;
+  const quote=useApi(s && destination!=='' ? `/services/${s.id}/availability?origin=${origin}&destination=${destination}` : null);
+  const fare=quote.data?.fare?.amountMinor ?? null;
+  const seats=quote.data?.available ?? null;
   async function submit(e){
-    e.preventDefault();setBusy(true);setError('');setNotice('');
+    e.preventDefault();setBusy(true);setError('');setDone(null);
     try{
       const result=await request('/driver/walk-up-bookings',{method:'POST',key:'walkup-'+crypto.randomUUID(),body:{serviceId:s.id,
-        origin:Number(origin),destination:Number(destination),passengerName:name,passengerPhone:phone,amountMinor:Number(amount),cashReference:reference.trim()}});
-      setNotice(`Vente enregistrée — ${result.amountMinor.toLocaleString('fr-FR')} FCFA encaissés (recette opérateur).`);setName('');setPhone('');setAmount('');setReference('');manifest.reload?.();
+        origin,destination:Number(destination),passengerName:name.trim(),passengerPhone:phone.trim(),amountMinor:fare,cashReference:receipt.trim()}});
+      setDone({amount:result.amountMinor,reference:receipt.trim(),to:(s.stops||[])[Number(destination)]?.city});
+      setName('');setPhone('');setDestination('');setReceipt('ESP-'+Date.now().toString(36).toUpperCase());
+      manifest.reload?.();
     }catch(e){setError(e.message);}finally{setBusy(false);}
   }
-  if(!s) return <><SectionTitle icon={Wallet} title="Vente au comptant"/><Card><p role="status">Aucun service affecté — la vente au comptant n’est pas disponible.</p></Card></>;
+  if(!s) return <><SectionTitle icon={Wallet} title="Vente à bord"/>
+    <Card className="stack"><strong>Aucun service en cours</strong>
+      <p className="small muted">La vente à bord s’active dès qu’un service vous est affecté.</p></Card></>;
   const stops=s.stops||[];
+  const owner=user?.operator_type==='independent'?'votre activité':(user?.operator_name||'la compagnie');
   return <>
-    <SectionTitle icon={Wallet} title="Vente au comptant (montée directe)"/>
-    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    <SectionTitle icon={Wallet} title="Vente à bord"/>
+    {error && <ErrorState title="Vente non enregistrée" text={error}/>}
+    {done && <Card className="card-success stack">
+      <div className="between wrap"><h3>Encaissé · {fcfa(done.amount)}</h3><Badge tone="success">Passager embarqué</Badge></div>
+      <div className="summary">
+        <div className="row"><span>Destination</span><span>{done.to}</span></div>
+        <div className="row"><span>Reçu</span><span>{done.reference}</span></div>
+        <div className="row"><span>Recette de</span><span>{owner}</span></div>
+      </div>
+    </Card>}
     <Card className="stack">
-      <p className="small muted">Le paiement en espèces n’existe qu’ici, par l’équipage du service. Le montant doit correspondre exactement au tarif du tronçon — la recette appartient à l’opérateur.</p>
       <form className="stack" onSubmit={submit}>
-        <div className="between wrap">
-          <label className="grow">Montée<select className="control" required value={origin} onChange={e=>setOrigin(e.target.value)}><option value="">Choisir…</option>{stops.map((st,index)=><option key={index} value={index}>{st.city}</option>)}</select></label>
-          <label className="grow">Descente<select className="control" required value={destination} onChange={e=>setDestination(e.target.value)}><option value="">Choisir…</option>{stops.map((st,index)=><option key={index} value={index}>{st.city}</option>)}</select></label>
-        </div>
-        <div className="between wrap">
-          <label className="grow">Nom du passager<input className="control" required minLength={2} value={name} onChange={e=>setName(e.target.value)}/></label>
-          <label className="grow">Téléphone<input className="control" type="tel" required value={phone} onChange={e=>setPhone(e.target.value)}/></label>
-          <label className="grow">Montant (FCFA)<input className="control" type="number" min={1} step={1} required value={amount} onChange={e=>setAmount(e.target.value)}/></label>
-          <label className="grow">Référence du reçu<input className="control" required value={reference} onChange={e=>setReference(e.target.value)}/></label>
-        </div>
-        <button className="btn btn-primary" disabled={busy || !online || !origin || !destination || Number(origin)>=Number(destination)}>{busy?'Enregistrement…':'Encaisser et embarquer'}</button>
+        <label>Descend à<select className="control" required value={destination} onChange={e=>setDestination(e.target.value)}>
+          <option value="">Choisir l’arrêt…</option>
+          {stops.map((st,index)=>index>origin?<option key={index} value={index}>{st.city}</option>:null)}
+        </select></label>
+        {fare!==null && <div className="summary">
+          <div className="row"><span>À encaisser</span><span><strong>{fcfa(fare)}</strong></span></div>
+          <div className="row"><span>Places restantes</span><span>{seats}</span></div>
+        </div>}
+        {destination!=='' && quote.loading && <p className="small muted" role="status">Calcul du tarif…</p>}
+        {destination!=='' && quote.error && <p className="small muted" role="alert">Tarif indisponible pour ce trajet.</p>}
+        <label>Nom du passager<input className="control" required minLength={2} value={name} onChange={e=>setName(e.target.value)}/></label>
+        <label>Téléphone<input className="control" type="tel" required value={phone} onChange={e=>setPhone(e.target.value)}/></label>
+        <details><summary className="small">Référence du reçu · {receipt}</summary>
+          <label style={{display:'block',marginTop:10}}>Remplacer par votre numéro de reçu papier
+            <input className="control" required value={receipt} onChange={e=>setReceipt(e.target.value)}/></label></details>
+        <button className="btn btn-primary" disabled={busy || !online || fare===null || !seats}>
+          {busy?'Enregistrement…':fare!==null?`Encaisser ${fcfa(fare)}`:'Choisir la destination'}</button>
+        <p className="small muted">Les espèces ne sont encaissées que par l’équipage, à bord. La recette revient à {owner}.</p>
       </form>
     </Card>
   </>;
@@ -319,26 +437,36 @@ export function Earnings(){
   const [opAmount,setOpAmount]=useState(''),[opPhone,setOpPhone]=useState(user?.phone||'');
   const summary=data.data?.summary || {available:0,reserved:0,paid:0,reversed:0};
   async function act(path,body,key){setBusy(true);setError('');setNotice('');try{await request(path,{method:'POST',body,key});payouts.reload();destinations.reload();data.reload();operatorData.reload?.();operatorPayouts.reload?.();setNotice('Action enregistrée.');}catch(e){setError(e.message);}finally{setBusy(false);}}
-  if(!user) return <Card><p role="status">Connectez-vous pour voir vos gains.</p></Card>;
+  if(!user) return <Card className="stack"><strong>Connectez-vous</strong>
+    <p className="small muted">Vos recettes s’affichent ici.</p></Card>;
+  // Company crew are paid by their employer: no ledger and no withdrawal
+  // control is presented to them at all. The API enforces this independently.
+  if(!independent) return <>
+    <SectionTitle icon={Wallet} title="Recettes"/>
+    <Card className="stack">
+      <strong>Les recettes reviennent à {user.operator_name||'votre compagnie'}</strong>
+      <p className="small muted">Les sommes encaissées à bord appartiennent à la compagnie qui vous emploie. Votre rémunération est gérée par votre exploitation, en dehors de LeRoutier.</p>
+    </Card>
+  </>;
   return <>
-    <SectionTitle icon={Wallet} title="Mes gains & versements"/>
+    <SectionTitle icon={Wallet} title="Mes recettes & retraits"/>
     <VerificationBanner/>
-    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    {independent && operatorData.data && <Card className="card-success stack"><SectionTitle icon={Wallet} title="Recette de mon activité indépendante"/>
+    {error && <ErrorState title="Action impossible" text={error}/>}
+    {notice && <div className="notice" role="status">{notice}</div>}
+    {operatorData.data && <Card className="card-success stack"><SectionTitle icon={Wallet} title="Recette de mon activité"/>
       <div className="grid grid-3">
-        <StatCard label="Disponible" value={`${(operatorData.data.summary.available).toLocaleString('fr-FR')} FCFA`} tone="success"/>
-        <StatCard label="En attente" value={`${operatorData.data.summary.reserved.toLocaleString('fr-FR')} FCFA`}/>
-        <StatCard label="Versé" value={`${operatorData.data.summary.paid.toLocaleString('fr-FR')} FCFA`}/>
+        <StatCard label="Disponible" value={fcfa(operatorData.data.summary.available)} tone="success"/>
+        <StatCard label="En attente" value={fcfa(operatorData.data.summary.reserved)}/>
+        <StatCard label="Déjà versé" value={fcfa(operatorData.data.summary.paid)}/>
       </div>
-      {operatorData.data.summary.verificationStatus!=='verified' && <p role="status">Compte en attente de vérification — les retraits seront possibles après validation.</p>}
+      {operatorData.data.summary.verificationStatus!=='verified' && <p className="small" role="status">Les retraits s’ouvriront dès la validation de votre dossier.</p>}
       <div className="between wrap">
         <label className="grow">Montant du retrait (FCFA)<input className="control" type="number" min={1} step={1} value={opAmount} onChange={e=>setOpAmount(e.target.value)}/></label>
         <label className="grow">Numéro Mobile Money<input className="control" type="tel" inputMode="numeric" value={opPhone} onChange={e=>setOpPhone(e.target.value.replace(/[^0-9]/g,''))}/></label>
         <button className="btn btn-primary" disabled={busy || !online || operatorData.data.summary.verificationStatus!=='verified' || !Number.isInteger(Number(opAmount)) || Number(opAmount)<=0 || !/^[0-9]{8,15}$/.test(opPhone)} onClick={()=>act('/operator/payouts',{amountMinor:Number(opAmount),phoneNumber:opPhone,country:'BJ',network:null},'oppayout-'+crypto.randomUUID())}>Demander le retrait</button>
       </div>
-      {(operatorPayouts.data||[]).map(p=><div className="between" key={p.id}><span className="small">{p.amountMinor.toLocaleString('fr-FR')} FCFA · {p.phoneNumber}</span><Badge tone={payoutTones[p.status]}>{payoutLabels[p.status]}</Badge></div>)}
+      {(operatorPayouts.data||[]).map(p=><div className="between" key={p.id}><span className="small">{fcfa(p.amountMinor)} · {p.phoneNumber}</span><Badge tone={status('payout',p.status).tone}>{status('payout',p.status).label}</Badge></div>)}
     </Card>}
-    {!independent && <Card className="stack"><p className="small muted">Vos gains sont gérés par votre opérateur. Les versements et la recette de la compagnie ne sont pas accessibles ici.</p></Card>}
     <div className="grid grid-3">
       <StatCard label="Disponible" value={`${summary.available.toLocaleString('fr-FR')} FCFA`} icon={Wallet} tone="success"/>
       <StatCard label="En attente" value={`${summary.reserved.toLocaleString('fr-FR')} FCFA`} icon={RefreshCw}/>

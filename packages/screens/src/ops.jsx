@@ -1,18 +1,32 @@
 import { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
 import { Card, Badge, StatCard, SectionTitle, ApiState } from '@leroutier/ui';
+import { status, fcfa } from '@leroutier/ui';
 import { Provisioning } from './provisioning.jsx';
-import { BusFront, Armchair, Radio, ShieldAlert, WalletCards, ShieldCheck, Package, MapPin, Home, Users } from 'lucide-react';
+import { BusFront, Armchair, Radio, ShieldAlert, WalletCards, ShieldCheck, Package, MapPin, Home, Users, Check } from 'lucide-react';
 
-const paymentLabels={pending:'En attente',succeeded:'Réussi',failed:'Échoué',cancelled:'Annulé',refunded:'Remboursé'};
-const payoutLabels={requested:'Demandé',processing:'En cours',paid:'Versé',failed:'Échoué',cancelled:'Annulé',reversed:'Reversé'};
-const payoutTones={requested:'neutral',processing:'warning',paid:'success',failed:'danger',cancelled:'neutral',reversed:'danger'};
-const parcelLabels={created:'Créé',accepted:'Accepté',manifested:'Affecté',loaded:'Chargé',in_transit:'En transit',arrived:'Arrivé',
-  ready_for_pickup:'Prêt au retrait',collected:'Retiré',cancelled:'Annulé',rejected:'Refusé',held:'Retenu',damaged:'Endommagé',
-  lost:'Perdu',return_requested:'Retour demandé',returned:'Retourné'};
-const parcelTones={created:'neutral',accepted:'neutral',manifested:'neutral',loaded:'neutral',in_transit:'neutral',arrived:'neutral',
-  ready_for_pickup:'warning',collected:'success',cancelled:'neutral',rejected:'danger',held:'warning',damaged:'danger',lost:'danger',
-  return_requested:'warning',returned:'neutral'};
+// Ops screens are mounted at /ops/* in the unified app and at /* in the legacy
+// operations app: setup links resolve against whichever prefix is in use.
+function useOpsLink() {
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const prefix = pathname.startsWith('/ops') ? '/ops' : '';
+  return path => navigate(`${prefix}${path}`);
+}
+
+
+// Automated treatments, named for what they do rather than by their workflow id.
+const WORKFLOW_LABELS={
+  'payment-reconciliation':'Rapprochement d’un paiement',
+  'breakdown-recovery':'Remplacement après panne',
+  'driver-payout':'Versement à un conducteur',
+  'delay-management':'Gestion d’un retard',
+  'parcel-delay':'Colis sur un service retardé',
+  'payout-anomaly':'Anomalie de versement',
+  'parcel-exception':'Anomalie colis',
+  'parcel-breakdown':'Colis après panne',
+};
 
 function useOpsActions(){
   const {request}=useSession();
@@ -37,14 +51,16 @@ export function Today(){
   const data=catalog.data;
   const configured=user?.verification_status==='verified';
   const hasOperations=(data?.vehicles?.length>0 || data?.routes?.length>0 || fleet.data?.services?.length>0);
+  const go=useOpsLink();
   const checklist=[
-    {label:'Ajouter une station (ou choisir un point vérifié)',done:(stations.data||[]).length>0,path:'/stations'},
+    {label:'Enregistrer votre gare ou point de départ',done:(stations.data||[]).length>0,path:'/stations'},
     {label:'Ajouter un véhicule',done:(data?.vehicles||[]).length>0,path:'/fleet'},
     {label:'Ajouter un conducteur',done:(data?.users||[]).some(u=>u.role==='driver'),path:'/crew'},
     {label:'Ajouter un convoyeur (recommandé)',done:(data?.users||[]).some(u=>u.role==='convoyeur'),path:'/crew'},
     {label:'Créer une ligne et ses tarifs',done:(data?.routes||[]).length>0,path:'/services'},
-    {label:'Publier le premier service',done:(fleet.data?.services||[]).length>0,path:'/services'},
+    {label:'Publier votre premier départ',done:(fleet.data?.services||[]).length>0,path:'/services'},
   ];
+  const remaining=checklist.filter(step=>!step.done).length;
   async function approve(approvalId,decision){
     const result=await act(`/agent/approvals/${approvalId}`,{decision});
     if(result.ok)setNotice('Décision enregistrée.');else setError(result.error);
@@ -56,21 +72,33 @@ export function Today(){
       <h1>{user?.operator_type==='independent'?'Votre activité indépendante':`Votre compagnie${user?.display_name?` — ${user.display_name}`:''}`}</h1>
       <p>{configured?'Supervision en temps réel : services, équipage, colis, paiements et incidents.':'Votre compte doit être vérifié par LeRoutier avant de créer des services ou de retirer des fonds. Préparez votre réseau en attendant.'}</p></Card>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    {configured && !hasOperations && catalog.data && <Card className="card-success stack"><SectionTitle icon={Home} title="Configurez votre compagnie"/>
-      <p className="small">Une compagnie vérifiée sans données opérationnelles — suivez ce parcours guidé pour publier votre premier service.</p>
-      {checklist.map((step,i)=><div className="between" key={step.label}><span className="small">{i+1}. {step.label}</span>{step.done?<Badge tone="success">fait</Badge>:<Badge>à faire</Badge>}</div>)}
-      <p className="small muted">Chaque étape est réalisable dans la section correspondante du menu.</p></Card>}
+    {/* A verified company with nothing running gets a guided setup, not an
+        empty dashboard. Each step opens the form that completes it. */}
+    {configured && !hasOperations && catalog.data && <Card className="stack">
+      <div className="between wrap"><h3>Mettons votre compagnie en route</h3>
+        <Badge tone={remaining?'warning':'success'}>{remaining?`${remaining} étape${remaining>1?'s':''} restante${remaining>1?'s':''}`:'Terminé'}</Badge></div>
+      <div className="checklist">
+        {checklist.map((step,i)=><button key={step.label} className={step.done?'done':''} onClick={()=>go(step.path)}>
+          <span className="idx">{step.done?<Check size={13}/>:i+1}</span>
+          <span className="grow">{step.label}</span>
+          <span className="small">{step.done?'Fait':'Ouvrir'}</span>
+        </button>)}
+      </div>
+    </Card>}
     {diagnostics.data && <>
       <div className="kpi-scroll">
         <StatCard label="Services aujourd’hui" value={todayServices.length} icon={Radio}/>
         <StatCard label="Paiements échoués" value={diagnostics.data.payments.failed} icon={WalletCards} tone={diagnostics.data.payments.failed?'danger':'default'}/>
         <StatCard label="Incidents ouverts" value={diagnostics.data.incidents.open} icon={ShieldAlert}/>
-        <StatCard label="Suivi véhicule obsolète" value={diagnostics.data.services.staleTracking} icon={BusFront} tone={diagnostics.data.services.staleTracking?'warning':'default'}/>
-        <StatCard label="Workflows échoués" value={diagnostics.data.workflows.failed} icon={ShieldCheck} tone={diagnostics.data.workflows.failed?'danger':'default'}/>
+        <StatCard label="Véhicules sans signal" value={diagnostics.data.services.staleTracking} icon={BusFront} tone={diagnostics.data.services.staleTracking?'warning':'default'}/>
+        <StatCard label="Traitements à relancer" value={diagnostics.data.workflows.failed} icon={ShieldCheck} tone={diagnostics.data.workflows.failed?'danger':'default'}/>
         <StatCard label="Colis non retirés (24h+)" value={diagnostics.data.parcels.uncollected} icon={Package} tone={diagnostics.data.parcels.uncollected?'warning':'default'}/>
       </div>
-      {diagnostics.data.workflows.failedRuns.length>0 && <Card className="stack"><h3>Workflows en échec</h3>
-        {diagnostics.data.workflows.failedRuns.map(run=><div className="between wrap" key={run.id}><span className="small">{run.workflow} · {run.step}{run.failure_code?` · ${run.failure_code}`:''} · tentative {run.attempts}/3</span>
+      {diagnostics.data.workflows.failedRuns.length>0 && <Card className="stack">
+        <h3>Traitements automatiques à relancer</h3>
+        <p className="small muted">Ces opérations n’ont pas abouti. Relancez-les, ou contactez LeRoutier si l’échec persiste.</p>
+        {diagnostics.data.workflows.failedRuns.map(run=><div className="between wrap" key={run.id}>
+          <span className="small">{WORKFLOW_LABELS[run.workflow]||'Traitement'} · tentative {run.attempts}/3</span>
           <button className="btn btn-soft" disabled={!online || run.attempts>=3} onClick={async()=>{const result=await act(`/workflows/${run.id}/retry`);result.ok?setNotice('Relance enregistrée.'):setError(result.error);diagnostics.reload();}}>Relancer</button></div>)}
       </Card>}
       <p className="small muted">FedaPay : collections {diagnostics.data.fedapay.collections?'actives':'indisponibles'} · versements {diagnostics.data.fedapay.payouts?'configurés':'non configurés'}{diagnostics.data.fedapay.environment?` · ${diagnostics.data.fedapay.environment}`:''}</p>
@@ -97,7 +125,7 @@ export function Services(){
   return <>
     <SectionTitle icon={Radio} title="Services & lignes"/>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    {fleet.loading || fleet.error || !services.length ? <ApiState resource={fleet} empty="Aucun service publié. Créez une ligne et un service dans Paramètres → Administration, ou ajoutez ici votre premier service."/> : services.map(s=><Card key={s.id} className="stack"><div className="between"><div><h3>{s.registration || 'Sans affectation'}</h3><span className="small muted">{s.driver_name || 'Sans conducteur'} · {s.route_name} · {new Date(s.departure_at).toLocaleString('fr-FR')}</span></div><Badge tone={s.status==='active'?'success':'neutral'}>{s.status}</Badge></div>
+    {fleet.loading || fleet.error || !services.length ? <ApiState resource={fleet} empty="Aucun service publié. Créez une ligne et un service dans Paramètres → Administration, ou ajoutez ici votre premier service."/> : services.map(s=><Card key={s.id} className="stack"><div className="between"><div><h3>{s.registration || 'Sans affectation'}</h3><span className="small muted">{s.driver_name || 'Sans conducteur'} · {s.route_name} · {new Date(s.departure_at).toLocaleString('fr-FR')}</span></div><Badge tone={status('service',s.status).tone}>{status('service',s.status).label}</Badge></div>
       {s.availability && <div className="notice"><div className="between"><strong>Capacité restante</strong><Armchair size={18}/></div>{s.availability.segments.map(segment=><div className="between small" key={segment.sequence}><span>{s.availability.stops[segment.sequence].city} → {s.availability.stops[segment.sequence+1].city}</span><strong>{segment.available} / {s.capacity}</strong></div>)}</div>}
       <div className="controls">{(s.status==='scheduled'?['active','cancelled']:s.status==='active'?['disrupted','completed']:s.status==='disrupted'?['active','cancelled']:[]).map(status=><button className="btn btn-soft" key={status} disabled={!online} onClick={()=>act(`/services/${s.id}/status`,{status})}>Passer à {status}</button>)}</div></Card>)}
     <SectionTitle icon={ShieldAlert} title="Incidents & reprise"/>
@@ -214,8 +242,8 @@ export function Parcels(){
       <button className="btn btn-soft" disabled={!online || !parcelQ.trim()}>Rechercher</button></form>
       {parcelsList===null && <p className="small muted">Recherchez une expédition pour l’accepter, l’affecter à un service, la rendre prête au retrait ou enregistrer sa remise.</p>}
       {parcelsList!==null && parcelsList.length===0 && <p role="status">Aucun colis trouvé.</p>}
-      {(parcelsList||[]).map(p=><div className="between wrap" key={p.id}><div className="stack"><div className="between"><h3>{p.trackingNumber}</h3><Badge tone={parcelTones[p.status]}>{parcelLabels[p.status]}</Badge></div>
-        <span className="small muted">{p.category} · {p.priceMinor.toLocaleString('fr-FR')} FCFA · {new Date(p.createdAt).toLocaleDateString('fr-FR')}</span></div>
+      {(parcelsList||[]).map(p=><div className="between wrap" key={p.id}><div className="stack"><div className="between"><h3>{p.trackingNumber}</h3><Badge tone={status('parcel',p.status).tone}>{status('parcel',p.status).label}</Badge></div>
+        <span className="small muted">{p.category} · {fcfa(p.priceMinor)} · {new Date(p.createdAt).toLocaleDateString('fr-FR')}</span></div>
         <div className="controls">
           {p.status==='created' && <button className="btn btn-primary" disabled={!online} onClick={()=>act(`/parcels/${p.id}/accept`,undefined,async()=>setParcelsList(await request('/ops/parcels?q='+encodeURIComponent(parcelQ))))}>Accepter</button>}
           {p.status==='accepted' && <select className="control" value={assignments[p.id]||''} onChange={e=>setAssignments(a=>({...a,[p.id]:e.target.value}))}><option value="">Affecter au service…</option>{(fleet.data?.services||[]).filter(s=>['scheduled','active'].includes(s.status)).map(s=><option key={s.id} value={s.id}>{s.route_name} · {s.registration}</option>)}</select>}
@@ -227,7 +255,7 @@ export function Parcels(){
         </div></div>)}
     </Card>
     <SectionTitle icon={Package} title="Grille tarifaire colis"/>
-    {rateRules.loading || rateRules.error || !rateRules.data?.length ? <ApiState resource={rateRules} empty="Aucune règle tarifaire configurée — la création de colis échoue sans grille explicite."/> : rateRules.data.map(r=><Card key={r.id} className="between"><div><h3>{r.base_minor.toLocaleString('fr-FR')} FCFA</h3><span className="small muted">+ {r.per_kg_minor} FCFA/kg{r.declared_value_bp?` · +${r.declared_value_bp/100}% valeur déclarée`:''}{r.category?` · catégorie ${r.category}`:''}{r.origin_stop_id?' · trajet spécifique':' · tous trajets'}</span></div></Card>)}
+    {rateRules.loading || rateRules.error || !rateRules.data?.length ? <ApiState resource={rateRules} empty="Aucune règle tarifaire configurée — la création de colis échoue sans grille explicite."/> : rateRules.data.map(r=><Card key={r.id} className="between"><div><h3>{fcfa(r.base_minor)}</h3><span className="small muted">+ {r.per_kg_minor} FCFA/kg{r.declared_value_bp?` · +${r.declared_value_bp/100}% valeur déclarée`:''}{r.category?` · catégorie ${r.category}`:''}{r.origin_stop_id?' · trajet spécifique':' · tous trajets'}</span></div></Card>)}
     <Card className="stack"><div className="between wrap">
       <label>Base (FCFA)<input className="control" type="number" min={0} value={ruleBase} onChange={e=>setRuleBase(e.target.value)}/></label>
       <label>Par kg (FCFA)<input className="control" type="number" min={0} value={rulePerKg} onChange={e=>setRulePerKg(e.target.value)}/></label>
@@ -256,11 +284,11 @@ export function Payments(){
         {(bookings.data||[]).filter(b=>b.status==='held').map(b=><div className="between wrap" key={b.id}><span className="small">{b.passenger_name} · {b.amount_minor} FCFA</span><button className="btn btn-primary" disabled={!online || !reference.trim()} onClick={()=>act(`/bookings/${b.id}/payments`,{provider:'cash',reference:reference.trim(),amountMinor:b.amount_minor,currency:'XOF'},'POST','cash-'+b.id,()=>bookings.reload())}>Enregistrer le paiement</button></div>)}
       </>}
     </Card>
-    <SectionTitle title="Paiements en ligne (FedaPay)" trailing={<select className="control" value={paymentStatus} onChange={e=>setPaymentStatus(e.target.value)}>{['pending','failed','refunded'].map(s=><option key={s} value={s}>{paymentLabels[s]}</option>)}</select>}/>
-    {payments.loading || payments.error || !payments.data?.length ? <ApiState resource={payments} empty={`Aucun paiement ${paymentLabels[paymentStatus].toLowerCase()}.`}/> : payments.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.passengerName} · {p.amountMinor.toLocaleString('fr-FR')} {p.currency}</h3><Badge tone={p.status==='succeeded'?'success':p.status==='failed'?'danger':'neutral'}>{paymentLabels[p.status]}</Badge></div><span className="small muted">Réf. {p.id} · prestataire {p.provider_reference ?? '—'} · {p.reconciliation==='review'?<Badge tone="danger">à examiner</Badge>:p.reconciliation}</span></div>
+    <SectionTitle title="Paiements en ligne (FedaPay)" trailing={<select className="control" value={paymentStatus} onChange={e=>setPaymentStatus(e.target.value)}>{['pending','failed','refunded'].map(s=><option key={s} value={s}>{status('payment',s).label}</option>)}</select>}/>
+    {payments.loading || payments.error || !payments.data?.length ? <ApiState resource={payments} empty={`Aucun paiement ${status('payment',paymentStatus).label.toLowerCase()}.`}/> : payments.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.passengerName} · {p.amountMinor.toLocaleString('fr-FR')} {p.currency}</h3><Badge tone={p.status==='succeeded'?'success':p.status==='failed'?'danger':'neutral'}>{status('payment',p.status).label}</Badge></div><span className="small muted">{p.reconciliation==='review'?<Badge tone="danger">à examiner</Badge>:p.reconciliation}</span></div>
       <button className="btn btn-soft" disabled={!online} onClick={()=>act(`/ops/payments/${p.id}/reconcile`,undefined,'POST',undefined,()=>payments.reload())}>Réconcilier</button></Card>)}
     <SectionTitle title="Versements conducteurs"/>
-    {payouts.loading || payouts.error || !payouts.data?.length ? <ApiState resource={payouts} empty="Aucun versement demandé."/> : payouts.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.driverName} · {p.amountMinor.toLocaleString('fr-FR')} {p.currency}</h3><Badge tone={payoutTones[p.status]}>{payoutLabels[p.status]}</Badge></div><span className="small muted">{new Date(p.createdAt).toLocaleString('fr-FR')} · destination {p.destinationPhone} · réf. prestataire {p.provider_reference ?? '—'}</span></div>
+    {payouts.loading || payouts.error || !payouts.data?.length ? <ApiState resource={payouts} empty="Aucun versement demandé."/> : payouts.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.driverName} · {p.amountMinor.toLocaleString('fr-FR')} {p.currency}</h3><Badge tone={status('payout',p.status).tone}>{status('payout',p.status).label}</Badge></div><span className="small muted">{new Date(p.createdAt).toLocaleString('fr-FR')} · destination {p.destinationPhone} · réf. prestataire {p.provider_reference ?? '—'}</span></div>
       <div className="controls">{(p.status==='requested'||p.status==='failed') && <button className="btn btn-primary" disabled={!online} onClick={()=>act(`/ops/payouts/${p.id}/approve`,undefined,'POST',undefined,()=>payouts.reload())}>{p.status==='failed'?'Relancer le versement':'Valider et envoyer'}</button>}
       {p.status==='processing' && <button className="btn btn-soft" disabled={!online} onClick={()=>act(`/ops/payouts/${p.id}/reconcile`,undefined,'POST',undefined,()=>payouts.reload())}>Vérifier auprès du prestataire</button>}</div></Card>)}
   </>;
@@ -275,7 +303,7 @@ export function Settlements(){
     <SectionTitle icon={WalletCards} title="Règlements & retraits opérateurs"/>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     <p className="small muted">La recette appartient à l’opérateur. Les retraits des chauffeurs indépendants sont validés ici — les compagnies gèrent leurs versements selon leur propre politique.</p>
-    {operatorPayouts.loading || operatorPayouts.error || !operatorPayouts.data?.length ? <ApiState resource={operatorPayouts} empty="Aucun retrait opérateur."/> : operatorPayouts.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.operatorName} · {p.amountMinor.toLocaleString('fr-FR')} FCFA</h3><Badge tone={payoutTones[p.status]}>{payoutLabels[p.status]}</Badge></div><span className="small muted">{new Date(p.createdAt).toLocaleString('fr-FR')} · {p.phoneNumber} · {p.operatorType}</span></div>
+    {operatorPayouts.loading || operatorPayouts.error || !operatorPayouts.data?.length ? <ApiState resource={operatorPayouts} empty="Aucun retrait opérateur."/> : operatorPayouts.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.operatorName} · {fcfa(p.amountMinor)}</h3><Badge tone={status('payout',p.status).tone}>{status('payout',p.status).label}</Badge></div><span className="small muted">{new Date(p.createdAt).toLocaleString('fr-FR')} · {p.phoneNumber} · {p.operatorType}</span></div>
       <div className="controls">{(p.status==='requested'||p.status==='failed') && <button className="btn btn-primary" disabled={!online} onClick={()=>act(`/ops/operator-payouts/${p.id}/approve`,()=>operatorPayouts.reload())}>{p.status==='failed'?'Relancer':'Valider et envoyer'}</button>}
       {p.status==='processing' && <button className="btn btn-soft" disabled={!online} onClick={()=>act(`/ops/operator-payouts/${p.id}/reconcile`,()=>operatorPayouts.reload())}>Vérifier auprès du prestataire</button>}</div></Card>)}
   </>;
