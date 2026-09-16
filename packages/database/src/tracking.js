@@ -111,7 +111,10 @@ export function tracking(db, config = {}) {
       signal: signal.state,
       signalAgeSeconds: signal.ageSeconds,
       progress: progress && { distanceAlongM: progress.distanceAlongM, remainingM, totalM: progress.totalM, fraction: progress.progress },
-      stops: states.map(s => ({ sequence: s.sequence, name: s.name, city: s.city, state: s.state })),
+      // Stop coordinates travel with the states: the map draws its markers from
+      // this same list, and a boarding point's position is already public.
+      stops: states.map(s => ({ sequence: s.sequence, name: s.name, city: s.city, state: s.state,
+        latitude: s.latitude ?? null, longitude: s.longitude ?? null })),
       nextStop: next ? { sequence: next.sequence, name: next.name, city: next.city } : null,
       // Deviation is an operational signal; it is not surfaced to passengers.
       offRoute: offRoute.offRoute,
