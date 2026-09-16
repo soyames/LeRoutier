@@ -248,6 +248,10 @@ importers:
       pg:
         specifier: ^8.16.3
         version: 8.23.0
+    devDependencies:
+      '@leroutier/ussd':
+        specifier: workspace:*
+        version: link:../../services/ussd
 
   packages/domain: {}
 
@@ -340,6 +344,9 @@ importers:
       '@leroutier/routing':
         specifier: workspace:*
         version: link:../../packages/routing
+      '@leroutier/ussd':
+        specifier: workspace:*
+        version: link:../ussd
       jose:
         specifier: ^6.1.0
         version: 6.2.12
@@ -348,7 +355,14 @@ importers:
         specifier: ^0.25.12
         version: 0.25.12
 
-  services/ussd: {}
+  services/ussd:
+    dependencies:
+      '@leroutier/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@leroutier/database':
+        specifier: workspace:*
+        version: link:../../packages/database
 
   services/worker:
     dependencies:

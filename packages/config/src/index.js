@@ -71,6 +71,21 @@ export function serverConfig(env = process.env) {
     // prefixed VITE_ or reach a browser bundle. An unset provider means agents
     // stay entirely deterministic, which is a supported production state.
     model: modelConfig(env),
+    // USSD channel. Server-side only. An unrecognised provider selects no
+    // adapter rather than the sandbox one, so a typo cannot turn the webhook
+    // into an unverified open endpoint.
+    ussd: {
+      provider: env.USSD_PROVIDER || null,
+      apiKey: env.USSD_API_KEY,
+      webhookSecret: env.USSD_WEBHOOK_SECRET,
+      sessionTtlSeconds: positiveSeconds(env.USSD_SESSION_TTL_SECONDS, 180),
+      defaultLocale: env.USSD_DEFAULT_LOCALE || 'fr',
+      // Whether an MSISDN from a verified callback may be treated as the
+      // caller's identity. Opt-in, because only the gateway's own terms can
+      // justify it — and even then, USSD reuses an existing account and never
+      // creates one. See docs/architecture/USSD.md.
+      trustProviderMsisdn: env.USSD_TRUST_PROVIDER_MSISDN === 'true',
+    },
     // Road routing engine. Unset means routes simply have no road geometry and
     // every surface says so — a straight line is never substituted. The public
     // OSRM/Valhalla demo servers forbid production use, so no default endpoint
@@ -86,6 +101,12 @@ export function serverConfig(env = process.env) {
 function positiveMinutes(value, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 600 ? parsed : fallback;
+}
+
+/** A USSD session outlives a few screens, never a day. */
+function positiveSeconds(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 30 && parsed <= 3600 ? parsed : fallback;
 }
 
 /**
