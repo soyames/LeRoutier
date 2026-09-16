@@ -49,6 +49,7 @@ removed rather than left to mislead.
 - [`operations/PILOT_TEST_PLAN.md`](operations/PILOT_TEST_PLAN.md) — what the pilot verifies
 - [`operations/AUTH_PRODUCTION_SETUP.md`](operations/AUTH_PRODUCTION_SETUP.md) — configuring the OIDC provider
 - [`operations/SLO_AND_MONITORING.md`](operations/SLO_AND_MONITORING.md) — objectives and what is watched
+- [`operations/USSD_ARCEP_APPLICATION.md`](operations/USSD_ARCEP_APPLICATION.md) — the regulator pack for a USSD shortcode
 
 ## Security and privacy
 

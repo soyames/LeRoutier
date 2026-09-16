@@ -13,6 +13,23 @@ the threat analysis, and
 [`../architecture/AGENTIC_WORKFLOWS.md`](../architecture/AGENTIC_WORKFLOWS.md)
 the agent architecture.
 
+## Activation status
+
+Deliberately not collapsed into one word. Working code and a live service are
+different claims, and only the first is true today.
+
+| Key | Status |
+| --- | --- |
+| `OIDC_CODE` | **READY** — PKCE S256, JWT access-token verification, DB-authoritative roles, 26 auth tests |
+| `OIDC_PROVIDER_CONFIGURATION` | **PENDING** — no ZITADEL application exists; no `AUTH_*`/`OIDC_*` variable is set on `le-routier-api` |
+| `OIDC_REAL_LOGIN` | **PENDING** — `/api/v1/auth/config` returns `oidc: null`, which is the correct fail-closed state |
+| `USSD_CODE` | **READY** |
+| `USSD_INTERNAL_ENGINE` | **READY** — journeys, sessions, idempotency, security, 57 tests |
+| `USSD_PROVIDER_ADAPTER` | **READY (unconfirmed)** — sandbox, generic HMAC and MTN implemented; MTN's field mapping awaits the portal Swagger |
+| `USSD_ARCEP_CODE` | **PENDING** — application pack prepared; nothing submitted, no fee paid |
+| `USSD_OPERATOR_ROUTING` | **PENDING** — no operator or aggregator contract |
+| `USSD_REAL_HANDSET_TEST` | **PENDING** — impossible before a code and routing exist |
+
 ## Product completion
 
 | § | Workstream | Status | Evidence |

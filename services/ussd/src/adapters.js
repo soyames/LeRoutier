@@ -13,8 +13,11 @@ import { createHmac, timingSafeEqual, createHash } from 'node:crypto';
 
 /** The normalised request every flow sees, whatever the gateway sent. */
 /**
+ * `terminated` is set only by gateways that say outright that the subscriber
+ * hung up or the network timed the call out; most leave it to be inferred.
  * @typedef {{ sessionId: string, msisdn: string, input: string,
- *   verified: boolean, provider: string, sequence: number|null }} UssdRequest
+ *   verified: boolean, provider: string, sequence: number|null,
+ *   terminated?: boolean }} UssdRequest
  */
 
 /**
@@ -124,7 +127,85 @@ export const hmacAdapter = {
   metadata() { return { name: 'generic', verified: true, maxResponseChars: 182 }; },
 };
 
-const ADAPTERS = { sandbox: sandboxAdapter, generic: hmacAdapter };
+/**
+ * MTN Group USSD interface.
+ *
+ * MTN's own inbound shape, which is not the `CON`/`END` convention most
+ * aggregators use:
+ *
+ *   sessionId    stable for the whole call
+ *   messageType  0 Begin · 1 Continue · 2 End · 3 Notification · 4 Cancel · 5 Timeout
+ *   msisdn       the subscriber
+ *   serviceCode  the shortcode, e.g. *1234*356#
+ *   ussdString   the message content; for a cancel, the reason
+ *
+ * `messageType` is the part worth having: MTN says explicitly whether this is
+ * the first screen, a continuation, or a call the subscriber or network has
+ * already ended. Most gateways leave that to be inferred.
+ *
+ * ⚠️ **Not yet confirmed against the portal's own Swagger.** These field names
+ * come from MTN's published API description; the specification itself sits
+ * behind developer-portal authentication, and Benin is served by
+ * `appx.developers.mtn.com` rather than the main portal. Before activation,
+ * check this mapping against the downloaded spec — `contract` below exists so
+ * that check is a single diff, and the contract tests pin every field name.
+ *
+ * The inbound verification scheme is deliberately NOT guessed. Until MTN's
+ * scheme is confirmed, `verify()` accepts only an explicitly configured shared
+ * secret, and anything else fails closed — which means an unconfirmed callback
+ * can never bind an identity.
+ */
+export const mtnAdapter = {
+  name: 'mtn',
+  /** Every field this adapter depends on, in one place, for the diff. */
+  contract: {
+    inbound: ['sessionId', 'messageType', 'msisdn', 'serviceCode', 'ussdString'],
+    messageTypes: { begin: 0, continue: 1, end: 2, notification: 3, cancel: 4, timeout: 5 },
+    signatureHeader: 'x-ussd-signature',
+    confirmed: false,
+  },
+  verify(raw, headers, secret) {
+    return verifyHmac(raw, headers.get?.('x-ussd-signature') ?? headers['x-ussd-signature'], secret);
+  },
+  /** @param {any} body @returns {UssdRequest} */
+  parse(body) {
+    const messageType = Number(body?.messageType);
+    // MTN sends the whole dialled string on Begin (`*1234*356#`). That is the
+    // shortcode, not an answer to a question — so the first screen gets no
+    // input, exactly as a caller who has only dialled in has typed nothing.
+    const isBegin = messageType === 0;
+    return {
+      provider: 'mtn',
+      sessionId: String(body?.sessionId ?? ''),
+      msisdn: normalizeMsisdn(body?.msisdn),
+      input: isBegin ? '' : latestInput(body?.ussdString),
+      sequence: Number.isInteger(messageType) ? messageType : null,
+      verified: true,
+      // A cancelled or timed-out call is over: the engine must close the
+      // session rather than render another screen into a dead channel.
+      terminated: [2, 4, 5].includes(messageType),
+    };
+  },
+  render({ text, continues }) {
+    // MTN's response carries the continuation decision as a message type
+    // rather than a text prefix.
+    return {
+      body: JSON.stringify({ messageType: continues ? 1 : 2, ussdString: text }),
+      contentType: 'application/json; charset=utf-8',
+    };
+  },
+  metadata() {
+    return {
+      name: 'mtn', verified: true, maxResponseChars: 182,
+      // ARCEP-approved operational limits, used as defaults rather than as
+      // targets: LeRoutier aims far below both.
+      maxSessionSeconds: 120, maxResponseSeconds: 60,
+      contractConfirmed: false,
+    };
+  },
+};
+
+const ADAPTERS = { sandbox: sandboxAdapter, generic: hmacAdapter, mtn: mtnAdapter };
 
 /**
  * An unknown provider resolves to nothing rather than to the sandbox: silently

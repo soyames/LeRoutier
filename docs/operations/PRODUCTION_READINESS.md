@@ -50,7 +50,9 @@ Run `pnpm release:check` for the mechanical half of this page.
 | Production fails closed when unconfigured | `DONE` | `auth.spec.js`; no permissive fallback | — |
 | Demo login impossible in production | `DONE` | `services/api/tests/http.test.js` | — |
 | Authorization enforced server-side | `DONE` | [`AUTHORIZATION_MATRIX.md`](../security/AUTHORIZATION_MATRIX.md) with a test per row | — |
-| **OIDC provider chosen and configured** | `BLOCKED_EXTERNAL` | provider-neutral; switch is configuration only | owner selects provider, sets `AUTH_*` / `OIDC_*` |
+| **ZITADEL application created** | `BLOCKED_EXTERNAL` | provider selected; requirements verified against ZITADEL's own docs ([`AUTH_PRODUCTION_SETUP.md`](AUTH_PRODUCTION_SETUP.md)) | owner creates a **User Agent** app with **Token Type: JWT** |
+| **Auth variables set** | `PENDING` | none present on `le-routier-api`; `auth/config` returns `oidc: null` | set the five variables, redeploy |
+| **Real production login** | `PENDING` | cannot be performed without the above | `pnpm auth:verify`, then one real sign-in |
 | MFA for Platform Ops | `BLOCKED_EXTERNAL` | not enforceable by this application | enforce at the provider |
 
 ## 4. Money
@@ -230,8 +232,12 @@ Benin. See [`../architecture/USSD.md`](../architecture/USSD.md).
 | Local development harness | `DONE` | `pnpm ussd:dev` — no telecom contract needed | — |
 | No new Vercel project or database | `DONE` | webhook inside `le-routier-api`; two tables in the existing Neon database | — |
 | Tests | `DONE` | 22 unit, 9 webhook, 26 journey — including concurrency and replay | — |
-| **A named Benin gateway adapter** | `BLOCKED_EXTERNAL` | generic HMAC adapter ships and is production-capable | owner selects a provider |
-| **Shortcode** | `BLOCKED_EXTERNAL` | nothing in the product claims one exists | telecom/commercial work |
+| MTN Benin adapter | `PARTIAL` | implemented from MTN's published API description; `contract.confirmed` is false | confirm field mapping against the portal Swagger |
+| Moov / Celtiis adapters | `NOT_DONE` | separate commercial relationships; one MTN API is not all-network USSD | a contract per operator, or one aggregator |
+| **Operator or aggregator routing** | `BLOCKED_EXTERNAL` | allocation is regulatory, reach is commercial | sign a routing contract |
+| **ARCEP SVA declaration** | `BLOCKED_EXTERNAL` | prerequisite for a code; 100 000 FCFA + 100 000/yr, 5 years ([`USSD_ARCEP_APPLICATION.md`](USSD_ARCEP_APPLICATION.md)) | owner submits |
+| **ARCEP USSD code** | `BLOCKED_EXTERNAL` | pack prepared; allocation list checked against v1.1 of 04/02/2026 (65 codes) | owner submits; 400 000 FCFA year one |
+| **Live handset test** | `PENDING` | nothing in the product claims a shortcode exists | after allocation and routing |
 | Multi-seat booking | `NOT_DONE` | one booking is one seat, matching the domain | a product decision, not a USSD one |
 | Observability | `NOT_DONE` | sessions and steps are stored; no aggregated metrics | derive from `ussd_sessions` |
 | Agentic triage from USSD | `NOT_DONE` | deliberately off the response path | after a provider exists |

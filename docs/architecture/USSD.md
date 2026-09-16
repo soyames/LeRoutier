@@ -195,15 +195,94 @@ Everything a gateway integration needs. An adapter is one object in
 | **IP allowlist** | if offered, take it |
 | **Shortcode** | the number a caller dials |
 
+## Operators and routing
+
+Allocation is regulatory; **reach is commercial**. A code works on the networks
+that agree to route it, so the architecture assumes several and commits to none.
+
+```
+UssdProviderAdapter
+├── mtn        MTN Benin — implemented, contract unconfirmed
+├── generic    aggregator / HMAC gateway — implemented
+├── sandbox    simulator and tests — never verifies, by design
+├── moov       not implemented — no contract
+└── celtiis    not implemented — no contract
+```
+
+**One MTN API is not all-network USSD.** Moov Africa and Celtiis/SBIN are
+separate commercial relationships and separate adapters. No adapter is activated
+without a real contract, and nothing claims multi-network reach until it has
+been dialled.
+
+The aggregator route is kept deliberately open: if an aggregator can lawfully
+route one ARCEP-assigned code across several operators, that is one contract and
+one adapter instead of three — judged on coverage, cost per session, webhook
+contract, **MSISDN guarantee**, uptime, retry behaviour and support.
+
+### MTN Benin
+
+MTN's inbound shape is not the `CON`/`END` convention most aggregators use:
+
+| Field | Meaning |
+| --- | --- |
+| `sessionId` | stable for the whole call |
+| `messageType` | 0 Begin · 1 Continue · 2 End · 3 Notification · 4 Cancel · 5 Timeout |
+| `msisdn` | the subscriber |
+| `serviceCode` | the shortcode, e.g. `*1234*356#` |
+| `ussdString` | message content; on cancel, the reason |
+
+`messageType` is the part worth having — MTN states outright whether this is
+the first screen, a continuation, or a call already ended. The engine closes the
+session on End, Cancel and Timeout rather than rendering into a dead channel.
+
+Two details that would otherwise be bugs: on **Begin**, `ussdString` carries the
+dialled shortcode (`*1234*356#`), which is not an answer to any question — so
+the first screen receives no input. And the reply carries its continuation
+decision as a `messageType`, not a text prefix.
+
+> ⚠️ **The field mapping is not yet confirmed against the portal's own Swagger.**
+> It follows MTN's published API description; the specification itself sits
+> behind developer-portal authentication, and Benin is served by
+> `appx.developers.mtn.com` rather than the main portal. `mtnAdapter.contract`
+> lists every field the adapter depends on so confirmation is one diff, the
+> contract tests pin each name, and `contract.confirmed` is `false` until
+> someone has actually checked.
+>
+> The inbound verification scheme is **not guessed**: until MTN's is confirmed,
+> `verify()` accepts only an explicitly configured shared secret and fails
+> closed otherwise — so an unconfirmed callback can never bind an identity.
+
+### Session and response limits
+
+ARCEP-approved operational limits, carried as defaults rather than as targets:
+
+| | Regulator ceiling | LeRoutier target |
+| --- | --- | --- |
+| Session | 120 s | a call is a few screens |
+| Response | 60 s | **under 2 s** for deterministic menu actions |
+
+No model call is on the response path, ever. Navigation is entirely
+deterministic and the engine does one database transaction per screen.
+
+## Shortcode
+
+**LeRoutier has no shortcode**, and nothing in the product claims one.
+
+Obtaining one is regulatory and commercial work, prepared in
+[`../operations/USSD_ARCEP_APPLICATION.md`](../operations/USSD_ARCEP_APPLICATION.md):
+an SVA declaration is a prerequisite, the fees are published, and the allocation
+list has been checked so no already-allocated code is proposed — `*601#` is
+FedaPay's, and LeRoutier must not route through it as though it were its own.
+
 ### Status
 
 | | |
 | --- | --- |
-| Architecture, engine, journeys, session model, security | **implemented and tested** |
-| Sandbox adapter (simulator and tests) | **implemented** — never verifies, by design |
-| Generic HMAC adapter | **implemented**, production-capable once a secret is set |
-| A named Benin gateway adapter | **not implemented** — no provider selected |
-| Shortcode | **not provisioned** |
+| `USSD_CODE` | **READY** |
+| `USSD_INTERNAL_ENGINE` | **READY** — journeys, sessions, security, tests |
+| `USSD_PROVIDER_ADAPTER` | **READY (unconfirmed)** — sandbox, generic HMAC and MTN implemented; MTN's field mapping awaits the portal Swagger |
+| `USSD_ARCEP_CODE` | **PENDING** — application pack prepared, nothing submitted |
+| `USSD_OPERATOR_ROUTING` | **PENDING** — no operator or aggregator contract |
+| `USSD_REAL_HANDSET_TEST` | **PENDING** — impossible before a code and routing exist |
 
-**LeRoutier has no live USSD shortcode.** Nothing in the product claims
-otherwise. Provisioning one is telecom and commercial work, not repository work.
+USSD is **not production live**.

@@ -248,3 +248,24 @@ Then, in a browser:
   login is ever reported as enabled.
 - Do not add a password, OTP or API-key login path.
 - Do not put any auth secret in a `VITE_*` variable — those ship to the browser.
+
+## Status
+
+| Key | Status |
+| --- | --- |
+| `OIDC_CODE` | **READY** |
+| `OIDC_PROVIDER_CONFIGURATION` | **PENDING** |
+| `OIDC_REAL_LOGIN` | **PENDING** |
+
+Verified on the production API: no `AUTH_*` or `OIDC_*` variable is set on
+`le-routier-api`, and `GET /api/v1/auth/config` returns:
+
+```json
+{"data":{"demoLogin":false,"oidc":null}}
+```
+
+That is the correct fail-closed state, not a defect. Sign-in is not offered
+because it is not configured; everything that needs no account keeps working.
+
+**Identity is not READY and must not be described as such** until one real
+production login has succeeded end to end.
