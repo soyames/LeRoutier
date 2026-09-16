@@ -4,13 +4,19 @@ import { DomainError } from '@leroutier/domain';
 
 export function createDatabase(config = serverConfig()) {
   if(!/^[a-z][a-z0-9_]{0,62}$/.test(config.schema)) throw new Error('Invalid database schema configuration.');
-  let connectionString;
+  let connectionString, loopback;
   try {
     const url = new URL(config.databaseUrl);
     for (const key of ['sslmode', 'sslcert', 'sslkey', 'sslrootcert']) url.searchParams.delete(key);
     connectionString = url.toString();
+    // A database reached over a network is always TLS-verified. A container on
+    // this machine, addressed by loopback, has no network segment to intercept
+    // and does not speak TLS at all — so the local development database works
+    // without weakening anything remote. The test is the host, not a flag, so
+    // no environment variable can turn verification off for Neon.
+    loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname);
   } catch { throw new Error('Invalid database configuration.'); }
-  const pool = new pg.Pool({ connectionString, ssl: { rejectUnauthorized: true }, max: 5,
+  const pool = new pg.Pool({ connectionString, ssl: loopback ? false : { rejectUnauthorized: true }, max: 5,
     connectionTimeoutMillis: 15_000, idleTimeoutMillis: 10_000 });
   // Never log raw driver errors: they can contain connection information.
   pool.on('error', () => {});

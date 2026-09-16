@@ -32,7 +32,10 @@ try {
     if(/(?:^|\/)\.env(?:\.|$)/.test(file) && !file.endsWith('.env.example')) {failures++;continue;}
     scan(fs.readFileSync(file,'utf8'));
   }
-  for(const app of ['passenger-web','driver-web','ops-web']) {
+  // Derived from the apps directory rather than listed, so a new app — or the
+  // canonical unified PWA — cannot be left unscanned by omission.
+  const apps=fs.existsSync('apps')?fs.readdirSync('apps',{withFileTypes:true}).filter(e=>e.isDirectory()).map(e=>e.name):[];
+  for(const app of apps) {
     const dir=`apps/${app}/dist`;
     if(fs.existsSync(dir)) for(const entry of fs.readdirSync(dir,{recursive:true})) {
       const file=path.join(dir,entry);if(fs.statSync(file).isFile())scan(fs.readFileSync(file,'utf8'),true);
@@ -40,8 +43,17 @@ try {
   }
   scan(execFileSync('git',['diff','HEAD','--no-ext-diff'],{encoding:'utf8',maxBuffer:30_000_000}));
   scan(execFileSync('git',['log','--all','-p','--no-ext-diff'],{encoding:'utf8',maxBuffer:60_000_000}));
-  for(const file of ['.env.local','services/api/.env.local','apps/passenger-web/.env.local','apps/driver-web/.env.local','apps/ops-web/.env.local']) {
+  for(const file of ['.env.local','services/api/.env.local',...apps.map(app=>`apps/${app}/.env.local`)]) {
     execFileSync('git',['check-ignore','--quiet',file]);
+  }
+  // The committed local-database file must stay local-only: if it ever grows a
+  // remote host, the isolation this repository promises is gone.
+  if(fs.existsSync('docker/postgres.env')) {
+    const text=fs.readFileSync('docker/postgres.env','utf8');
+    checked++;
+    for(const match of text.matchAll(/postgres(?:ql)?:\/\/[^\s'"`]+/gi)) {
+      if(!['localhost','127.0.0.1','::1'].includes(new URL(match[0]).hostname)) failures++;
+    }
   }
   if(failures) {console.error(`Secret scan failed: ${failures} unsafe content checks. Matched values withheld.`);process.exitCode=1;}
   else console.log(`Secret scan passed: ${checked} source, diff, history and bundle checks. No reference secrets found.`);
