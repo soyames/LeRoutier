@@ -3,6 +3,7 @@ import { useSession } from '@leroutier/config/client';
 import { Card, SectionTitle } from '@leroutier/ui';
 import { TripSearchHero } from '@leroutier/screens/passenger';
 import { Package, Navigation, Car, Building2 } from 'lucide-react';
+import { LegalFooter } from './legal.jsx';
 
 // One public entry point, led by the single most important task: find a trip.
 // Passenger intent dominates; operator entry is present but clearly secondary,
@@ -37,5 +38,6 @@ export function Home() {
     {user && <Card className="stack">
       <p className="small muted">Connecté en tant que {user.display_name || 'voyageur'}. Vos espaces disponibles sont accessibles depuis l’en-tête.</p>
     </Card>}
+    <LegalFooter/>
   </div>;
 }
