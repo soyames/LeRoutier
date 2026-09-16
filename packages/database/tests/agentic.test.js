@@ -11,7 +11,7 @@ import { payments } from '../src/payments.js';
 import { earnings, payouts } from '../src/payouts.js';
 import { recovery } from '../src/recovery.js';
 import { recordIncident } from '../src/driver-actions.js';
-import { bootstrap, authenticate, createActions, createWorkflowEngine, createReasoning } from '@leroutier/agents';
+import { bootstrap, authenticate, createActions, createWorkflowEngine, createReasoning, createModelProvider, unsafeFields, ModelUnavailable, MODEL_REASONS } from '@leroutier/agents';
 import { createApi } from '../../../services/api/src/app.js';
 
 const config={...serverConfig(),schema:'lr_test_'+randomUUID().replaceAll('-',''),demoLogin:true};
@@ -357,4 +357,130 @@ test('agent API endpoints enforce principal authentication',async()=>{
   assert.equal(tick.status,200);
   assert.equal((await api(agentRequest(tokens.readonly,'/workflows/tick','POST'))).status,403);
   assert.equal((await api(agentRequest(tokens.platform,'/ops/fleet'))).status,403);
+});
+
+// --- the one workflow that asks a model anything -----------------------------
+//
+// Everything below proves the same property from a different angle: the model
+// is an addition to a deterministic pipeline, never a link in it. A triage
+// engine is built per test so the provider, the thresholds and the autonomy
+// level are explicit rather than ambient.
+
+const triageEngine=(provider,triage={})=>createWorkflowEngine({db,actions,
+  reasoning:createReasoning({db,provider,actions}),triage,
+  autonomy:{default:'auto_low_risk',workflows:{'incident-triage':'recommend'}}});
+const modelCalls=async()=>(await one('SELECT count(*)::integer AS n FROM agent_model_calls')).n;
+const triageRun=async()=>one("SELECT * FROM workflow_runs WHERE workflow='incident-triage'");
+/** A service carrying somebody, which is what makes an incident worth triaging. */
+const withPassenger=async()=>domain.hold(passenger,{serviceId:demo.service,origin:0,destination:1},randomUUID());
+
+test('an incident nobody is waiting on never reaches a model',async()=>{
+  // No booking held: beforeEach cancelled them all, so the service is empty.
+  await recordIncident(db,driver,{serviceId:demo.service,kind:'breakdown',severity:'high',description:'Empty service'});
+  await triageEngine(fakeProvider(GOOD_REPLY)).processOutbox();
+  const run=await triageRun();
+  assert.equal(run.context.gather.skip,true);
+  assert.equal(run.context.gather.why,'below_threshold');
+  assert.equal(await modelCalls(),0,'the cheapest call is the one not made');
+});
+
+test('a minor note stays below the threshold; a breakdown crosses it',async()=>{
+  await withPassenger();
+  const quiet=triageEngine(fakeProvider(GOOD_REPLY),{minDelayMinutes:999,minStationaryMinutes:999});
+  await recordIncident(db,driver,{serviceId:demo.service,kind:'other',severity:'low',description:'Minor note'});
+  await quiet.processOutbox();
+  assert.equal((await triageRun()).context.gather.skip,true);
+  assert.equal(await modelCalls(),0);
+
+  await db.transaction(async tx=>{await tx.query('DELETE FROM workflow_approvals');await tx.query('DELETE FROM workflow_runs');await tx.query('DELETE FROM outbox');});
+  await recordIncident(db,driver,{serviceId:demo.service,kind:'breakdown',severity:'high',description:'Vehicle stopped'});
+  await quiet.processOutbox();
+  assert.equal((await triageRun()).context.gather.skip,false,'a breakdown is material whatever the clock says');
+  assert.equal(await modelCalls(),1);
+});
+
+test('what reaches the model carries no passenger, no crew and no coordinate',async()=>{
+  await withPassenger();
+  /** @type {any} */ let sent=null;
+  const spy={name:'gemini',model:'gemini-3.6-flash',configured:true,
+    async complete({input}){sent=input;return {data:GOOD_REPLY,actualModel:'gemini-3.6-flash',latencyMs:11,providerUsed:'gemini'};},
+    async health(){return {provider:'gemini',configured:true,reachable:true,status:'ok'};}};
+  await recordIncident(db,driver,{serviceId:demo.service,kind:'breakdown',severity:'high',
+    description:'Passager Kofi, +229 00 00 00 00, panne vers 6.36,2.42'});
+  await triageEngine(spy).processOutbox();
+
+  assert.ok(sent,'the model was consulted');
+  assert.deepEqual(unsafeFields(sent),[],'the projection is an allowlist, not a redaction of the description');
+  // The incident's free text is the obvious leak: a driver typed a name, a
+  // phone number and a position into it. None of it is a projected field.
+  const text=JSON.stringify(sent);
+  for(const leak of ['Kofi','229','6.36','2.42','description'])assert.equal(text.includes(leak),false,leak+' must not leave LeRoutier');
+  assert.equal(sent.passengersAffected,1,'the count is a fact; the people are not');
+});
+
+test('a recommendation reaches Ops as an approval, and mutates nothing until released',async()=>{
+  await withPassenger();
+  const before=(await one("SELECT count(*)::integer AS n FROM outbox WHERE event_type='alert.created'")).n;
+  const withModel=triageEngine(fakeProvider(GOOD_REPLY));
+  await recordIncident(db,driver,{serviceId:demo.service,kind:'breakdown',severity:'high',description:'Immobilise sur la RNIE2'});
+  await withModel.processOutbox();
+
+  const run=await triageRun();
+  assert.equal(run.status,'awaiting_approval');
+  assert.equal(run.context.triage.available,true);
+  assert.equal(run.context.triage.recommendation.severity,'high');
+  assert.equal(run.context.triage.fallbackUsed,false);
+  assert.equal((await one("SELECT count(*)::integer AS n FROM outbox WHERE event_type='alert.created'")).n,before,
+    'nothing is surfaced before a human releases it');
+
+  const approval=(await withModel.listApprovals(ops)).find(a=>a.workflow_run_id===run.id&&a.action==='surface');
+  assert.ok(approval,'Ops is asked, with the recommendation as the rationale');
+  await withModel.approve(ops,approval.id,'approved');
+  assert.equal((await one("SELECT count(*)::integer AS n FROM outbox WHERE event_type='alert.created'")).n,before+1);
+});
+
+test('only explainability is kept from the model, never a reasoning trace',async()=>{
+  await withPassenger();
+  await recordIncident(db,driver,{serviceId:demo.service,kind:'breakdown',severity:'high',description:'Trace test'});
+  await triageEngine(fakeProvider({...GOOD_REPLY,thoughts:'D abord j ai considere... puis j ai decide...'})).processOutbox();
+  const triage=(await triageRun()).context.triage;
+  assert.equal(JSON.stringify(triage).includes('considere'),false,'a field nobody validated is a field nobody stores');
+  assert.deepEqual(Object.keys(triage.recommendation).sort(),
+    ['classification','reason','recommendedAction','requiresApproval','severity']);
+});
+
+test('a model that is down, slow or over quota changes nothing at all',async()=>{
+  await withPassenger();
+  const withModel=triageEngine(fakeProvider(new ModelUnavailable(MODEL_REASONS.rateLimited,'quota exhausted')));
+  await recordIncident(db,driver,{serviceId:demo.service,kind:'breakdown',severity:'high',description:'Provider is down'});
+  await withModel.processOutbox();
+
+  const run=await triageRun();
+  assert.equal(run.status,'completed','no recommendation is a normal ending, not a failed run');
+  assert.equal(run.context.triage.available,false);
+  assert.equal(run.context.triage.status,MODEL_REASONS.rateLimited);
+  assert.equal(run.context.surface,null,'the step that needed an answer is skipped, not guessed at');
+
+  // And the deterministic workflow reacting to the same event is untouched.
+  const recovery=await one("SELECT * FROM workflow_runs WHERE workflow='breakdown-recovery'");
+  assert.equal(recovery.status,'awaiting_approval','breakdown recovery never consulted a model and still ran');
+});
+
+test('with no provider configured the product behaves as it did before the feature existed',async()=>{
+  const booking=await withPassenger();
+  const bare=createWorkflowEngine({db,actions,reasoning:createReasoning({db,provider:createModelProvider({}),actions})});
+  await recordIncident(db,driver,{serviceId:demo.service,kind:'breakdown',severity:'high',description:'No provider at all'});
+  await bare.processOutbox();
+  assert.equal((await triageRun()).status,'completed');
+
+  // Booking, capacity and the manifest all work with the model layer switched
+  // off — which is the only state CI ever runs in.
+  assert.equal((await domain.booking(passenger,booking.id)).status,'held');
+  const held=await domain.availability(demo.service,0,1);
+  assert.equal((await domain.transition(passenger,booking.id,'cancel')).status,'cancelled');
+  const released=await domain.availability(demo.service,0,1);
+  assert.equal(released.segments[0].available,held.segments[0].available+1,'capacity is released by the domain, not by an agent');
+  assert.ok((await domain.manifest(driver,demo.service)).length>=0);
+  assert.equal(await modelCalls(),1,'exactly one non-call, recorded as unavailable');
+  assert.equal((await one('SELECT status FROM agent_model_calls ORDER BY created_at DESC LIMIT 1')).status,'unavailable');
 });

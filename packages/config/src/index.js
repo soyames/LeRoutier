@@ -164,6 +164,14 @@ export function agentAutonomy(env = process.env) {
 }
 
 /**
+ * Every provider LeRoutier can be pointed at, in the order they are preferred
+ * when someone has to choose one: Gemini Flash is the primary remote model,
+ * OpenRouter is the second chance, a local server is for data that must not
+ * leave the machine. None of them is required for the product to work.
+ */
+export const PROVIDERS = ['gemini', 'openrouter', 'local'];
+
+/**
  * Model provider configuration.
  *
  * `AGENT_MODEL_PROVIDER` selects; an unrecognised value selects nothing rather
@@ -171,7 +179,13 @@ export function agentAutonomy(env = process.env) {
  * because of a typo would be exactly the wrong default.
  */
 export function modelConfig(env = process.env) {
-  const provider = ['openrouter', 'local'].includes(env.AGENT_MODEL_PROVIDER) ? env.AGENT_MODEL_PROVIDER : null;
+  const named = name => (PROVIDERS.includes(name) ? name : null);
+  const provider = named(env.AGENT_MODEL_PROVIDER);
+  // A second chance for low-risk tasks only, and only when named. Falling back
+  // to another third party because the first was busy is a decision about where
+  // a situation is sent, so it is never inferred from a key being present.
+  const fallbackProvider = named(env.AGENT_MODEL_FALLBACK_PROVIDER);
+  const oauthGemini = !env.GEMINI_AUTH_MODE || env.GEMINI_AUTH_MODE === 'oauth';
   // Bounds the whole completion, retry ladder included. Measured free-tier
   // latency runs from 2 s to 49 s, so this is the point at which LeRoutier
   // decides a recommendation is not coming and carries on without one.
@@ -180,6 +194,35 @@ export function modelConfig(env = process.env) {
   const positive = (value, fallback) => (Number.isInteger(Number(value)) && Number(value) > 0 ? Number(value) : fallback);
   return {
     provider,
+    fallbackProvider,
+    // Google Gemini through the Developer API, authenticated with OAuth.
+    //
+    // There is deliberately no API-key path. `generativelanguage.googleapis.com`
+    // serves the free tier on a project with billing disabled; Vertex AI is a
+    // different host that requires a billing account and is not reachable from
+    // this configuration at all.
+    gemini: {
+      // OAuth is the only authentication LeRoutier implements for Gemini, so
+      // GEMINI_AUTH_MODE exists to be checked rather than to be chosen: any
+      // other value withholds the credentials and leaves the provider
+      // unconfigured. Someone who sets it to `api_key` should get no model, not
+      // a silently different trust model.
+      ...(oauthGemini ? {
+        clientId: env.GOOGLE_GEMINI_CLIENT_ID,
+        clientSecret: env.GOOGLE_GEMINI_CLIENT_SECRET,
+        refreshToken: env.GOOGLE_GEMINI_REFRESH_TOKEN,
+      } : {}),
+      authMode: oauthGemini ? 'oauth' : null,
+      // Quota attribution for a user OAuth credential. Google cannot tell which
+      // project's free allowance a call belongs to without it.
+      projectId: env.GOOGLE_GEMINI_PROJECT_ID,
+      baseUrl: env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta',
+      // Verified against the free tier on 2026-09-16: available on every
+      // attempt, ~1.7 s median, strict JSON every time, and the model Google's
+      // own retirement notice for gemini-2.5-flash points to.
+      model: env.GEMINI_MODEL || 'gemini-3.6-flash',
+      timeoutMs,
+    },
     openrouter: {
       apiKey: env.OPENROUTER_API_KEY,
       baseUrl: env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
@@ -192,6 +235,21 @@ export function modelConfig(env = process.env) {
       baseUrl: env.LOCAL_MODEL_BASE_URL || 'http://127.0.0.1:8000/v1',
       model: env.LOCAL_MODEL_NAME || 'minicpm',
       timeoutMs,
+    },
+    // The deterministic gate in front of the one workflow that asks a model
+    // anything. "How late is late" is an operator's judgement, so it is
+    // configuration; the defaults are a starting point for the pilot, not a
+    // finding. Below these, an incident is handled deterministically and no
+    // remote call is made at all.
+    triage: {
+      minDelayMinutes: positive(env.AGENT_TRIAGE_MIN_DELAY_MINUTES, 15),
+      minStationaryMinutes: positive(env.AGENT_TRIAGE_MIN_STATIONARY_MINUTES, 10),
+    },
+    // How long a provider is left alone after it says no. A quota error means
+    // "not for a while": retrying into it spends the next window too.
+    cooldown: {
+      cooldownMs: positive(env.AGENT_MODEL_COOLDOWN_MINUTES, 10) * 60_000,
+      failuresBeforeCooldown: positive(env.AGENT_MODEL_FAILURES_BEFORE_COOLDOWN, 3),
     },
     // Free capacity is shared and exhaustible. These are hard ceilings, not
     // guidance: a runaway workflow must hit a wall, not a warning.

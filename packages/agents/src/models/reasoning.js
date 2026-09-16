@@ -28,6 +28,10 @@ export const TASKS = {
   'incident.triage': {
     allowedActions: ['alert.create', 'recovery.propose', 'notification.send'],
     project: projectServiceSituation,
+    // The worst outcome of a second provider answering this is a suggestion
+    // from a model nobody evaluated, shown to a human who can ignore it. That
+    // is what makes fallback permissible here and nowhere financial.
+    allowFallback: true,
     system: [
       'You classify intercity bus operations in Benin for LeRoutier.',
       'You receive facts about one service. Reply with JSON only.',
@@ -42,6 +46,7 @@ export const TASKS = {
   'parcel.triage': {
     allowedActions: ['parcel.notify', 'parcel.escalate', 'alert.create'],
     project: projectParcelSituation,
+    allowFallback: true,
     system: [
       'You triage parcel exceptions for LeRoutier in Benin.',
       'You receive facts about one parcel. Reply with JSON only.',
@@ -66,11 +71,12 @@ export function createReasoning({ db, provider, actions = {}, budget = {} }) {
   /** Every outcome is recorded, including the ones that never reached a provider. */
   async function record(entry) {
     await db.transaction(tx => tx.query(
-      `INSERT INTO agent_model_calls(provider,task,workflow,workflow_run_id,requested_model,actual_model,status,latency_ms,input_hash,recommendation,rejection_code)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      `INSERT INTO agent_model_calls(provider,task,workflow,workflow_run_id,requested_model,actual_model,status,latency_ms,input_hash,recommendation,rejection_code,fallback_from)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [entry.provider, entry.task, entry.workflow ?? null, entry.workflowRunId ?? null, entry.requestedModel ?? 'none',
         entry.actualModel ?? null, entry.status, entry.latencyMs ?? null, entry.inputHash,
-        entry.recommendation ? JSON.stringify(entry.recommendation) : null, entry.rejectionCode ?? null]));
+        entry.recommendation ? JSON.stringify(entry.recommendation) : null, entry.rejectionCode ?? null,
+        entry.fallbackFrom ?? null]));
   }
 
   /**
@@ -98,6 +104,22 @@ export function createReasoning({ db, provider, actions = {}, budget = {} }) {
     provider,
 
     /**
+     * The scopes a task's own allowlist implies.
+     *
+     * An outbox-driven workflow has no agent principal — it is LeRoutier acting
+     * on its own domain event — so there are no granted scopes to check a
+     * proposal against. Passing none would refuse every proposal as
+     * out-of-scope, which reads like containment but is really just the feature
+     * switched off. What actually contains a system run is the task allowlist
+     * (narrower than the catalog), the operator boundary, and the approval gate
+     * in front of the only step that mutates anything. A *bound agent* asking
+     * still presents its own scopes, and those are still checked.
+     */
+    scopesFor(taskName) {
+      return (TASKS[taskName]?.allowedActions ?? []).map(name => actions[name]?.scope).filter(Boolean);
+    },
+
+    /**
      * Ask for a recommendation about one situation.
      *
      * Never throws for a model problem. The caller is deterministic operational
@@ -105,7 +127,8 @@ export function createReasoning({ db, provider, actions = {}, budget = {} }) {
      * this feature existed.
      *
      * @returns {Promise<{ available: boolean, status: string, recommendation?: object,
-     *   rejection?: string, actualModel?: string|null, latencyMs?: number }>}
+     *   rejection?: string, actualModel?: string|null, latencyMs?: number,
+     *   providerUsed?: string, fallbackFrom?: string|null }>}
      */
     async recommend(taskName, situation, { workflow = null, workflowRunId = null, scopes = [], operatorId = null, targetOperatorId = null } = {}) {
       const task = TASKS[taskName];
@@ -131,23 +154,33 @@ export function createReasoning({ db, provider, actions = {}, budget = {} }) {
 
       let result;
       try {
-        result = await provider.complete({ system: task.system, input, schema: RECOMMENDATION_SCHEMA });
+        result = await provider.complete({
+          system: task.system, input, schema: RECOMMENDATION_SCHEMA,
+          // Opt-in, per task. A task that has not said so is answered by the
+          // configured provider or not at all.
+          allowFallback: task.allowFallback === true,
+        });
       } catch (error) {
         const reason = error instanceof ModelUnavailable ? error.reason : MODEL_REASONS.providerError;
         await record({ ...base, status: reason === MODEL_REASONS.timeout ? 'timeout' : 'error', rejectionCode: reason });
         return { available: false, status: reason };
       }
 
+      // Which provider actually answered, not which one was asked. A
+      // recommendation from the second choice must not be filed under the first.
+      const answered = { ...base, provider: result.providerUsed ?? provider.name, fallbackFrom: result.fallbackFrom ?? null };
+      const evidence = { providerUsed: answered.provider, fallbackFrom: answered.fallbackFrom, actualModel: result.actualModel, latencyMs: result.latencyMs };
+
       const verdict = validateRecommendation(result.data, {
         actions, allowedActions: task.allowedActions, scopes, operatorId, targetOperatorId,
       });
       if (!verdict.ok) {
-        await record({ ...base, status: 'rejected', actualModel: result.actualModel, latencyMs: result.latencyMs, rejectionCode: verdict.rejection });
-        return { available: false, status: 'rejected', rejection: verdict.rejection };
+        await record({ ...answered, status: 'rejected', actualModel: result.actualModel, latencyMs: result.latencyMs, rejectionCode: verdict.rejection });
+        return { available: false, status: 'rejected', rejection: verdict.rejection, ...evidence };
       }
 
-      await record({ ...base, status: 'ok', actualModel: result.actualModel, latencyMs: result.latencyMs, recommendation: verdict.recommendation });
-      return { available: true, status: 'ok', recommendation: verdict.recommendation, actualModel: result.actualModel, latencyMs: result.latencyMs };
+      await record({ ...answered, status: 'ok', actualModel: result.actualModel, latencyMs: result.latencyMs, recommendation: verdict.recommendation });
+      return { available: true, status: 'ok', recommendation: verdict.recommendation, ...evidence };
     },
 
     /** Configuration and today's usage. No network call, so it is cheap to poll. */
