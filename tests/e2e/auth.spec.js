@@ -58,7 +58,7 @@ test('passenger signs in with PKCE, completes profile and signs out without pers
   await expect(page.getByRole('button',{name:'Complétez votre profil'})).toBeDisabled();
   await page.getByLabel('Nom complet').fill('Voyageur Test');await page.getByLabel('Téléphone',{exact:true}).fill('');
   await page.getByRole('button',{name:'Enregistrer mon profil'}).click();
-  await expect(page.getByRole('button',{name:'Réserver une place'})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'Choisir ce trajet'})).toBeEnabled();
   expect(await page.evaluate(()=>Object.keys(localStorage).length+Object.keys(sessionStorage).filter(k=>k.startsWith('oidc.')).length)).toBe(0);
   await expect(page).toHaveURL('http://127.0.0.1:4173/');
   await page.getByRole('button',{name:'Déconnexion'}).click();
@@ -84,9 +84,9 @@ test('ops app denies passenger identity and hides provisioning controls',async({
 });
 test('approved driver sees assignment and signout clears privileged data',async({page})=>{
   await provider(page,4174,'driver');await page.getByRole('button',{name:'Se connecter',exact:true}).click();
-  await expect(page.getByText('DEMO-BUS-01',{exact:false}).first()).toBeVisible();
+  await expect(page.getByText('à bord').first()).toBeVisible();
   await page.getByRole('button',{name:'Déconnexion'}).click();
-  await expect(page.getByText('DEMO-BUS-01',{exact:false})).toHaveCount(0);
+  await expect(page.getByText('à bord')).toHaveCount(0);
 });
 test('operator ops can create a vehicle with a stable retry key and no fake success',async({page})=>{
   await provider(page,4175,'ops');

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router';
 import { AppShell, Card, Badge, SectionTitle, SessionPanel, EmptyState } from '@leroutier/ui';
 import { useSession } from '@leroutier/config/client';
-import { Trips, Tickets, Stations, Tracking, Account, Parcels as PassengerParcels, OnboardingPage } from '@leroutier/screens/passenger';
+import { Trips, Tickets, Stations, Tracking, Account, Parcels as PassengerParcels, ParcelTracking, OnboardingPage } from '@leroutier/screens/passenger';
 import { Today as CrewToday, Manifest, Scanner, WalkUp, Parcels as CrewParcels, Vehicle, Points, Earnings, Profile } from '@leroutier/screens/crew';
 import { Today as OpsToday, Services, Fleet, Crew, Stations as OpsStations, Parcels as OpsParcels, Payments, Settlements, Incidents, Alerts, Settings } from '@leroutier/screens/ops';
 import { JourneyTimeline } from '@leroutier/screens/journey';
@@ -10,14 +10,21 @@ import { NotificationCentre, useUnreadCount } from '@leroutier/screens/notificat
 import { Home } from './home.jsx';
 import { PASSENGER, WORK, OPS, workspacesFor, capabilities, workspaceOf, isAuthorized } from './workspaces.js';
 import {
-  Search, Ticket, Navigation, UserRound, Package, Bell, Home as HomeIcon, Route, Users, QrCode,
+  Search, Ticket, UserRound, Package, Bell, Home as HomeIcon, Route, Users, QrCode,
   Wallet, BusFront, MapPin, Radio, WalletCards, ShieldAlert, Settings as SettingsIcon, Layers, Lock,
 } from 'lucide-react';
 
-// Deep-linked ticket: the booking id drives the end-to-end journey view.
+// Deep-linked ticket: the booking id leads the list and drives the end-to-end
+// journey view — first mile, boarding, departure, arrival.
 function TicketsRoute() {
   const { id } = useParams();
-  return <div className="stack"><Tickets/>{id && <JourneyTimeline bookingId={id}/>}</div>;
+  return <div className="stack"><Tickets focusId={id}/>{id && <JourneyTimeline bookingId={id}/>}</div>;
+}
+
+// /parcels/track is public; /parcels (sending) needs an account.
+function ParcelsRoute() {
+  const { id } = useParams();
+  return id === 'track' ? <ParcelTracking/> : <PassengerParcels/>;
 }
 
 // A workspace the identity is not authorized for is stated plainly rather than
@@ -70,22 +77,22 @@ export default function App() {
   const segments = pathname.replace(/\/+$/, '').split('/').filter(Boolean);
 
   // ---- Public and passenger -------------------------------------------------
+  // Five destinations, thumb-reachable. Home lives behind the brand mark.
   const passengerNav = [
-    { id: '', label: 'Accueil', icon: HomeIcon },
-    { id: 'trips', label: 'Trajets', icon: Search },
+    { id: 'trips', label: 'Voyager', icon: Search },
     { id: 'tickets', label: 'Billets', icon: Ticket },
     { id: 'parcels', label: 'Colis', icon: Package },
-    { id: 'tracking', label: 'Suivi', icon: Navigation },
+    { id: 'notifications', label: 'Alertes', icon: Bell },
     { id: 'account', label: 'Compte', icon: UserRound },
   ];
   const passengerScreens = {
-    '': <Home/>, trips: <Trips/>, tickets: <TicketsRoute/>, stations: <Stations/>, parcels: <PassengerParcels/>,
+    '': <Home/>, trips: <Trips/>, tickets: <TicketsRoute/>, stations: <Stations/>, parcels: <ParcelsRoute/>,
     tracking: <Tracking/>, account: <Account/>, onboarding: <OnboardingPage/>,
     notifications: <NotificationCentre onOpen={to => navigate(to)}/>,
   };
   const passengerTitles = {
-    '': 'LeRoutier', trips: 'Recherche de trajets', tickets: 'Mes billets', stations: 'Gares & arrêts',
-    parcels: 'Colis & fret', tracking: 'Suivi', account: 'Mon compte', onboarding: 'Rejoindre LeRoutier',
+    '': 'LeRoutier', trips: 'Voyager', tickets: 'Mes billets', stations: 'Gares & arrêts',
+    parcels: 'Colis', tracking: 'Suivi', account: 'Mon compte', onboarding: 'Travailler avec LeRoutier',
     notifications: 'Notifications',
   };
 
@@ -141,7 +148,7 @@ export default function App() {
   const shell = content => <AppShell
     online={online} role={scoped.role} title={scoped.titles[page] ?? 'LeRoutier'} subtitle="LeRoutier · Bénin"
     nav={scoped.nav} active={page} onNavigate={id => navigate(`${scoped.prefix}/${id}`.replace(/\/+$/, '') || '/')}
-    unread={unread} onNotifications={() => navigate(`${scoped.prefix}/notifications`)}
+    unread={unread} onNotifications={() => navigate(`${scoped.prefix}/notifications`)} onHome={() => navigate('/')}
     actions={<WorkspaceSwitcher current={workspace} onSwitch={path => navigate(path)}/>}>
     {content}
   </AppShell>;

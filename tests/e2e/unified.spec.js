@@ -34,10 +34,11 @@ async function open(page, identity, route) {
 test('public home offers product tasks, never application names', async ({ page }) => {
   await mockApi(page);
   await page.goto(APP + '/');
-  await expect(page.getByRole('button', { name: /Rechercher un trajet/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rechercher' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Envoyer un colis/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Conduire avec LeRoutier/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Gérer une compagnie/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Suivre un colis/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /chauffeur indépendant/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /représente une compagnie/ })).toBeVisible();
   // A visitor never meets our deployment architecture.
   await expect(page.getByText(/application (passager|chauffeur)|Passenger app|Driver app|Ops app/i)).toHaveCount(0);
 });
@@ -52,8 +53,14 @@ test('anonymous trip search works and never offers cash', async ({ page }) => {
 
 test('public parcel tracking works without an account', async ({ page }) => {
   await mockApi(page);
-  await page.goto(APP + '/tracking');
-  await expect(page.getByRole('heading', { name: /Suivi/ }).first()).toBeVisible();
+  await page.goto(APP + '/parcels/track');
+  await expect(page.getByRole('heading', { name: /Suivre un colis/ })).toBeVisible();
+  await page.getByLabel('Numéro de suivi').fill('LRP-12345678');
+  await page.getByRole('button', { name: /Suivre mon colis/ }).click();
+  // A public logistics timeline, with no custody internals exposed.
+  await expect(page.getByText('LRP-12345678').first()).toBeVisible();
+  await expect(page.getByText('En route').first()).toBeVisible();
+  await expect(page.getByText('Prêt à retirer')).toBeVisible();
 });
 
 test('a protected workspace asks for the LeRoutier identity, not an app login', async ({ page }) => {
@@ -120,7 +127,7 @@ test('one identity opens both the passenger and the work workspace', async ({ pa
   await page.getByRole('menuitem', { name: /Voyageur/ }).click();
   await expect(page).toHaveURL(/\/trips$/);
   await expect(page.getByRole('button', { name: 'Se connecter pour réserver' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Réserver une place' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Choisir ce trajet' })).toBeVisible();
 });
 
 test('independent owner-driver sees revenue, withdrawals and walk-up cash', async ({ page }) => {
@@ -154,12 +161,13 @@ test('company driver is refused the ops workspace explicitly', async ({ page }) 
 // --------------------------------------------------------------- convoyeur --
 test('convoyeur gets crew navigation without driver-only tools', async ({ page }) => {
   await open(page, CONVOYEUR, '/work/today');
-  await expect(page.getByRole('button', { name: /Manifeste/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Colis/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Comptant/ })).toBeVisible();
+  const nav = page.getByRole('navigation');
+  await expect(nav.getByRole('button', { name: /Manifeste/ })).toBeVisible();
+  await expect(nav.getByRole('button', { name: /Colis/ })).toBeVisible();
+  await expect(nav.getByRole('button', { name: /Comptant/ })).toBeVisible();
   // Vehicle belongs to the driver role, not to the convoyeur.
-  await expect(page.getByRole('button', { name: /Véhicule/ })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /Recettes/ })).toHaveCount(0);
+  await expect(nav.getByRole('button', { name: /Véhicule/ })).toHaveCount(0);
+  await expect(nav.getByRole('button', { name: /Recettes/ })).toHaveCount(0);
   await expect(page.getByText('Convoyeur').first()).toBeVisible();
 });
 
@@ -194,7 +202,7 @@ test('an unknown route returns to the workspace home instead of erroring', async
   await mockApi(page);
   await page.goto(APP + '/definitely-not-a-route');
   await expect(page).toHaveURL(APP + '/');
-  await expect(page.getByRole('button', { name: /Rechercher un trajet/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rechercher' })).toBeVisible();
 });
 
 test('deep links survive a refresh and never silently redirect', async ({ page }) => {
