@@ -33,7 +33,7 @@ Run `pnpm release:check` for the mechanical half of this page.
 
 | Requirement | Status | Evidence | Action |
 | --- | --- | --- | --- |
-| Migrations apply from empty | `DONE` | `pnpm test:migrate:fresh` — 10/10, 70 tables, replay moves no `applied_at` | — |
+| Migrations apply from empty | `DONE` | `pnpm test:migrate:fresh` — 12/12, 73 tables, replay moves no `applied_at` | — |
 | Local dev/test isolated from production | `DONE` | `compose.yaml`, PostgreSQL 18 matching Neon 18.6 | — |
 | Tests cannot touch production | `DONE` | `guards.js`; `dropDisposableSchema` only drops `lr_test_*`; CI holds no production credential | — |
 | TLS to any remote database | `DONE` | verified TLS unless the host is loopback — decided from the URL, not a flag | — |
@@ -202,3 +202,36 @@ customer-facing legal document.
 engine entitlement, a domain, and legal review.
 
 Nothing in the first list should be taken as permission to skip the second.
+
+---
+
+## 12. USSD channel
+
+A feature phone with no data plan is still the most common way to reach a bus in
+Benin. See [`../architecture/USSD.md`](../architecture/USSD.md).
+
+| Requirement | Status | Evidence | Action |
+| --- | --- | --- | --- |
+| Provider-neutral adapter | `DONE` | sandbox + generic HMAC; an unknown name resolves to **no** adapter | — |
+| Callback verification | `DONE` | HMAC-SHA256, constant-time, raw body; missing secret or signature never passes | — |
+| Endpoint hidden when unconfigured | `DONE` | 404 unless `USSD_PROVIDER` names a real adapter | — |
+| No parallel booking logic | `DONE` | the same `domain.search` and `domain.hold` the PWA uses | — |
+| Segment capacity honoured | `DONE` | concurrent web + USSD test: exactly one channel takes the last seat | — |
+| Fares are server-authoritative | `DONE` | the confirmation screen re-reads availability; nothing is cached | — |
+| Payment truth preserved | `DONE` | USSD initiates only; a keypress never marks a fare paid | — |
+| Identity: no creation, no promotion | `DONE` | binds an **existing** passenger only, and only on a verified callback | — |
+| MSISDN trust is opt-in | `DONE` | `USSD_TRUST_PROVIDER_MSISDN`, default false, assumption documented | — |
+| Idempotency and replay | `DONE` | per-request fingerprint; session-derived hold key | — |
+| Session expiry and cleanup | `DONE` | TTL, expired calls restart, `sweep()` drops old transcripts | — |
+| Phone numbers never stored | `DONE` | hashed for storage, masked for output — asserted by test | — |
+| Screen length and pagination | `DONE` | navigation reserved first; lists split rather than truncate | — |
+| Rate limiting | `DONE` | per-caller session throttle plus the API limiter, separate buckets | — |
+| French UX, no English leakage | `DONE` | one catalogue; asserted by test | — |
+| Local development harness | `DONE` | `pnpm ussd:dev` — no telecom contract needed | — |
+| No new Vercel project or database | `DONE` | webhook inside `le-routier-api`; two tables in the existing Neon database | — |
+| Tests | `DONE` | 22 unit, 9 webhook, 26 journey — including concurrency and replay | — |
+| **A named Benin gateway adapter** | `BLOCKED_EXTERNAL` | generic HMAC adapter ships and is production-capable | owner selects a provider |
+| **Shortcode** | `BLOCKED_EXTERNAL` | nothing in the product claims one exists | telecom/commercial work |
+| Multi-seat booking | `NOT_DONE` | one booking is one seat, matching the domain | a product decision, not a USSD one |
+| Observability | `NOT_DONE` | sessions and steps are stored; no aggregated metrics | derive from `ussd_sessions` |
+| Agentic triage from USSD | `NOT_DONE` | deliberately off the response path | after a provider exists |

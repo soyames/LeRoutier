@@ -24,6 +24,7 @@ removed rather than left to mislead.
 - [`NOTIFICATIONS.md`](architecture/NOTIFICATIONS.md) — the event-driven notification layer
 - [`AGENTIC_WORKFLOWS.md`](architecture/AGENTIC_WORKFLOWS.md) — principals, scopes, typed actions, approvals, autonomy
 - [`MODEL_PROVIDERS.md`](architecture/MODEL_PROVIDERS.md) — what a model may see, suggest and never do
+- [`USSD.md`](architecture/USSD.md) — the feature-phone channel over the same domain
 
 ## Domain and product
 

@@ -108,6 +108,18 @@ bus, no second authorization model, no direct database access for agents.
 | 37 | Agentic documentation | DONE | `AGENTIC_WORKFLOWS.md` extended with autonomy, untrusted content and the parcel workflows. |
 | 38 | Agentic readiness gate | DONE | Section 7 of `PRODUCTION_READINESS.md`. |
 
+## USSD channel
+
+| Area | Status | Evidence |
+| --- | --- | --- |
+| Architecture | DONE | Channel over the same domain; no second booking engine, capacity rule or payment truth. |
+| Provider adapter | DONE | Sandbox and generic HMAC; an unknown provider resolves to no adapter. |
+| Journeys | DONE | Search, booking, payment handoff, bookings, journey status, parcel tracking, help, language. |
+| Safety | DONE | Verification, replay suppression, session expiry, per-caller throttle, hashed phone numbers. |
+| Identity | DONE | Binds an existing passenger only, on a verified callback, with trust opt-in. No creation, no promotion. |
+| Tests | DONE | 22 unit, 9 webhook, 26 journey — including web-vs-USSD concurrency for the last seat. |
+| Live provider | BLOCKED_EXTERNAL | No Benin gateway selected; no shortcode provisioned. |
+
 ## Decisions worth carrying
 
 - **PostgreSQL 18 locally** because production Neon reports 18.6. Testing
@@ -119,6 +131,13 @@ bus, no second authorization model, no direct database access for agents.
   the isolated path the easy path. It is deliberately not named `.env.*`,
   because the secret scanner fails on any tracked file with that prefix, and
   that rule must stay absolute.
+- **USSD binds, never creates.** A gateway MSISDN proves the gateway sent it,
+  not that the caller owns the account. So USSD reuses an account created
+  through the real sign-in path and offers anonymous journeys otherwise —
+  rather than minting identities from an unauthenticated claim.
+- **One booking is one seat**, because the domain models it that way. Asking a
+  USSD caller for a passenger count would offer a capability the product does
+  not have.
 - **One maps document.** `MAPS_ROUTING_AND_TRACKING.md` is canonical; a second
   `MAPS_AND_ROUTING.md` would be the documentation equivalent of a parallel
   architecture.
