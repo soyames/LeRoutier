@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createDatabase } from '../src/index.js';
 import { migrate } from '../src/migrations.js';
+import { dropDisposableSchema } from '../src/guards.js';
 import { provisioning,bootstrap } from '../src/provisioning.js';
 import { activeIdentity } from '../src/identities.js';
 import { serverConfig } from '@leroutier/config';
@@ -29,7 +30,7 @@ before(async()=>{
   alphaDriver=await provision.driver(alphaOps,{subject:'alpha-driver',displayName:'Alpha Driver',operatorId:operatorA,licenseReference:'TEST-A'},randomUUID());
   betaDriver=await provision.driver(betaOps,{subject:'beta-driver',displayName:'Beta Driver',operatorId:operatorB,licenseReference:'TEST-B'},randomUUID());
 });
-after(async()=>{try{await db.transaction(tx=>tx.query(`DROP SCHEMA "${db.schema}" CASCADE`));}finally{await db.close();}});
+after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}});
 test('bootstrap is idempotent and closes against different inputs',async()=>{
   assert.equal((await bootstrap(db,bootstrapInput)).opsUserId,platform.id);
   await assert.rejects(bootstrap(db,{...bootstrapInput,opsSubject:'another-person'}),{code:'BOOTSTRAP_CONFLICT'});

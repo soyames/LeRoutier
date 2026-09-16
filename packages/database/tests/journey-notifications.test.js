@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { serverConfig } from '@leroutier/config';
 import { createDatabase } from '../src/index.js';
 import { migrate } from '../src/migrations.js';
+import { dropDisposableSchema } from '../src/guards.js';
 import { seed, demo, demoId } from '../src/seed.js';
 import { transport } from '../src/transport.js';
 import { notificationPolicies } from '../src/notifications.js';
@@ -57,7 +58,7 @@ beforeEach(async()=>{
     await tx.query("UPDATE services SET current_sequence=0,status='active',departure_at=now()+interval '1 day',arrival_at=NULL,departure_point_id=$2 WHERE id=$1",[demo.service,point]);
   });
 });
-after(async()=>{try{await db.transaction(tx=>tx.query(`DROP SCHEMA "${db.schema}" CASCADE`));}finally{await db.close();}});
+after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}});
 
 const hold=async()=>domain.hold(passenger,{serviceId:demo.service,origin:0,destination:1},'key-'+randomUUID());
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useApi, useSession } from '@leroutier/config/client';
+import { useApi, useSession, IDENTITY_ERROR_CODES } from '@leroutier/config/client';
 import { Card, Badge, StatCard, SectionTitle, ApiState, ErrorState, SkeletonCards } from '@leroutier/ui';
 import { status, fcfa, time, untilLabel } from '@leroutier/ui';
 import { createSyncQueue } from '@leroutier/config/offline';
@@ -108,7 +108,11 @@ export function Today(){
     <p className="small muted">Votre service du jour s’affiche ici.</p></Card></>;
   if(service.loading) return <><VerificationBanner/><SectionTitle title="Aujourd’hui"/><SkeletonCards count={2} lines={4}/></>;
   if(service.error) return <><VerificationBanner/><SectionTitle title="Aujourd’hui"/>
-    <ErrorState text="Impossible de charger votre service." onRetry={service.reload}/></>;
+    {/* An identity problem is the user's to act on, so it is stated plainly;
+        anything else is a transient failure they can simply retry. */}
+    <ErrorState title={IDENTITY_ERROR_CODES.includes(service.code)?'Accès impossible':'Chargement impossible'}
+      text={IDENTITY_ERROR_CODES.includes(service.code)?service.error:'Impossible de charger votre service.'}
+      onRetry={IDENTITY_ERROR_CODES.includes(service.code)?undefined:service.reload}/></>;
   if(!s) return <><VerificationBanner/><SectionTitle title="Aujourd’hui"/>
     <Card className="stack"><strong>Aucun service aujourd’hui</strong>
       <p className="small muted">Aucun départ ne vous est affecté. Prévenez votre exploitation si cela vous semble anormal.</p></Card></>;
