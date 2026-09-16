@@ -267,6 +267,50 @@ test('time-based reminders are raised once per computed time and recompute after
   assert.equal(events.length,1);
 });
 
+// A parcel that arrived and was never collected. The clock runs from the
+// ready_for_pickup event, and each stage fires once per arrival.
+test('an uncollected parcel is reminded, then escalated, each exactly once',async()=>{
+  const parcelId=randomUUID();
+  const stop=(await all('SELECT id FROM stops ORDER BY name LIMIT 1'))[0].id;
+  await db.transaction(async tx=>{
+    await tx.query(`INSERT INTO parcels(id,tracking_number,operator_id,origin_stop_id,destination_stop_id,category,quantity,price_minor,status,payment_responsibility,idempotency_key,request_fingerprint)
+      VALUES($1,'LRP-AAAA1111',$2,$3,$3,'documents',1,1000,'ready_for_pickup','sender',$4,$4)`,[parcelId,demo.operator,stop,parcelId]);
+    // Ready 30 hours ago: past the 24 h reminder, short of the 72 h escalation.
+    await tx.query(`INSERT INTO parcel_events(parcel_id,kind,created_at) VALUES($1,'ready_for_pickup',now()-interval '30 hours')`,[parcelId]);
+  });
+  const tick=reminders(db,config);
+  await tick.tick();
+  const afterFirst=await all("SELECT event_type FROM outbox WHERE aggregate_id=$1 ORDER BY event_type",[parcelId]);
+  assert.deepEqual(afterFirst.map(e=>e.event_type),['parcel.uncollected_reminder'],'reminded, not yet escalated');
+
+  // A second sweep must not remind again.
+  await tick.tick();
+  assert.equal((await all("SELECT 1 FROM outbox WHERE aggregate_id=$1 AND event_type='parcel.uncollected_reminder'",[parcelId])).length,1);
+
+  // Past the escalation threshold, the station is asked to act.
+  await db.transaction(tx=>tx.query(`UPDATE parcel_events SET created_at=now()-interval '80 hours' WHERE parcel_id=$1`,[parcelId]));
+  await db.transaction(tx=>tx.query(`DELETE FROM outbox WHERE aggregate_id=$1`,[parcelId]));
+  await tick.tick();
+  const stages=(await all("SELECT event_type FROM outbox WHERE aggregate_id=$1 ORDER BY event_type",[parcelId])).map(e=>e.event_type);
+  assert.deepEqual(stages,['parcel.uncollected_escalation','parcel.uncollected_reminder']);
+
+  // A collected parcel stops the cycle entirely.
+  await db.transaction(async tx=>{
+    await tx.query(`DELETE FROM outbox WHERE aggregate_id=$1`,[parcelId]);
+    await tx.query("UPDATE parcels SET status='collected' WHERE id=$1",[parcelId]);
+  });
+  await tick.tick();
+  assert.equal((await all('SELECT 1 FROM outbox WHERE aggregate_id=$1',[parcelId])).length,0);
+});
+
+test('pickup thresholds come from configuration, never from code',async()=>{
+  const fast=reminders(db,{...config,parcelPickup:{reminderHours:1,escalationHours:2}});
+  assert.equal(fast.policy.parcelPickup.reminderHours,1);
+  assert.equal(fast.policy.parcelPickup.escalationHours,2);
+  // The default is a documented operational choice, not an accident.
+  assert.equal(reminders(db,{}).policy.parcelPickup.reminderHours,24);
+});
+
 test('first-mile support never introduces a passenger cash option',async()=>{
   // Passenger-facing payment surfaces stay online-only: cash exists solely for
   // crew walk-up sales and the operator counter.

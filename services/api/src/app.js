@@ -36,7 +36,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const notify=notificationPolicies(db,config),rides=mobility(db),journey=journeys(db,config);
   const router=createRouter(config),geometry=routeGeometry(db,router),track=tracking(db,config);
   const actions=createActions({db,domain,payments:pay,payouts:payout,recovery:recover,parcels:parcel});
-  const workflows=createWorkflowEngine({db,actions,onEvent:(tx,event)=>notify.dispatchEvent(tx,event)});
+  const workflows=createWorkflowEngine({db,actions,onEvent:(tx,event)=>notify.dispatchEvent(tx,event),autonomy:config.agentAutonomy});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
   async function limited(subject) {
     await db.transaction(async tx=>{

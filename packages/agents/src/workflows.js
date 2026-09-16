@@ -20,7 +20,7 @@ export function createWorkflows({ actions }) {
     'breakdown-recovery': {
       trigger: 'incident.created', description: 'Propose a replacement vehicle for an incident and, after Ops approval, assign it and notify passengers.',
       steps: [
-        { name: 'propose', run: async (ctx, executor) => {
+        { name: 'propose', reads: true, run: async (ctx, executor) => {
           const proposal = await actions['recovery.propose'].run(executor, { incidentId: ctx.incidentId });
           invariant(proposal.eligibleVehicles.length > 0, 'NO_REPLACEMENT', 'No eligible replacement vehicle is available.', 409);
           const drivers = await executor.db.transaction(async tx => (await tx.query(`SELECT u.id,u.display_name FROM driver_profiles dp JOIN users u ON u.id=dp.user_id
@@ -40,7 +40,7 @@ export function createWorkflows({ actions }) {
     'driver-payout': {
       trigger: 'payout.requested', description: 'Validate a driver withdrawal, prepare it, and after Ops approval execute it through the payout provider.',
       steps: [
-        { name: 'validate', run: async (ctx, executor) => {
+        { name: 'validate', reads: true, run: async (ctx, executor) => {
           const rows = await executor.db.transaction(async tx => (await tx.query(`SELECT sum(net_minor)::integer AS reserved FROM driver_earnings WHERE payout_request_id=$1 AND payout_state='reserved'`, [ctx.payoutRequestId])).rows);
           invariant(rows[0]?.reserved >= ctx.amountMinor, 'PAYOUT_BALANCE', 'Reserved balance no longer covers the request.', 409);
           return { reservedMinor: rows[0].reserved };
@@ -51,7 +51,7 @@ export function createWorkflows({ actions }) {
     'delay-management': {
       trigger: 'service.position', description: 'Evaluate a position update against open delay incidents, notify affected passengers and surface Ops.',
       steps: [
-        { name: 'evaluate', run: async (ctx, executor) => {
+        { name: 'evaluate', reads: true, run: async (ctx, executor) => {
           const open = await executor.db.transaction(async tx => (await tx.query(`SELECT id FROM incidents WHERE service_id=$1 AND kind='delay' AND status<>'resolved' ORDER BY created_at DESC LIMIT 1`, [ctx.serviceId])).rows);
           return { delayed: open.length > 0, incidentId: open[0]?.id ?? null };
         } },
@@ -69,7 +69,7 @@ export function createWorkflows({ actions }) {
     'parcel-delay': {
       trigger: 'service.position', description: 'Detect parcels on a delayed service, record parcel.delay events, notify receivers and surface an Ops alert.',
       steps: [
-        { name: 'detect', run: async (ctx, executor) => {
+        { name: 'detect', reads: true, run: async (ctx, executor) => {
           const open = await executor.db.transaction(async tx => (await tx.query(`SELECT id FROM incidents WHERE service_id=$1 AND kind='delay' AND status<>'resolved' ORDER BY created_at DESC LIMIT 1`, [ctx.serviceId])).rows);
           if (!open.length) return { skip: true };
           const rows = await executor.db.transaction(async tx => (await tx.query(`SELECT p.id,p.tracking_number,p.operator_id FROM parcels p
@@ -116,7 +116,7 @@ export function createWorkflows({ actions }) {
     'parcel-breakdown': {
       trigger: 'incident.created', description: 'Detect parcels on the affected service, propose a replacement and, after Ops approval, reassign custody and notify.',
       steps: [
-        { name: 'detect', run: async (ctx, executor) => {
+        { name: 'detect', reads: true, run: async (ctx, executor) => {
           const rows = await executor.db.transaction(async tx => (await tx.query(`SELECT p.id,p.tracking_number,p.operator_id FROM parcels p
             JOIN parcel_service_assignments a ON a.parcel_id=p.id AND a.status IN ('loaded','in_transit')
             WHERE p.status IN ('loaded','in_transit') AND a.service_id=$1`, [ctx.serviceId])).rows);
@@ -133,6 +133,38 @@ export function createWorkflows({ actions }) {
         } },
       ],
     },
+    // A parcel that arrived and was never collected. The thresholds live in
+    // configuration (PARCEL_UNCOLLECTED_*), and the time-based sweep in
+    // packages/database/src/reminders.js raises these as ordinary outbox
+    // events — so they travel the same policy path as every other notification
+    // rather than through a second scheduler.
+    'parcel-uncollected-reminder': {
+      trigger: 'parcel.uncollected_reminder', autonomy: 'auto_low_risk',
+      description: 'A parcel has been collectable for longer than the reminder threshold; remind the receiver.',
+      steps: [
+        { name: 'notify', run: async (ctx, executor) => {
+          await actions['parcel.notify'].run(executor, { parcelId: ctx.parcelId, party: 'receiver' });
+          return { reminded: 1, waitingHours: ctx.waitingHours };
+        } },
+      ],
+    },
+    'parcel-uncollected-escalation': {
+      trigger: 'parcel.uncollected_escalation', autonomy: 'auto_low_risk',
+      description: 'A parcel is still uncollected past the escalation threshold; remind the receiver and ask the station to act.',
+      steps: [
+        { name: 'notify', run: async (ctx, executor) => {
+          await actions['parcel.notify'].run(executor, { parcelId: ctx.parcelId, party: 'receiver' });
+          return { reminded: 1 };
+        } },
+        { name: 'surface', run: async (ctx, executor) => {
+          // What Ops sees is the fact and its evidence — tracking number and
+          // how long it has waited — never a recommendation without a reason.
+          await actions['alert.create'].run(executor, { kind: 'parcel', serviceId: null,
+            message: `Colis non retiré depuis ${ctx.waitingHours} h : ${ctx.trackingNumber} — à traiter en gare.` });
+          return { flagged: true };
+        } },
+      ],
+    },
   };
 }
 
@@ -140,8 +172,24 @@ export function createWorkflows({ actions }) {
 // in its own transaction inside the same outbox drain, so a notification
 // failure can never roll back the business transaction that produced the event
 // and never blocks workflow processing.
-export function createWorkflowEngine({ db, actions, onEvent = null }) {
+export function createWorkflowEngine({ db, actions, onEvent = null, autonomy = null }) {
   const definitions = createWorkflows({ actions });
+  const autonomyConfig = { default: 'auto_low_risk', workflows: {}, ...(autonomy ?? {}) };
+
+  /**
+   * How much this workflow may do without a human.
+   *
+   * Resolution order is explicit configuration, then the workflow's own
+   * declared default, then the global default. Configuration can only ever be
+   * consulted by name, so a workflow nobody has thought about inherits the
+   * global setting rather than the most permissive one seen so far.
+   */
+  const levelFor = workflow => autonomyConfig.workflows[workflow]
+    ?? definitions[workflow]?.autonomy
+    ?? autonomyConfig.default;
+
+  /** A step that only queries: safe to execute even while observing. */
+  const readsOnly = step => step.reads === true || (step.action && actions[step.action]?.category === 'read');
   const one = async (tx, sql, args = []) => (await tx.query(sql, args)).rows[0];
   const stepKey = step => step.action ?? step.name;
   const audit = (tx, principalId, action, entityId, details) =>
@@ -195,7 +243,28 @@ export function createWorkflowEngine({ db, actions, onEvent = null }) {
           });
           continue;
         }
-        const requiresApproval = !!step.approval || (step.action && actions[step.action]?.approval === 'always');
+        // Autonomy is applied here, once, for every workflow and every step —
+        // not scattered through the definitions, where one omission would
+        // quietly become an exception.
+        const level = levelFor(run.workflow);
+        if (level === 'observe' && !readsOnly(step)) {
+          // Observation mode: record what would have happened and move on. This
+          // is how recommendation quality is measured before autonomy is
+          // widened — the run is complete and reviewable, and nothing changed.
+          const proposed = step.input ? step.input(context) : {};
+          await db.transaction(async tx => {
+            await one(tx, 'UPDATE workflow_runs SET context=$2,step=$3,updated_at=now() WHERE id=$1',
+              [runId, JSON.stringify({ ...context, [key]: { observed: true, proposed } }), steps[idx + 1] ? stepKey(steps[idx + 1]) : 'done']);
+            await audit(tx, run.principal_id, 'workflow.step_observed', runId, { workflow: run.workflow, step: key, autonomy: level });
+          });
+          continue;
+        }
+        const requiresApproval = !!step.approval
+          || (step.action && actions[step.action]?.approval === 'always')
+          // 'recommend' gates every mutation; 'approval_required' gates
+          // everything, reads included.
+          || (level === 'recommend' && !readsOnly(step))
+          || level === 'approval_required';
         if (requiresApproval) {
           const approval = await db.transaction(async tx => {
             const pending = await one(tx, "SELECT * FROM workflow_approvals WHERE workflow_run_id=$1 AND action=$2 AND status='pending' FOR UPDATE", [runId, key]);
