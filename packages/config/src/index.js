@@ -115,7 +115,11 @@ export function agentAutonomy(env = process.env) {
  */
 export function modelConfig(env = process.env) {
   const provider = ['openrouter', 'local'].includes(env.AGENT_MODEL_PROVIDER) ? env.AGENT_MODEL_PROVIDER : null;
-  const timeoutMs = Number(env.AGENT_MODEL_TIMEOUT_MS) > 0 ? Number(env.AGENT_MODEL_TIMEOUT_MS) : 20_000;
+  // Bounds the whole completion, retry ladder included. Measured free-tier
+  // latency runs from 2 s to 49 s, so this is the point at which LeRoutier
+  // decides a recommendation is not coming and carries on without one.
+  // Raise it only where the caller is a background worker, never a request.
+  const timeoutMs = Number(env.AGENT_MODEL_TIMEOUT_MS) > 0 ? Number(env.AGENT_MODEL_TIMEOUT_MS) : 25_000;
   const positive = (value, fallback) => (Number.isInteger(Number(value)) && Number(value) > 0 ? Number(value) : fallback);
   return {
     provider,

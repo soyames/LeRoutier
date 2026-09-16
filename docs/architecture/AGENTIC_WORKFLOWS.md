@@ -169,8 +169,14 @@ note changes nothing — covered by test in `packages/database/tests/agentic.tes
 
 Deterministic before generative: capacity, fares, payment state, payout
 eligibility, permissions, geometry and state machines are code. No invariant
-lives in a prompt. **No model is on any critical path today**, so a model
-failure cannot affect booking or payment safety.
+lives in a prompt.
+
+A model now assists with triage — classifying a situation and suggesting an
+action from a narrow per-task menu, which LeRoutier then validates against its
+own catalog before anything is shown to Ops. It executes nothing, approves
+nothing, and receives no party data. **No model is on any critical path**, and a
+test holds a booking through payment to confirmation while the provider throws
+on every call. See [`MODEL_PROVIDERS.md`](MODEL_PROVIDERS.md).
 
 The FedaPay webhook emits `payment.anomaly` / `payout.anomaly` only for
 signature-valid events that fail strict correlation, so anomalies are always

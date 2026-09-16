@@ -107,9 +107,27 @@ Run `pnpm release:check` for the mechanical half of this page.
 | Every mutation audited | `DONE` | `audit_events` | — |
 | Autonomy configurable per workflow | `DONE` | observe / recommend / auto_low_risk / approval_required; bad values resolve to the safest | — |
 | Prompt injection mitigated | `DONE` | structural — nothing for injected text to call (`agentic.test.js`) | — |
-| Model failure is safe | `DONE` | **no model on any critical path** | revisit when one is added |
 | Agent observability metrics | `NOT_DONE` | run data exists; no aggregated metrics | derive from `workflow_runs` |
 | Agentic load tested | `NOT_DONE` | never run | burst duplicate events against Docker |
+
+### Model-assisted reasoning
+
+| Requirement | Status | Evidence | Action |
+| --- | --- | --- | --- |
+| OpenRouter provider implemented | `DONE` | OpenAI-compatible, behind the provider interface | — |
+| Production provider configured | `DONE` | `AGENT_MODEL_PROVIDER=openrouter` on `le-routier-api` | — |
+| **Live connectivity verified** | `DONE` | two live calls: auth accepted, valid structured output, validated against the catalog, nothing executed | — |
+| Local MiniCPM still selectable | `DONE` | `AGENT_MODEL_PROVIDER=local`, no key required | — |
+| Model failure is safe | `DONE` | every path degrades to "no recommendation"; a booking completes while the provider throws on every call | — |
+| Model cannot execute anything | `DONE` | suggestion validated against the real catalog, scopes and approval gates | — |
+| No PII leaves for a model | `DONE` | allowlist projections, asserted by `unsafeFields()` in tests | — |
+| Prompt injection mitigated | `DONE` | separate policy/content turns; no free-form command path | — |
+| Secrets never exposed | `DONE` | no key, header or payload in any error, log or response — four failure modes tested | — |
+| Usage ceilings enforced | `DONE` | daily and per-workflow caps in the database; duplicate suppression | — |
+| CI never spends quota | `DONE` | every provider call in the suite uses an injected fetch | — |
+| **API key stored as Sensitive** | `NOT_DONE` | `OPENROUTER_API_KEY` is a **Config** variable, unlike `DATABASE_URL` and `FEDAPAY_*`, and is exposed to **Preview** as well as Production | re-add as Sensitive, Production-only — see [`VERCEL.md`](VERCEL.md) |
+| Model latency suitable for a request path | `NOT_DONE` | measured 6.5 s–49 s on the free tier | keep model calls in the workflow tick; never in a user request |
+| Triage wired into a workflow | `NOT_DONE` | the layer, its endpoints and its safety are complete; no workflow calls `recommend()` yet | enable per workflow under `observe` first |
 
 ## 8. Security
 

@@ -124,6 +124,64 @@ test('a model that refuses strict schemas is retried in plain JSON mode', async 
   assert.equal(result.data.classification, 'possible_breakdown');
 });
 
+// The three cases below were observed against the live free tier, not imagined.
+test('an empty 200 is treated as unusable and the ladder continues', async () => {
+  // Some free models answer a strict json_schema request with HTTP 200 and an
+  // empty body. It looks like success and contains nothing.
+  const { impl, calls } = fakeFetch(n => (n <= 2 ? { body: {} } : { body: { model: 'x/y', choices: [{ message: { content: JSON.stringify(GOOD) } }] } }));
+  const provider = createModelProvider({ model: modelConfig(env()) }, impl);
+  const result = await provider.complete({ system: 's', input: {}, schema: { type: 'object' } });
+  assert.equal(calls.length, 3, 'the ladder ran all three rungs');
+  assert.equal(calls[2].body.response_format, undefined, 'the last rung drops the format constraint entirely');
+  assert.equal(result.data.severity, 'high');
+});
+
+test('a reasoning model that narrates before answering is still understood', async () => {
+  const narrated = 'We need to output JSON with the required fields. Here it is:\n```json\n'
+    + JSON.stringify(GOOD) + '\n```\nThat should be correct.';
+  const { impl } = fakeFetch({ body: { model: 'x/y', choices: [{ message: { content: narrated } }] } });
+  const provider = createModelProvider({ model: modelConfig(env()) }, impl);
+  const result = await provider.complete({ system: 's', input: {} });
+  assert.equal(result.data.recommendedAction, 'incident.create');
+});
+
+test('a brace inside a string value does not truncate the extracted object', async () => {
+  const tricky = { ...GOOD, reason: 'Retard { anormal } signalé' };
+  const { impl } = fakeFetch({ body: { model: 'x/y', choices: [{ message: { content: `Voici: ${JSON.stringify(tricky)}` } }] } });
+  const provider = createModelProvider({ model: modelConfig(env()) }, impl);
+  const result = await provider.complete({ system: 's', input: {} });
+  assert.equal(result.data.reason, 'Retard { anormal } signalé');
+});
+
+test('the ladder shares one deadline instead of one timeout per rung', async () => {
+  // Three rungs at 20 s each would be a 60 s call. Free-tier latency has been
+  // measured at up to 49 s, so the caller's budget has to bound the whole thing.
+  const { impl, calls } = fakeFetch(async () => { await new Promise(r => setTimeout(r, 60)); return { body: {} }; });
+  const provider = createModelProvider({ model: modelConfig(env({ AGENT_MODEL_TIMEOUT_MS: '100' })) }, impl);
+  const started = Date.now();
+  await assert.rejects(() => provider.complete({ system: 's', input: {}, schema: { type: 'object' } }),
+    withReason(MODEL_REASONS.timeout));
+  assert.ok(Date.now() - started < 400, 'the deadline must bound the whole ladder');
+  assert.ok(calls.length < 3, 'the ladder stopped once the budget was spent');
+});
+
+test('a bad key or a rate limit is never retried down the ladder', async () => {
+  for (const status of [401, 429]) {
+    const { impl, calls } = fakeFetch({ status });
+    const provider = createModelProvider({ model: modelConfig(env()) }, impl);
+    await assert.rejects(() => provider.complete({ system: 's', input: {}, schema: { type: 'object' } }));
+    assert.equal(calls.length, 1, `HTTP ${status} must fail immediately, not spend two more attempts`);
+  }
+});
+
+test('reasoning output is asked to be brief and omitted', async () => {
+  const { impl, calls } = fakeFetch(completion(GOOD));
+  const provider = createModelProvider({ model: modelConfig(env()) }, impl);
+  await provider.complete({ system: 's', input: {} });
+  assert.deepEqual(calls[0].body.reasoning, { effort: 'low', exclude: true });
+  assert.ok(calls[0].body.max_tokens >= 1000, 'a reasoning model needs room to reach the answer');
+});
+
 test('which model actually answered is captured, not assumed', async () => {
   const { impl } = fakeFetch(completion(GOOD, 'mistralai/mistral-7b:free'));
   const provider = createModelProvider({ model: modelConfig(env()) }, impl);

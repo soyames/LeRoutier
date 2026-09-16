@@ -27,6 +27,37 @@ export const MODEL_REASONS = {
   modelUnavailable: 'model_unavailable',
 };
 
+/**
+ * Pulls the JSON object out of a completion.
+ *
+ * Reasoning models routinely narrate before answering, and some wrap the answer
+ * in a code fence. Asking them not to is a request, not a guarantee — so the
+ * first balanced object in the text is extracted rather than assuming the whole
+ * string parses. Scanning for balance (rather than a greedy regex) is what
+ * makes a brace inside a string value survive.
+ */
+export function extractJson(text) {
+  if (typeof text !== 'string') return null;
+  const cleaned = text.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+  try { return JSON.parse(cleaned); } catch { /* narration around it, most likely */ }
+
+  const start = cleaned.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0, inString = false, escaped = false;
+  for (let i = start; i < cleaned.length; i++) {
+    const char = cleaned[i];
+    if (escaped) { escaped = false; continue; }
+    if (char === '\\') { escaped = true; continue; }
+    if (char === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (char === '{') depth++;
+    else if (char === '}' && --depth === 0) {
+      try { return JSON.parse(cleaned.slice(start, i + 1)); } catch { return null; }
+    }
+  }
+  return null;
+}
+
 /** HTTP status → a reason code that says something useful without the body. */
 function reasonForStatus(status) {
   if (status === 401 || status === 403) return MODEL_REASONS.unauthorized;
@@ -76,13 +107,20 @@ function openAiCompatible({ name, baseUrl, apiKey, model, timeoutMs, headers = {
      *   maxTokens?: number, temperature?: number }} request
      * @returns {Promise<{ data: object, actualModel: string|null, latencyMs: number }>}
      */
-    async complete({ system, input, schema = null, maxTokens = 400, temperature = 0 }) {
+    async complete({ system, input, schema = null, maxTokens = 1200, temperature = 0 }) {
       if (!configured) throw new ModelUnavailable(MODEL_REASONS.notConfigured);
       const started = Date.now();
-      const payload = {
+      const base = {
         model,
         temperature,
+        // Generous, because a free router may serve a *reasoning* model that
+        // narrates before answering. Too small a budget truncates the answer
+        // mid-object and looks exactly like a malformed model.
         max_tokens: maxTokens,
+        // Ask for as little chain-of-thought as possible, and to be spared it
+        // in the response. Both are requests the provider may ignore, which is
+        // why extractJson exists rather than this being the whole answer.
+        reasoning: { effort: 'low', exclude: true },
         // The task input travels as JSON in a user message, never interpolated
         // into the system prompt: system policy and untrusted content stay in
         // separate turns so content cannot rewrite policy.
@@ -90,36 +128,46 @@ function openAiCompatible({ name, baseUrl, apiKey, model, timeoutMs, headers = {
           { role: 'system', content: system },
           { role: 'user', content: JSON.stringify(input) },
         ],
-        // Ask for JSON. Not every free model honours a strict schema, so the
-        // output is validated afterwards regardless of what was requested.
-        response_format: schema
-          ? { type: 'json_schema', json_schema: { name: 'recommendation', strict: true, schema } }
-          : { type: 'json_object' },
       };
 
-      let result;
-      try {
-        result = await call(payload);
-      } catch (error) {
-        // A model that cannot do strict schemas rejects the request outright.
-        // Retry once in plain JSON mode rather than losing the capability.
-        if (schema && error instanceof ModelUnavailable
-          && [MODEL_REASONS.providerError, MODEL_REASONS.modelUnavailable].includes(error.reason)) {
-          result = await call({ ...payload, response_format: { type: 'json_object' } });
-        } else throw error;
+      // A ladder, not a single attempt. "openrouter/free" routes to a different
+      // model per request, and they do not agree on what they support: strict
+      // schemas draw an empty 200 from some, a plain JSON hint works on others,
+      // and a few only behave with no format constraint at all. Verified
+      // against the live free tier rather than assumed.
+      const formats = schema
+        ? [{ type: 'json_schema', json_schema: { name: 'recommendation', strict: true, schema } }, { type: 'json_object' }, null]
+        : [{ type: 'json_object' }, null];
+
+      // One deadline for the whole operation, not one per attempt. A three-rung
+      // ladder with a 20 s timeout each is a 60 s call, and measured free-tier
+      // latency runs from 2 s to 49 s — enough to outlive any serverless
+      // budget. The caller waits `timeoutMs`, whatever the ladder does inside.
+      const deadline = started + timeoutMs;
+      const remaining = () => deadline - Date.now();
+
+      let lastReason = MODEL_REASONS.malformedOutput;
+      for (const responseFormat of formats) {
+        if (remaining() <= 0) throw new ModelUnavailable(MODEL_REASONS.timeout, 'deadline reached before a usable answer');
+        let result;
+        try {
+          result = await call(responseFormat ? { ...base, response_format: responseFormat } : base, { timeout: remaining() });
+        } catch (error) {
+          lastReason = error instanceof ModelUnavailable ? error.reason : MODEL_REASONS.providerError;
+          // A refusal of *this request shape* is worth retrying differently; a
+          // bad key, a rate limit or a timeout is not.
+          if ([MODEL_REASONS.unauthorized, MODEL_REASONS.rateLimited, MODEL_REASONS.timeout].includes(lastReason)) throw error;
+          continue;
+        }
+        const data = extractJson(result?.choices?.[0]?.message?.content);
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          // Free routing may substitute a model. An evaluation that does not
+          // know which model answered is worth very little, so it is captured.
+          return { data, actualModel: typeof result?.model === 'string' ? result.model : null, latencyMs: Date.now() - started };
+        }
+        lastReason = MODEL_REASONS.malformedOutput;
       }
-
-      const latencyMs = Date.now() - started;
-      const content = result?.choices?.[0]?.message?.content;
-      if (typeof content !== 'string' || !content.trim()) throw new ModelUnavailable(MODEL_REASONS.malformedOutput, 'no completion content');
-      let data;
-      try { data = JSON.parse(content); }
-      catch { throw new ModelUnavailable(MODEL_REASONS.malformedOutput, 'completion was not JSON'); }
-      if (!data || typeof data !== 'object' || Array.isArray(data)) throw new ModelUnavailable(MODEL_REASONS.malformedOutput, 'completion was not an object');
-
-      // Free routing may substitute a model. An evaluation that does not know
-      // which model answered is worth very little, so it is captured.
-      return { data, actualModel: typeof result?.model === 'string' ? result.model : null, latencyMs };
+      throw new ModelUnavailable(lastReason, 'no usable structured output');
     },
 
     /**

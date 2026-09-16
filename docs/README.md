@@ -23,6 +23,7 @@ removed rather than left to mislead.
 - [`MAPS_ROUTING_AND_TRACKING.md`](architecture/MAPS_ROUTING_AND_TRACKING.md) — **canonical** for maps, road routing, GPS, progress and ETA
 - [`NOTIFICATIONS.md`](architecture/NOTIFICATIONS.md) — the event-driven notification layer
 - [`AGENTIC_WORKFLOWS.md`](architecture/AGENTIC_WORKFLOWS.md) — principals, scopes, typed actions, approvals, autonomy
+- [`MODEL_PROVIDERS.md`](architecture/MODEL_PROVIDERS.md) — what a model may see, suggest and never do
 
 ## Domain and product
 
