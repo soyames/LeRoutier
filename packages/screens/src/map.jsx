@@ -19,9 +19,14 @@ const ROUTE_DONE = '#059669', ROUTE_AHEAD = '#94a3b8', VEHICLE = '#d97706';
 
 // Leaflet's default marker images do not survive bundling; the vehicle uses a
 // styled div so nothing depends on external image assets.
-const vehicleIcon = L.divIcon({
+// The vehicle marker carries meaning, so it is announced — but it is not a
+// command, and Leaflet's default keyboard handling would present it as one:
+// a focusable role="button" with nothing to activate and no accessible name.
+// It is an image with a label instead.
+const escapeHtml = value => String(value).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const vehicleIconFor = label => L.divIcon({
   className: 'lr-vehicle-marker',
-  html: '<span aria-hidden="true"></span>',
+  html: `<span role="img" aria-label="${escapeHtml(label)}"></span>`,
   iconSize: [22, 22], iconAnchor: [11, 11],
 });
 
@@ -93,7 +98,8 @@ export default function TransportMap({
         </CircleMarker>;
       })}
 
-      {vehicle && Number.isFinite(vehicle.latitude) && <Marker position={/** @type {[number, number]} */ ([vehicle.latitude, vehicle.longitude])} icon={vehicleIcon}>
+      {vehicle && Number.isFinite(vehicle.latitude) && <Marker keyboard={false}
+        position={/** @type {[number, number]} */ ([vehicle.latitude, vehicle.longitude])} icon={vehicleIconFor(vehicleLabel)}>
         <Tooltip direction="top">{vehicleLabel}</Tooltip>
       </Marker>}
     </MapContainer>
