@@ -1,0 +1,33 @@
+# Dependency monitoring.
+#
+# Grouped and weekly rather than per-package and daily: a pull request per
+# patch bump trains everyone to merge without reading, which is worse than a
+# slightly older dependency. Major versions are deliberately left ungrouped so
+# they arrive on their own and get reviewed on their own.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Majors still open a PR; they are simply not swept into the group above.
+      - dependency-name: '*'
+        update-types: [version-update:semver-major]
+    labels: [dependencies]
+
+  # CI pins actions to commit SHAs, so this is what keeps them current: without
+  # it, pinning silently becomes "frozen on an old, possibly vulnerable build".
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [dependencies, ci]
