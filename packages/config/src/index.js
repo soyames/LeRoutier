@@ -52,6 +52,10 @@ export function serverConfig(env = process.env) {
     // Per-workflow autonomy. Unfamiliar and high-risk workflows default to
     // recommending rather than acting; see AGENTIC_WORKFLOWS.md.
     agentAutonomy: agentAutonomy(env),
+    // Model-assisted reasoning. Server-side only: none of these may ever be
+    // prefixed VITE_ or reach a browser bundle. An unset provider means agents
+    // stay entirely deterministic, which is a supported production state.
+    model: modelConfig(env),
     // Road routing engine. Unset means routes simply have no road geometry and
     // every surface says so — a straight line is never substituted. The public
     // OSRM/Valhalla demo servers forbid production use, so no default endpoint
@@ -100,6 +104,42 @@ export function agentAutonomy(env = process.env) {
     }
   } catch { perWorkflow = {}; }
   return { default: fallback, workflows: perWorkflow };
+}
+
+/**
+ * Model provider configuration.
+ *
+ * `AGENT_MODEL_PROVIDER` selects; an unrecognised value selects nothing rather
+ * than falling back to a remote provider. Sending a situation to a third party
+ * because of a typo would be exactly the wrong default.
+ */
+export function modelConfig(env = process.env) {
+  const provider = ['openrouter', 'local'].includes(env.AGENT_MODEL_PROVIDER) ? env.AGENT_MODEL_PROVIDER : null;
+  const timeoutMs = Number(env.AGENT_MODEL_TIMEOUT_MS) > 0 ? Number(env.AGENT_MODEL_TIMEOUT_MS) : 20_000;
+  const positive = (value, fallback) => (Number.isInteger(Number(value)) && Number(value) > 0 ? Number(value) : fallback);
+  return {
+    provider,
+    openrouter: {
+      apiKey: env.OPENROUTER_API_KEY,
+      baseUrl: env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+      model: env.OPENROUTER_MODEL || 'openrouter/free',
+      appName: env.OPENROUTER_APP_NAME || 'LeRoutier',
+      appUrl: env.OPENROUTER_APP_URL || 'https://le-routier.vercel.app',
+      timeoutMs,
+    },
+    local: {
+      baseUrl: env.LOCAL_MODEL_BASE_URL || 'http://127.0.0.1:8000/v1',
+      model: env.LOCAL_MODEL_NAME || 'minicpm',
+      timeoutMs,
+    },
+    // Free capacity is shared and exhaustible. These are hard ceilings, not
+    // guidance: a runaway workflow must hit a wall, not a warning.
+    budget: {
+      dailyCalls: positive(env.AGENT_MODEL_DAILY_CALLS, 200),
+      perWorkflowDailyCalls: positive(env.AGENT_MODEL_WORKFLOW_DAILY_CALLS, 50),
+      suppressDuplicatesHours: positive(env.AGENT_MODEL_DEDUP_HOURS, 6),
+    },
+  };
 }
 
 export function firstMilePolicy(env = process.env) {
