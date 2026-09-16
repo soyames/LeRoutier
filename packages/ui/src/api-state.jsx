@@ -25,7 +25,10 @@ export function SessionPanel() {
       {user?.needs_profile && <ProfileForm/>}</> : <>
       <h3>Connexion</h3>
       {authLoading?<p role="status">Chargement de la connexion…</p>:<>
-        <button className="btn btn-primary" disabled={busy || !online || !canSignin} onClick={()=>connect(login)}>Se connecter</button>
+        {/* The provider is named, because a person about to hand over an
+            identity deserves to know to whom. */}
+        <button className="btn btn-primary" disabled={busy || !online || !canSignin} onClick={()=>connect(login)}>
+          {canSignin?'Se connecter avec Google':'Se connecter'}</button>
         {!canSignin && !demoLogin && <p role="status">La connexion sécurisée n’est pas encore configurée.</p>}
         {demoLogin && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>connect(loginDemo)}>Connexion de développement</button>}
         {/* The unified app serves every role from one identity: in development

@@ -17,11 +17,26 @@ test('missing expiry is rejected',async()=>assert.rejects(verify(await fixture.s
 test('missing subject is rejected',async()=>assert.rejects(verify(await fixture.sign(undefined)),{code:'UNAUTHORIZED'}));
 test('not-before time is enforced',async()=>assert.rejects(verify(await fixture.sign('person',{nbf:Math.floor(Date.now()/1000)+300})),{code:'UNAUTHORIZED'}));
 test('unconfigured verifier fails closed',async()=>assert.rejects(jwtVerifier({})(await fixture.sign('person')),{code:'AUTH_UNAVAILABLE'}));
+const FIREBASE_WEB={apiKey:'web-api-key',authDomain:'example.firebaseapp.com',projectId:'example-project',appId:'1:1:web:1'};
 test('public sign-in config stays unavailable until complete',()=>{
-  assert.equal(publicAuthConfig({...fixture.config,demoLogin:false}).oidc,null);
-  assert.equal(publicAuthConfig({...fixture.config,oidcClientId:'public-client',oidcRedirectUris:['http://unsafe.example.invalid/callback']}).oidc,null);
+  assert.equal(publicAuthConfig({demoLogin:false}).firebase,null);
+  // Every field is required: a half-configured Firebase app produces a sign-in
+  // button that fails only after the user has committed to using it.
+  for(const missing of ['apiKey','authDomain','appId']) {
+    assert.equal(publicAuthConfig({firebaseProjectId:'example-project',firebaseWeb:{...FIREBASE_WEB,[missing]:undefined}}).firebase,null,
+      `${missing} missing must disable sign-in`);
+  }
+  assert.equal(publicAuthConfig({firebaseWeb:FIREBASE_WEB}).firebase,null,'no project id must disable sign-in');
 });
-test('public sign-in config contains only public OIDC settings',()=>{
-  const result=publicAuthConfig({...fixture.config,oidcClientId:'public-client',oidcRedirectUris:['https://app.example.invalid/auth/callback'],databaseUrl:'private-placeholder'});
-  assert.equal(result.oidc.clientId,'public-client');assert.ok(!JSON.stringify(result).includes('private-placeholder'));
+test('public sign-in config carries only browser-facing Firebase identifiers',()=>{
+  const result=publicAuthConfig({firebaseProjectId:'example-project',firebaseWeb:FIREBASE_WEB,
+    databaseUrl:'private-placeholder',fedapay:{secretKey:'sk-private'},issuer:'https://securetoken.google.com/example-project'});
+  assert.deepEqual(Object.keys(result.firebase).sort(),['apiKey','appId','authDomain','projectId','providers']);
+  assert.deepEqual(result.firebase.providers,['google']);
+  // Nothing server-side may ride along: not a credential, and not even the
+  // issuer or key set the API verifies against.
+  const text=JSON.stringify(result);
+  for(const secret of ['private-placeholder','sk-private','securetoken.google.com','jwks']) {
+    assert.equal(text.includes(secret),false,`${secret} reached the browser payload`);
+  }
 });

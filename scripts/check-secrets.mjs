@@ -56,6 +56,15 @@ try {
     if (/VITE_[A-Z_]*(?:DATABASE|DB_PASSWORD|NEON|SECRET)[A-Z_]*\s*=\s*[^\s]/.test(text)) failures++;
     if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(text)) failures++;
     if (/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/.test(text)) failures++;
+    // A Google service account, however it was named. The Firebase Admin
+    // credential is the one file that would turn a leak into full project
+    // control, so it is matched by shape rather than by filename.
+    if (/"type"\s*:\s*"service_account"/.test(text)) failures++;
+    if (/"private_key(?:_id)?"\s*:\s*"/.test(text)) failures++;
+    if (/\bGOCSPX-[A-Za-z0-9_-]{10,}/.test(text)) failures++;
+    // Firebase Admin belongs to the server. Importing it into anything the
+    // browser loads is how a service account ends up in a bundle.
+    if (isBundle && /firebase-admin|googleapis\.com\/auth\/cloud-platform/.test(text)) failures++;
   }
 
   for (const file of files) {

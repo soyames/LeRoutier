@@ -1,10 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { oidcClient, finishSignin, clearSignin, rememberReturnPath, takeReturnPath } from './oidc.js';
+import { signInWithGoogle, completeRedirectSignIn, signOutFirebase, idToken, onAuthChange, takeReturnPath } from './firebase.js';
 
 const Context=createContext(null);
 const subscribe=callback=>{window.addEventListener('online',callback);window.addEventListener('offline',callback);return()=>{window.removeEventListener('online',callback);window.removeEventListener('offline',callback);};};
-// Read once, at mount, before anything rewrites the location.
-const callbackUrlReturnPath=()=>(window.location.pathname==='/auth/callback'?takeReturnPath():'/');
 
 // Identity and authorisation outcomes are explained in the product's language.
 // The API's own message is a developer-facing description; a pilot user should
@@ -18,87 +16,114 @@ const ERROR_COPY={
   RATE_LIMITED:'Trop de tentatives. Patientez un instant avant de réessayer.',
   FORBIDDEN:'Vous n’avez pas accès à cette action avec ce compte.',
 };
+
 export function ApiProvider({baseUrl='',role,children}) {
-  const [session,setSession]=useState(null),[auth,setAuth]=useState({loading:true,demoLogin:false,client:null,error:''});
-  const [callbackUrl]=useState(()=>window.location.pathname==='/auth/callback'?window.location.href:null);
-  // Captured before the callback rewrites the URL: where sign-in should land.
-  const [returnTo]=useState(()=>callbackUrlReturnPath());
-  const [callbackPending,setCallbackPending]=useState(!!callbackUrl);
+  const [session,setSession]=useState(null),[auth,setAuth]=useState({loading:true,demoLogin:false,firebase:null,error:''});
   const online=useSyncExternalStore(subscribe,()=>navigator.onLine,()=>true),base=baseUrl.replace(/\/$/,'');
+
+  // Firebase refreshes an ID token shortly before it expires, so the token is
+  // asked for per request rather than held: a long booking must not fail on a
+  // token that went stale while the user was reading the summary.
+  const authorization=useCallback(async explicit=>{
+    if(explicit)return explicit;
+    // A development session carries its own opaque token; a real one does not.
+    if(session?.token)return session.token;
+    return auth.firebase?await idToken(auth.firebase).catch(()=>null):null;
+  },[session?.token,auth.firebase]);
+
   // All API calls use the versioned transport (/api/v1); the domain stays shared.
-  const request=useCallback(async(path,{method='GET',body=undefined,key=undefined,signal=undefined,token=session?.token}={})=>{
+  const request=useCallback(async(path,{method='GET',body=undefined,key=undefined,signal=undefined,token=undefined}={})=>{
     if(!base) throw new Error('API non configurée.');
     if(!navigator.onLine) throw new Error('Hors ligne. Réessayez après reconnexion.');
-    const response=await fetch(base+'/api/v1'+path,{method,signal,cache:'no-store',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{}),...(key?{'idempotency-key':key}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+    const bearer=await authorization(token);
+    const response=await fetch(base+'/api/v1'+path,{method,signal,cache:'no-store',headers:{'content-type':'application/json',...(bearer?{authorization:'Bearer '+bearer}:{}),...(key?{'idempotency-key':key}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
     let payload;
     try { payload=await response.json(); } catch { throw new Error('Le service est indisponible.'); }
     if(!response.ok){
-      if(response.status===401 && token)setSession(null);
+      if(response.status===401 && bearer)setSession(null);
       const code=payload.error?.code;
       throw Object.assign(new Error(ERROR_COPY[code] || payload.error?.message || 'Le service est indisponible.'),
         {status:response.status,code});
     }
     return payload.data;
-  },[base,session?.token]);
+  },[base,authorization]);
+
+  // Sign-in configuration arrives at runtime, so rotating a Firebase key is an
+  // API change and never a rebuild of the app.
   useEffect(()=>{
     let cancelled=false;
-    async function initialize(){
-      try {
+    (async()=>{
+      try{
         if(!base)throw new Error();
         const response=await fetch(base+'/api/v1/auth/config',{cache:'no-store'});
         if(!response.ok)throw new Error();
-        const {data}=await response.json(),client=oidcClient(base,data.oidc);
+        const {data}=await response.json();
         if(cancelled)return;
-        setAuth({loading:false,demoLogin:data.demoLogin===true,client,error:''});
-        if(callbackUrl){
-          if(!client)throw new Error();
-          const identity=await finishSignin(client,callbackUrl,returnTo);
-          const me=await fetch(base+'/api/v1/me',{cache:'no-store',headers:{authorization:'Bearer '+identity.access_token}});
-          if(!me.ok){await client.manager.removeUser();throw new Error();}
-          const {data:user}=await me.json();
-          if(!cancelled)setSession({token:identity.access_token,user});
+        setAuth({loading:false,demoLogin:data.demoLogin===true,firebase:data.firebase ?? null,error:''});
+
+        // A popup sign-in never left the page, so only a redirect needs
+        // finishing — and only when one was actually started.
+        if(data.firebase){
+          const returning=await completeRedirectSignIn(data.firebase).catch(()=>null);
+          // The provider leaves its own parameters in the URL; the user is put
+          // back on the page they asked for, with a clean address.
+          if(returning && !cancelled)window.history.replaceState({},'',takeReturnPath());
         }
       }catch{
-        // A failed sign-in still leaves the browser on a usable page.
-        if(callbackUrl)window.history.replaceState({},'', '/');
-        if(!cancelled)setAuth(a=>({...a,loading:false,error:callbackUrl?'Connexion refusée ou expirée. Réessayez.':'Connexion indisponible. Réessayez ultérieurement.'}));
-      }finally{if(!cancelled)setCallbackPending(false);}
-    }
-    initialize();return()=>{cancelled=true;};
-  },[base,callbackUrl,returnTo]);
+        if(!cancelled)setAuth(a=>({...a,loading:false,error:'Connexion indisponible. Réessayez ultérieurement.'}));
+      }
+    })();
+    return()=>{cancelled=true;};
+  },[base]);
+
+  // Firebase is the source of truth for "is somebody signed in". When it says
+  // yes, LeRoutier asks its own API who that is — Google never decides a role.
   useEffect(()=>{
-    if(!auth.client)return;
-    const expired=()=>{setSession(null);clearSignin(auth.client);setAuth(a=>({...a,error:'Votre session a expiré. Reconnectez-vous.'}));auth.client.manager.removeUser();};
-    auth.client.manager.events.addAccessTokenExpired(expired);
-    return()=>auth.client.manager.events.removeAccessTokenExpired(expired);
-  },[auth.client]);
+    if(!auth.firebase)return;
+    let cancelled=false,unsubscribe=()=>{};
+    (async()=>{
+      unsubscribe=await onAuthChange(auth.firebase,async firebaseUser=>{
+        if(cancelled)return;
+        if(!firebaseUser){setSession(s=>(s?.token?s:null));return;}
+        try{
+          const user=await request('/me');
+          if(!cancelled)setSession({token:null,user});
+        }catch(error){
+          // A verified Google identity that LeRoutier refuses is not a silent
+          // failure: the user is told, and is not left looking signed in.
+          if(!cancelled){setSession(null);setAuth(a=>({...a,error:error.message}));}
+        }
+      });
+    })();
+    return()=>{cancelled=true;unsubscribe();};
+  },[auth.firebase,request]);
+
   const login=useCallback(async()=>{
-    if(!auth.client)throw new Error('La connexion sécurisée n’est pas encore configurée.');
+    if(!auth.firebase)throw new Error('La connexion sécurisée n’est pas encore configurée.');
     // Sign-in returns the user to the page they asked for, not to the home page.
-    rememberReturnPath(window.location.pathname+window.location.search);
-    try{await auth.client.manager.clearStaleState();await auth.client.manager.signinRedirect();}
-    catch{throw new Error('Impossible de démarrer la connexion. Réessayez.');}
-  },[auth.client]);
+    try{ await signInWithGoogle(auth.firebase,window.location.pathname+window.location.search); }
+    catch(error){
+      // The provider's own message is never shown — it is developer-facing and
+      // can name internals — but it is kept as the cause for diagnosis.
+      if(error?.code==='auth/popup-closed-by-user')throw new Error('Connexion annulée.',{cause:error});
+      throw new Error('Impossible de démarrer la connexion. Réessayez.',{cause:error});
+    }
+  },[auth.firebase]);
+
   // The unified app serves every role from one identity, so development login
   // accepts the role to impersonate; single-role apps keep their first role.
   const demoLogin=useCallback(async(as=undefined)=>{
     if(!auth.demoLogin)throw new Error('Connexion de développement indisponible.');
     setSession(await request('/auth/demo',{method:'POST',body:{role:as ?? (Array.isArray(role)?role[0]:role)}}));
   },[request,role,auth.demoLogin]);
+
   const logout=useCallback(async()=>{
     window.dispatchEvent(new Event('leroutier:logout'));
     setSession(null);
-    if(auth.client){
-      await auth.client.manager.removeUser();
-      clearSignin(auth.client);
-      // No token hints in logout URLs. Providers supporting client_id may also
-      // end SSO; otherwise this securely ends only the local application session.
-      try{
-        const endpoint=await auth.client.manager.metadataService.getEndSessionEndpoint();
-        if(endpoint){const url=new URL(endpoint);url.searchParams.set('client_id',auth.client.manager.settings.client_id);url.searchParams.set('post_logout_redirect_uri',window.location.origin+'/');window.location.assign(url.href);}
-      }catch{throw new Error('Session locale fermée. La déconnexion du fournisseur est indisponible.');}
-    }
-  },[auth.client]);
+    setAuth(a=>({...a,error:''}));
+    if(auth.firebase)await signOutFirebase(auth.firebase);
+  },[auth.firebase]);
+
   const updateProfile=useCallback(async body=>{
     const user=await request('/me',{method:'PATCH',body});setSession(s=>s?{...s,user}:s);
   },[request]);
@@ -106,12 +131,16 @@ export function ApiProvider({baseUrl='',role,children}) {
   const refresh=useCallback(async()=>{
     const user=await request('/me');setSession(s=>s?{...s,user}:s);
   },[request]);
+
   const roles=useMemo(()=>Array.isArray(role)?role:[role],[role]);
   const value=useMemo(()=>({request,identity:session?.user,user:session?.user && roles.includes(session.user.role)?session.user:null,role,online,configured:!!base,
-    demoLogin:auth.demoLogin,authLoading:auth.loading,authError:auth.error,canSignin:!!auth.client,login,loginDemo:demoLogin,logout,updateProfile,refresh}),[request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles]);
-  return <Context.Provider value={value}>{callbackPending?<p role="status">Connexion sécurisée en cours…</p>:children}</Context.Provider>;
+    demoLogin:auth.demoLogin,authLoading:auth.loading,authError:auth.error,canSignin:!!auth.firebase,login,loginDemo:demoLogin,logout,updateProfile,refresh}),
+  [request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles]);
+  return <Context.Provider value={value}>{children}</Context.Provider>;
 }
+
 export function useSession(){return useContext(Context);}
+
 export function useApi(path) {
   const {request,online}=useSession();
   const [version,setVersion]=useState(0),[state,setState]=useState({path:null,request:null,version:0,data:null,error:null,code:null,loading:true});

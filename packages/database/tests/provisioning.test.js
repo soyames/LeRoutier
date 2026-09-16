@@ -85,10 +85,10 @@ test('API rejects a token signed with an unknown key id, without leaking why',as
   assert.equal(/kid|jwks|key/i.test(JSON.stringify(body)),false);
 });
 
-// ZITADEL — and several other providers — put MULTIPLE values in `aud` by
-// default: every client id of the project plus the project id. The API must
-// accept a token whose audience *contains* the configured one.
-test('a multi-valued audience containing AUTH_AUDIENCE is accepted',async()=>{
+// Some providers put MULTIPLE values in `aud`. Firebase uses a single project
+// id, but the verifier must accept a token whose audience *contains* the
+// configured one — and still refuse one that merely looks similar.
+test('a multi-valued audience containing the project id is accepted',async()=>{
   const multi=await call('multi-aud-user','/api/v1/me','GET',undefined,
     {aud:['some-other-client-id',fixture.config.audience,'the-project-id']});
   assert.equal(multi.status,200);

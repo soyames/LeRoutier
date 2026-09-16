@@ -43,7 +43,7 @@ operations, USSD — goes through the same booking and capacity logic in
 | `packages/screens` · `packages/ui` | shared screens and design system |
 | `packages/geo` · `packages/routing` | route geometry, progress, ETA, routing adapter |
 | `packages/agents` | agent principals, typed action catalog, workflow engine |
-| `packages/config` | server and client configuration, OIDC |
+| `packages/config` | server and client configuration, Firebase Authentication |
 
 ## Getting started
 
@@ -106,6 +106,9 @@ Real operators, real vehicles, real money — nothing is mocked into existence.
   real GPS. A straight line between two cities is never drawn as a road, and
   "live" is never claimed without a recent fix.
   See [`docs/architecture/MAPS_ROUTING_AND_TRACKING.md`](docs/architecture/MAPS_ROUTING_AND_TRACKING.md).
+- **Identity** — Firebase Authentication with Google Sign-In. Google says who
+  you are; the database says what you may do, and a token claim grants nothing.
+  See [`docs/operations/AUTH_PRODUCTION_SETUP.md`](docs/operations/AUTH_PRODUCTION_SETUP.md).
 - **Agentic operations** — domain events drive typed, scoped, audited agent
   actions. Money and privileged changes always wait for a human.
   See [`docs/architecture/AGENTIC_WORKFLOWS.md`](docs/architecture/AGENTIC_WORKFLOWS.md).
