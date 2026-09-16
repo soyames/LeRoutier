@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { serverConfig } from '@leroutier/config';
 import { createDatabase } from '../src/index.js';
 import { migrate } from '../src/migrations.js';
+import { dropDisposableSchema } from '../src/guards.js';
 import { seed, demo } from '../src/seed.js';
 import { transport } from '../src/transport.js';
 
@@ -25,7 +26,7 @@ beforeEach(async()=>db.transaction(async tx=>{
   await tx.query("UPDATE services SET current_sequence=0,status='active'");
 }));
 after(async()=>{
-  try { if(db.schema.startsWith('lr_test_')) await db.transaction(tx=>tx.query(`DROP SCHEMA "${db.schema}" CASCADE`)); }
+  try { await dropDisposableSchema(db); }
   finally {await db.close();}
 });
 test('full-route booking allocates every segment',async()=>{
