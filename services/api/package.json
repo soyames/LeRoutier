@@ -15,7 +15,8 @@
     "@leroutier/geo": "workspace:*",
     "@leroutier/notifications": "workspace:*",
     "jose": "^6.1.0",
-    "@leroutier/agents": "workspace:*"
+    "@leroutier/agents": "workspace:*",
+    "@leroutier/routing": "workspace:*"
   },
   "devDependencies": {
     "esbuild": "^0.25.12"

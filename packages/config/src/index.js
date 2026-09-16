@@ -42,6 +42,15 @@ export function serverConfig(env = process.env) {
     // First-mile timing policy: one configurable default, documented in
     // docs/product/FIRST_LAST_MILE.md, instead of buffers invented per screen.
     firstMile: firstMilePolicy(env),
+    // Road routing engine. Unset means routes simply have no road geometry and
+    // every surface says so — a straight line is never substituted. The public
+    // OSRM/Valhalla demo servers forbid production use, so no default endpoint
+    // ships: point ROUTING_URL at an engine you are entitled to use.
+    routing: {
+      url: env.ROUTING_URL, provider: env.ROUTING_PROVIDER || 'osrm',
+      apiKey: env.ROUTING_API_KEY,
+      timeoutMs: Number(env.ROUTING_TIMEOUT_MS) > 0 ? Number(env.ROUTING_TIMEOUT_MS) : 15_000,
+    },
   };
 }
 

@@ -10,6 +10,34 @@ export function validatePosition({ latitude, longitude, observedAt }, now = Date
   return { latitude, longitude, observedAt: new Date(time).toISOString() };
 }
 
+const POSITION_SOURCES = ['pwa_device', 'dedicated_tracker', 'fleet_integration'];
+
+/**
+ * A vehicle position with optional GPS quality. Every extra field is optional
+ * because many devices report none of them; none is ever invented, and an
+ * implausible value is rejected rather than stored.
+ */
+export function validateVehiclePosition(input, now = Date.now()) {
+  invariant(input && Object.keys(input).every(k => ['latitude', 'longitude', 'observedAt', 'accuracyM', 'speedMps', 'headingDeg', 'source'].includes(k)),
+    'INVALID_POSITION', 'Unexpected position fields.');
+  const base = validatePosition(input, now);
+  const optional = (value, min, max, code) => {
+    if (value === undefined || value === null) return null;
+    const number = Number(value);
+    invariant(Number.isFinite(number) && number >= min && number <= max, 'INVALID_POSITION', code);
+    return number;
+  };
+  const source = input.source ?? 'pwa_device';
+  invariant(POSITION_SOURCES.includes(source), 'INVALID_POSITION', 'Position source is not recognised.');
+  return {
+    ...base,
+    accuracyM: optional(input.accuracyM, 0, 100_000, 'Accuracy is invalid.'),
+    speedMps: optional(input.speedMps, 0, 100, 'Speed is invalid.'),
+    headingDeg: optional(input.headingDeg, 0, 359.999, 'Heading is invalid.'),
+    source,
+  };
+}
+
 const radians = degrees => degrees * Math.PI / 180;
 
 // Great-circle distance in metres.
@@ -30,3 +58,8 @@ export function localTravelEstimateMinutes(from, to, { detourFactor = 1.35, kmPe
   if (metres === null) return null;
   return Math.max(1, Math.min(600, Math.round((metres * detourFactor / 1000) / kmPerHour * 60)));
 }
+
+// Route geometry, vehicle progress, freshness and arrival estimation.
+export { haversineMetres, isValidLine, cumulativeDistances, lineLengthMetres, nearestOnRoute,
+  routeProgress, projectStops, nextStopFrom, stopStates, offRouteState, derivedSpeedMps } from './route.js';
+export { FRESHNESS, DEFAULT_ROUTE_SPEED_MPS, freshness, estimateArrival, shouldPublishPosition } from './tracking.js';

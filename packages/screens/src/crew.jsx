@@ -4,6 +4,7 @@ import { useApi, useSession, IDENTITY_ERROR_CODES } from '@leroutier/config/clie
 import { Card, Badge, StatCard, SectionTitle, ApiState, ErrorState, SkeletonCards } from '@leroutier/ui';
 import { status, fcfa, time, untilLabel } from '@leroutier/ui';
 import { createSyncQueue } from '@leroutier/config/offline';
+import { useVehicleTracking } from './vehicle-gps.js';
 import QrScanner from 'qr-scanner';
 import { Users, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw, Package, MapPin, Navigation } from 'lucide-react';
 
@@ -92,6 +93,37 @@ function QueueStatus({queue}){
   </Card>;
 }
 
+// Live vehicle tracking for the service being run. Permission is asked for
+// only once the crew turn it on, and capture stops when the service does.
+function VehicleTracking({serviceId,serviceStatus}){
+  const {request}=useSession();
+  const [enabled,setEnabled]=useState(false);
+  const running=['active','disrupted'].includes(serviceStatus);
+  const {state,lastSentAt,pending}=useVehicleTracking({serviceId,enabled:enabled&&running,request});
+  const copy={
+    off:{label:'Suivi désactivé',tone:'neutral',help:'Activez le suivi pour que vos passagers voient la position du véhicule pendant le trajet.'},
+    requesting:{label:'Autorisation demandée',tone:'warning',help:'Autorisez la localisation pour activer le suivi du véhicule pendant ce trajet.'},
+    active:{label:'Suivi actif',tone:'success',help:'Vos passagers voient la position du véhicule. Gardez cette page ouverte pendant le trajet.'},
+    denied:{label:'Localisation refusée',tone:'danger',help:'La localisation est bloquée pour ce site. Autorisez-la dans les réglages du navigateur, puis réactivez le suivi.'},
+    unavailable:{label:'GPS indisponible',tone:'danger',help:'Cet appareil ne fournit pas de position exploitable pour le moment.'},
+    offline:{label:'Hors ligne — positions en attente',tone:'warning',help:'Les positions sont conservées sur l’appareil et repartiront dès le retour du réseau.'},
+  }[state]??{label:'Suivi désactivé',tone:'neutral',help:''};
+  if(!running) return null;
+  return <Card className="stack">
+    <div className="between wrap">
+      <strong>Suivi du véhicule</strong>
+      <Badge tone={copy.tone}><Navigation size={13}/>{copy.label}</Badge>
+    </div>
+    <p className="small muted">{copy.help}</p>
+    {lastSentAt && <p className="small muted">Dernière position transmise à {time(lastSentAt)}.</p>}
+    {pending>0 && <p className="small muted" role="status">{pending} position{pending>1?'s':''} en attente d’envoi.</p>}
+    <button className={enabled?'btn btn-soft':'btn btn-primary'} onClick={()=>setEnabled(v=>!v)}>
+      {enabled?'Arrêter le suivi':'Activer le suivi du véhicule'}</button>
+    {/* An honest statement of what the web platform can and cannot do. */}
+    {enabled && <p className="small muted">Le suivi web s’interrompt si cette page est fermée ou mise en arrière-plan par le téléphone.</p>}
+  </Card>;
+}
+
 // The crew home screen answers, at a glance and one-handed: what am I running,
 // how full is it, what is next, and what do I press now. Dense tables, revenue
 // and long forms belong elsewhere.
@@ -166,13 +198,10 @@ export function Today(){
           .then(()=>{setNotice(`Arrivée à ${next?.city??'l’arrêt suivant'} enregistrée.`);service.reload();})
           .catch(e=>setError(e.message)).finally(()=>setBusy(false));
       }}>Je suis arrivé à {next?.city??'l’arrêt suivant'}</button>}
-      <button className="btn btn-soft" disabled={busy} onClick={()=>navigator.geolocation
-        ? navigator.geolocation.getCurrentPosition(
-          p=>request(`/services/${s.id}/positions`,{method:'POST',body:{latitude:p.coords.latitude,longitude:p.coords.longitude,observedAt:new Date(p.timestamp).toISOString()}})
-            .then(()=>setNotice('Position partagée avec les passagers.')).catch(e=>setError(e.message)),
-          ()=>setError('Position indisponible ou autorisation refusée.'))
-        : setError('La géolocalisation n’est pas disponible sur cet appareil.')}><Navigation size={16}/>Partager ma position</button>
     </Card>
+
+    {/* Live vehicle tracking, for this service only. */}
+    <VehicleTracking serviceId={s.id} serviceStatus={s.status}/>
 
     {/* Reporting is deliberately behind one tap: it is a stopped-vehicle task. */}
     <Card className="stack">
