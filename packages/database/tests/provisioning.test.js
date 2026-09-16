@@ -64,6 +64,58 @@ test('API rejects malformed JWT and invalid signature',async()=>{
   for(const jwt of ['invalid.jwt.input',await other.sign('must-not-exist')])assert.equal((await api(new Request('http://localhost/api/v1/me',{headers:{authorization:'Bearer '+jwt}}))).status,401);
 });
 
+// An opaque bearer token is the single most likely production misconfiguration:
+// most providers issue one by default and it looks like a working login right
+// up to the first API call.
+test('API rejects an opaque access token rather than treating it as a session',async()=>{
+  for(const opaque of ['s7YkQ2m1Np8vRt4Lw0Zx','opaque-token-without-dots','a.b']) {
+    const response=await api(new Request('http://localhost/api/v1/me',{headers:{authorization:'Bearer '+opaque}}));
+    assert.equal(response.status,401,`opaque token "${opaque.slice(0,6)}…" must not authenticate`);
+  }
+  const count=await db.transaction(async tx=>(await tx.query('SELECT count(*)::integer AS n FROM users')).rows[0].n);
+  assert.ok(count>0,'the rejection path must not have disturbed existing identities');
+});
+
+test('API rejects a token signed with an unknown key id, without leaking why',async()=>{
+  const response=await api(new Request('http://localhost/api/v1/me',
+    {headers:{authorization:'Bearer '+await fixture.sign('must-not-exist',{},{kid:'rotated-away'})}}));
+  assert.equal(response.status,401);
+  const body=await response.json();
+  assert.equal(body.error.message,'Session is invalid or expired.','the reason is never disclosed to the caller');
+  assert.equal(/kid|jwks|key/i.test(JSON.stringify(body)),false);
+});
+
+// ZITADEL — and several other providers — put MULTIPLE values in `aud` by
+// default: every client id of the project plus the project id. The API must
+// accept a token whose audience *contains* the configured one.
+test('a multi-valued audience containing AUTH_AUDIENCE is accepted',async()=>{
+  const multi=await call('multi-aud-user','/api/v1/me','GET',undefined,
+    {aud:['some-other-client-id',fixture.config.audience,'the-project-id']});
+  assert.equal(multi.status,200);
+  assert.equal(multi.data.role,'passenger');
+  // ...and one that merely looks similar is still refused.
+  assert.equal((await call('must-not-exist','/api/v1/me','GET',undefined,
+    {aud:['other-client','not-our-api']})).status,401);
+});
+
+test('an ES256-signed token is accepted, like the RS256 one',async()=>{
+  // Both are advertised as supported; a provider signing with the untested one
+  // would otherwise be a production discovery.
+  const es=await jwtFixture('ES256');
+  const esApi=createApi(db,{...serverConfig(),...es.config,demoLogin:false},es.resolver);
+  const response=await esApi(new Request('http://localhost/api/v1/me',
+    {headers:{authorization:'Bearer '+await es.sign('es256-user')}}));
+  assert.equal(response.status,200);
+  assert.equal((await response.json()).data.role,'passenger');
+});
+
+test('an unsupported algorithm is refused even with otherwise perfect claims',async()=>{
+  const hs=await fixture.signSymmetric('must-not-exist');
+  assert.equal((await api(new Request('http://localhost/api/v1/me',{headers:{authorization:'Bearer '+hs}}))).status,401);
+  const count=await db.transaction(async tx=>(await tx.query("SELECT count(*)::integer AS n FROM users WHERE auth_subject='must-not-exist'")).rows[0].n);
+  assert.equal(count,0);
+});
+
 test('inactive operator disables its identities',async()=>{
   await db.transaction(tx=>tx.query('UPDATE operators SET active=false WHERE id=$1',[operatorB]));
   assert.equal((await call('beta-ops','/api/v1/ops/fleet')).status,403);

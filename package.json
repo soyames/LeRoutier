@@ -7,10 +7,11 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
+    "dev:local": "pnpm --parallel --filter @leroutier/api --filter @leroutier/web dev:local",
     "lint": "eslint . --max-warnings 0",
     "test": "pnpm test:unit && pnpm test:api && pnpm test:frontend",
     "typecheck": "tsc --project jsconfig.json",
-    "test:unit": "node --test packages/domain/tests/*.test.js packages/geo/tests/*.test.js packages/database/tests/guards.test.js",
+    "test:unit": "node --test packages/domain/tests/*.test.js packages/geo/tests/*.test.js packages/database/tests/guards.test.js packages/agents/tests/*.test.js packages/config/tests/*.test.js services/ussd/tests/*.test.js",
     "test:database": "node --env-file=.env.local --test --test-concurrency=1 packages/database/tests/*.test.js",
     "test:api": "pnpm --filter @leroutier/api test",
     "test:frontend": "playwright test",
@@ -32,13 +33,18 @@
     "db:bootstrap": "node --env-file=.env.local packages/database/scripts/bootstrap.js",
     "secrets:check": "node scripts/check-secrets.mjs",
     "smoke:prod": "node scripts/prod-smoke.mjs",
-    "test:live": "node --env-file=.env.local scripts/test-live.mjs"
+    "test:live": "node --env-file=.env.local scripts/test-live.mjs",
+    "release:check": "node scripts/release-check.mjs",
+    "docs:check": "node scripts/check-docs.mjs",
+    "auth:verify": "node scripts/verify-oidc.mjs",
+    "ussd:dev": "node --env-file=docker/postgres.env services/ussd/src/simulator.js"
   },
   "engines": {
     "node": ">=22.13.0"
   },
   "type": "module",
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
     "@types/node": "^22.20.2",
@@ -48,6 +54,7 @@
     "eslint": "^10.10.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^16.5.0",
+    "jose": "^6.2.12",
     "terser": "^5.51.2",
     "typescript": "^5.9.3"
   }

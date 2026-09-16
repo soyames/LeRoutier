@@ -93,6 +93,43 @@ suitable for Vercel Cron) or via `services/worker` (`pnpm --filter
 @leroutier/worker workflows`). It consumes undelivered outbox events, creates
 guarded runs and drives steps.
 
+## Autonomy
+
+How much a workflow may do without a human is **configuration, not code** — and
+deliberately not one global switch, because "turn autonomy on" is exactly the
+decision that should never be made once, for everything, in one place.
+
+| Level | The agent may |
+| --- | --- |
+| `observe` | read and record what it *would* do; mutate nothing |
+| `recommend` | read; every mutating step becomes an approval request |
+| `auto_low_risk` | run read and low-risk steps; privileged and financial steps still wait |
+| `approval_required` | nothing without a human, reads included |
+
+Resolution order is explicit configuration → the workflow's declared default →
+the global default (`auto_low_risk`). Two rules make this fail safe:
+
+- An **unrecognised value is treated as the safest level, never the loosest.** A
+  typo in `AGENT_AUTONOMY_DEFAULT` falls back to `auto_low_risk`; a typo in a
+  per-workflow entry pins *that* workflow to `observe`. Malformed JSON widens
+  nothing.
+- Autonomy is applied **once, centrally**, in the engine — not scattered through
+  the definitions, where a single omission would quietly become an exception.
+
+Observation mode is how recommendation quality gets measured before autonomy is
+widened: steps that only read still execute, everything else is recorded as
+`observed` with the input it would have used, the run completes, and
+`workflow.step_observed` lands in the audit log. Nothing changed, and the
+proposal is reviewable.
+
+```bash
+AGENT_AUTONOMY_DEFAULT=observe                          # whole layer observes
+AGENT_AUTONOMY='{"driver-payout":"approval_required"}'  # tighten one workflow
+```
+
+Existing approval gates are unchanged by any of this: money and privileged
+operational change wait for a human at every level.
+
 ### Built-in workflows
 
 - **payment-reconciliation** — `payment.anomaly` → propose a trusted
@@ -106,6 +143,40 @@ guarded runs and drives steps.
 - **delay-management** — `service.position` → if a delay incident is open,
   raise an operational alert for Ops.
 - **payout-anomaly** — `payout.anomaly` → raise an operational alert.
+- **parcel-delay**, **parcel-exception**, **parcel-breakdown** — detect parcels
+  on a delayed or broken-down service, notify receivers, and propose a
+  reassignment for Ops approval.
+- **parcel-uncollected-reminder / -escalation** — a parcel that arrived and was
+  never collected. Thresholds are configuration
+  (`PARCEL_UNCOLLECTED_REMINDER_HOURS`, `PARCEL_UNCOLLECTED_ESCALATION_HOURS`,
+  default 24 / 72 hours); the clock runs from the `ready_for_pickup` event
+  rather than the parcel's `updated_at`, so correcting a note does not make an
+  uncollected parcel look fresh. Each stage fires once per arrival, and a
+  parcel returned to the counter later legitimately starts a new cycle.
+
+Time-based workflows have **no second scheduler**. The sweep in
+`packages/database/src/reminders.js` raises ordinary outbox events, which then
+travel the same policy → recipient → channel path as everything else.
+
+## Untrusted content
+
+Passenger notes, parcel notes, operator names, incident notes and station
+descriptions are **data, never instructions**. The structural defence is that
+there is nothing for an injected instruction to call: the only execution path is
+a typed catalog with validated schemas, and no free-form command endpoint
+exists. An event payload carrying `"action":"payout.execute"` and a persuasive
+note changes nothing — covered by test in `packages/database/tests/agentic.test.js`.
+
+Deterministic before generative: capacity, fares, payment state, payout
+eligibility, permissions, geometry and state machines are code. No invariant
+lives in a prompt.
+
+A model now assists with triage — classifying a situation and suggesting an
+action from a narrow per-task menu, which LeRoutier then validates against its
+own catalog before anything is shown to Ops. It executes nothing, approves
+nothing, and receives no party data. **No model is on any critical path**, and a
+test holds a booking through payment to confirmation while the provider throws
+on every call. See [`MODEL_PROVIDERS.md`](MODEL_PROVIDERS.md).
 
 The FedaPay webhook emits `payment.anomaly` / `payout.anomaly` only for
 signature-valid events that fail strict correlation, so anomalies are always

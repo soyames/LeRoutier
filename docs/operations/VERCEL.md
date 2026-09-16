@@ -126,3 +126,65 @@ See [production identity and provisioning](../production-auth.md) for OIDC
 configuration, migration order, first-operator bootstrap and Ops workflows.
 All three apps support /auth/callback through the existing SPA fallback. Provider
 settings must be real registered values; incomplete configuration fails closed.
+
+## Environment-variable ownership
+
+**One public product does not mean one security boundary.** A variable exists
+only where it is needed, and the PWA needs almost nothing.
+
+The unified PWA is a static Vite build with no serverless functions. Vite
+inlines only `VITE_`-prefixed variables, and everything else in a frontend
+project is read by nothing. Placing a server secret there would add exposure
+for zero function.
+
+| Project | Variables | Why |
+| --- | --- | --- |
+| `le-routier` (PWA) | `VITE_API_URL` | the only variable any frontend code reads; `same-origin` because `/api/v1/*` is rewritten to the API |
+| `le-routier-api` | `DATABASE_URL`, `CORS_ORIGINS`, `PAYMENT_PROVIDER`, `FEDAPAY_*`, `PAYOUT_APPROVAL_REQUIRED`, `AGENT_MODEL_PROVIDER`, `OPENROUTER_*`, `AUTH_*`, `OIDC_*`, `NOTIFICATION_*` | the only project that runs server code |
+| legacy frontends | `VITE_API_URL` (+ 15 unused variables) | see below |
+
+Names only. Values appear in this repository nowhere, ever.
+
+### Sensitive is not the same as encrypted
+
+Vercel's **Sensitive** variables are write-only: their values cannot be read
+back by the CLI, the REST API, or the dashboard. That is the right storage for
+anything that grants access.
+
+| Variable | Type today | Should be |
+| --- | --- | --- |
+| `DATABASE_URL`, `FEDAPAY_*` | Sensitive | ✔ |
+| **`OPENROUTER_API_KEY`** | **Config** | **Sensitive, Production-only** |
+
+`OPENROUTER_API_KEY` is currently stored as an ordinary Config variable and is
+exposed to **Preview** as well as Production. Preview deployments have publicly
+reachable URLs, so that widens where the key can be used. It grants spend
+against a quota rather than access to passenger data, which is why this is a
+hardening item rather than an incident — but it should match the others.
+
+Fixing it requires the value, which only the owner should handle:
+
+```bash
+vercel env rm OPENROUTER_API_KEY --yes
+vercel env add OPENROUTER_API_KEY production --sensitive
+```
+
+This was deliberately **not** done automatically: re-adding needs the secret,
+and a failed re-add would leave production without a key.
+
+### The legacy frontends carry 15 dead variables
+
+`le-routier-passenger`, `le-routier-driver` and `le-routier-ops` each hold
+`NODE_ENV`, `PASSENGER_APP_URL`, `DRIVER_APP_URL`, `OPS_APP_URL`, `API_URL`,
+`MAP_TILE_URL`, `GEOCODING_API_URL`, `ROUTING_API_URL`, `PAYMENT_PROVIDER`,
+`PAYMENT_API_KEY`, `PAYMENT_WEBHOOK_SECRET`, `USSD_PROVIDER`, `USSD_API_KEY`,
+`NOTIFICATION_PROVIDER` and `NOTIFICATION_API_KEY`.
+
+Thirteen of those fifteen are read by **zero** source files. Several no longer
+exist under those names anywhere in the codebase — `PAYMENT_API_KEY` and
+`PAYMENT_WEBHOOK_SECRET` were superseded by `FEDAPAY_SECRET_KEY` and
+`FEDAPAY_WEBHOOK_SECRET`. They are scaffold residue.
+
+They are also all **Sensitive**, so they cannot be read back and therefore
+cannot be migrated anywhere — which is moot, because nothing would read them.
+They should be deleted with the legacy projects.

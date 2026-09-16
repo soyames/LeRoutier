@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --env-file=../../.env.local src/server.js",
+    "dev:local": "node --env-file=../../docker/postgres.env src/server.js",
     "build": "node scripts/build.mjs",
     "test": "node --test tests/*.test.js"
   },
@@ -16,7 +17,8 @@
     "@leroutier/notifications": "workspace:*",
     "jose": "^6.1.0",
     "@leroutier/agents": "workspace:*",
-    "@leroutier/routing": "workspace:*"
+    "@leroutier/routing": "workspace:*",
+    "@leroutier/ussd": "workspace:*"
   },
   "devDependencies": {
     "esbuild": "^0.25.12"
