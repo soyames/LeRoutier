@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { createDatabase } from '../src/index.js';
 import { migrate } from '../src/migrations.js';
+import { dropDisposableSchema } from '../src/guards.js';
 import { seed, demo } from '../src/seed.js';
 import { serverConfig } from '@leroutier/config';
 import { transport } from '../src/transport.js';
@@ -33,7 +34,7 @@ before(async()=>{
 beforeEach(async()=>{
   await db.transaction(async tx=>{await tx.query('DELETE FROM booking_segments');await tx.query("UPDATE bookings SET status='cancelled'");await tx.query('DELETE FROM payment_events');await tx.query('DELETE FROM payments');await tx.query('DELETE FROM payout_events');await tx.query('DELETE FROM driver_earnings');await tx.query('DELETE FROM payout_requests');await tx.query('DELETE FROM payout_destinations');await tx.query('DELETE FROM agent_action_receipts');await tx.query('DELETE FROM workflow_approvals');await tx.query('DELETE FROM workflow_runs');await tx.query('DELETE FROM outbox');await tx.query("UPDATE services SET current_sequence=0,status='active'");});
 });
-after(async()=>{try{await db.transaction(tx=>tx.query(`DROP SCHEMA "${db.schema}" CASCADE`));}finally{await db.close();}});
+after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}});
 const agentRequest=(agentToken,path,method='GET',body=undefined,key=undefined)=>{
   const headers={'content-type':'application/json',authorization:'Bearer '+agentToken};
   if(key)headers['idempotency-key']=key;

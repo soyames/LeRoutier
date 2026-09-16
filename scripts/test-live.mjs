@@ -5,6 +5,7 @@ import { serverConfig } from '../packages/config/src/index.js';
 import { createDatabase } from '../packages/database/src/index.js';
 import { migrate } from '../packages/database/src/migrations.js';
 import { seed } from '../packages/database/src/seed.js';
+import { assertDisposableSchema, dropDisposableSchema, environmentLabel } from '../packages/database/src/guards.js';
 import { createApi } from '../services/api/src/app.js';
 import { nodeHandler } from '../services/api/src/node-handler.js';
 
@@ -32,6 +33,10 @@ async function runSpec(spec) {
     corsOrigins: [...new Set([...base.corsOrigins, ...PREVIEW_ORIGINS])] };
   const db = createDatabase(config), server = createServer(nodeHandler(createApi(db, config)));
   try {
+    // Prove the target before writing anything, and say so out loud. Schema and
+    // environment label only — never a host or a connection string.
+    assertDisposableSchema(db, { purpose: 'The live integration suite' });
+    console.log(`Live suite target: schema=${db.schema} environment=${environmentLabel(db.schema)}`);
     await migrate(db); await seed(db);
     reclaimPorts();
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(4000, resolve); });
@@ -42,7 +47,7 @@ async function runSpec(spec) {
     });
   } finally {
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-    try { if (db.schema.startsWith('lr_test_')) await db.transaction(tx => tx.query(`DROP SCHEMA "${db.schema}" CASCADE`)); }
+    try { await dropDisposableSchema(db); }
     finally { await db.close(); }
   }
 }
