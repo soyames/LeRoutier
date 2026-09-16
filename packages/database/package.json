@@ -15,5 +15,8 @@
   "exports": {
     ".": "./src/index.js",
     "./*": "./src/*.js"
+  },
+  "devDependencies": {
+    "@leroutier/ussd": "workspace:*"
   }
 }
