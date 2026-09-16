@@ -380,7 +380,7 @@ export function createUssdEngine({ db, domain, parcels, payments, tracking, conf
      * Never throws: a USSD gateway given an error page shows the caller
      * nothing useful, so every failure becomes a short, honest end screen.
      */
-    async handle({ provider, sessionId, msisdn, input, verified }) {
+    async handle({ provider, sessionId, msisdn, input, verified, terminated = false }) {
       const t = translator(config.defaultLocale ?? 'fr');
       try {
         if (!sessionId) return { text: enforceLimit(screen({ title: t('error.generic') })), continues: false };
@@ -388,6 +388,14 @@ export function createUssdEngine({ db, domain, parcels, payments, tracking, conf
         return await db.transaction(async tx => {
           const opened = await sessions.open(tx, { provider, sessionId, msisdn });
           let session = opened.session;
+
+          // Some gateways say outright that the subscriber hung up or the
+          // network timed the call out. Rendering another screen into a channel
+          // that is already closed wastes work and leaves the session open.
+          if (terminated) {
+            if (session) await sessions.close(tx, session.id, 'cancelled');
+            return { text: '', continues: false, terminated: true };
+          }
 
           if (!session) {
             if (await sessions.tooManySessions(tx, opened.phoneHash)) {
