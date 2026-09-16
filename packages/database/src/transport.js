@@ -121,6 +121,42 @@ export function transport(db) {
     return result;
   }
   return {
+    /**
+     * Bookable departures, with live segment availability.
+     *
+     * This lives in the domain rather than in a route handler because it is not
+     * a transport concern: the PWA, USSD and anything after them must see the
+     * same departures, the same fares and the same remaining seats. A second
+     * copy of this query is a second answer to "is there a seat?".
+     *
+     * @param {{originStopId?: string|null, destinationStopId?: string|null, limit?: number}} query
+     */
+    async search({ originStopId = null, destinationStopId = null, limit = 50 } = {}) {
+      invariant(!originStopId === !destinationStopId, 'INVALID_JOURNEY', 'Both origin and destination are required.');
+      if (originStopId) { uuid(originStopId); uuid(destinationStopId); }
+      const rows = await db.transaction(async tx => (await tx.query(`SELECT s.*,r.name AS route_name,o.name AS operator_name,v.registration,
+        bdp.name AS departure_point_name,bdp.description AS departure_point_landmark,bdp.latitude AS departure_point_latitude,bdp.longitude AS departure_point_longitude,
+        bap.name AS arrival_point_name,bap.description AS arrival_point_landmark,bap.latitude AS arrival_point_latitude,bap.longitude AS arrival_point_longitude,
+        u.display_name AS driver_name,
+        (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$1) AS origin,
+        (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$2) AS destination
+        FROM services s JOIN routes r ON r.id=s.route_id JOIN operators o ON o.id=s.operator_id
+        JOIN service_assignments a ON a.service_id=s.id AND a.ended_at IS NULL JOIN vehicles v ON v.id=a.vehicle_id
+        LEFT JOIN users u ON u.id=a.driver_id
+        LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id
+        WHERE s.status IN ('scheduled','active') AND (s.departure_at>now() OR s.status='active')
+        ORDER BY s.departure_at LIMIT $3`, [originStopId, destinationStopId, limit])).rows);
+      const result = [];
+      for (const service of rows) {
+        const from = originStopId ? service.origin : service.current_sequence;
+        const to = destinationStopId ? service.destination
+          : (await db.transaction(async tx => (await tx.query('SELECT max(sequence)::integer AS sequence FROM service_stops WHERE service_id=$1', [service.id])).rows))[0].sequence;
+        if (from === null || to === null || from >= to || from < service.current_sequence) continue;
+        result.push({ ...service, availability: await this.availability(service.id, from, to) });
+      }
+      return result;
+    },
+
     async availability(id, origin, destination) {
       return db.transaction(async tx => availability(tx, await serviceLock(tx, id), origin, destination));
     },

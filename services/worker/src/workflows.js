@@ -20,12 +20,13 @@ try {
   const domain = transport(db);
   const notifications = notificationPolicies(db, config);
   const actions = createActions({ db, domain, payments: payments(db, adapter), payouts: payouts(db, adapter), recovery: recovery(db), parcels: parcels(db) });
-  const engine = createWorkflowEngine({ db, actions, onEvent: (tx, event) => notifications.dispatchEvent(tx, event) });
+  const engine = createWorkflowEngine({ db, actions, onEvent: (tx, event) => notifications.dispatchEvent(tx, event), autonomy: config.agentAutonomy });
   // Time-based journey reminders are raised as ordinary outbox events first, so
   // they travel the same policy path as every other notification.
   const due = await reminders(db, config).tick();
   const result = await engine.processOutbox();
-  console.log(`Workflow tick processed ${result.processed} events and raised ${due.raised} reminders.`);
+  console.log(`Workflow tick processed ${result.processed} events and raised ${due.raised} reminders `
+    + `(${due.journeyReminders} journey, ${due.parcelReminders} parcel).`);
 } catch {
   console.error('Workflow processing failed.');
   process.exitCode = 1;
