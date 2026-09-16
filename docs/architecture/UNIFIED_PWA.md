@@ -112,7 +112,14 @@ grants nothing. Cross-operator access remains rejected by the API.
 
 Authentication is LeRoutier's, not a per-app login: one OIDC public client with
 PKCE, no local passwords. After sign-in the app resolves available workspaces
-and stays on the route the user asked for.
+and stays on the route the user asked for: the intended path is recorded before
+the redirect and restored by the callback, validated as a same-origin absolute
+path so it cannot be used as an open redirect. An interrupted booking is
+resumed automatically on return.
+
+Provider configuration — every variable, both callback URLs and the access-token
+audience pitfall — is in
+[`../operations/AUTH_PRODUCTION_SETUP.md`](../operations/AUTH_PRODUCTION_SETUP.md).
 
 ## PWA
 

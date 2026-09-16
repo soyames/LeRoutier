@@ -58,6 +58,12 @@ every row below is created through the real onboarding and Ops flows.
 
 ## 2. Auth provider setup
 
+> Full detail — every variable the code expects, both callback URLs, the
+> audience pitfall and a verification checklist — is in
+> [`AUTH_PRODUCTION_SETUP.md`](AUTH_PRODUCTION_SETUP.md).
+> The end-to-end pilot script, including the two controlled money tests, is in
+> [`PILOT_TEST_PLAN.md`](PILOT_TEST_PLAN.md).
+
 - [ ] Configure the OIDC provider (issuer, JWKS URL, audience).
 - [ ] Register one public PKCE client per app (Passenger/Driver/Ops).
 - [ ] Set callback URLs exactly: `https://le-routier-passenger.vercel.app/auth/callback`, same for `-driver` and `-ops`.

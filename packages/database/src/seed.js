@@ -1,9 +1,12 @@
+import { assertDisposableSchema } from './guards.js';
+
 export const demoId = number => `00000000-0000-4000-8000-${String(number).padStart(12,'0')}`;
 export const demo = { operator:demoId(1), passenger:demoId(2), driver:demoId(3), ops:demoId(4),
   route:demoId(10), vehicle:demoId(20), replacement:demoId(21), service:demoId(30) };
 
 export async function seed(db, { capacity = 12 } = {}) {
-  if (!db.schema.endsWith('_dev') && !db.schema.startsWith('lr_test_')) throw new Error('Seed requires an isolated development or test schema.');
+  // Layered guard: disposable schema, not production, not a production runtime.
+  assertDisposableSchema(db, { purpose: 'Seeding' });
   await db.transaction(async tx => {
     await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['seed-' + db.schema]);
     if ((await tx.query('SELECT id FROM services WHERE id=$1', [demo.service])).rowCount) return;

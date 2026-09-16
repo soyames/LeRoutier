@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { createDatabase } from '../src/index.js';
 import { serverConfig } from '@leroutier/config';
 import { migrate } from '../src/migrations.js';
+import { dropDisposableSchema } from '../src/guards.js';
 import { seed, demo, demoId } from '../src/seed.js';
 import { createApi } from '../../../services/api/src/app.js';
 
@@ -17,7 +18,7 @@ before(async()=>{
   await migrate(db);await seed(db);
   for(const role of ['passenger','driver','ops']) sessions[role]=(await call('/api/v1/auth/demo','POST',{role})).data.token;
 });
-after(async()=>{try{await db.transaction(tx=>tx.query(`DROP SCHEMA "${db.schema}" CASCADE`));}finally{await db.close();}});
+after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}});
 let booking;
 test('real catalog exposes ordered stops and server fares',async()=>{
   const routes=await call('/api/v1/routes');assert.equal(routes.data[0].stops.length,4);

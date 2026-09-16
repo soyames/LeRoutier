@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { createDatabase } from '../src/index.js';
 import { migrate } from '../src/migrations.js';
+import { dropDisposableSchema } from '../src/guards.js';
 import { seed, demo, demoId } from '../src/seed.js';
 import { serverConfig } from '@leroutier/config';
 import { transport } from '../src/transport.js';
@@ -45,7 +46,7 @@ beforeEach(async()=>{
     await tx.query("UPDATE services SET current_sequence=0,status='active'");await tx.query('UPDATE users SET active=true');
     await tx.query('DELETE FROM parcel_rate_rules');await tx.query('INSERT INTO parcel_rate_rules(operator_id,base_minor,per_kg_minor,declared_value_bp) VALUES($1,1000,500,0)',[demo.operator]);});
 });
-after(async()=>{try{await db.transaction(tx=>tx.query(`DROP SCHEMA "${db.schema}" CASCADE`));}finally{await db.close();}});
+after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}});
 const agentRequest=(agentToken,path,method='GET',body=undefined)=>
   new Request('http://localhost/api/v1'+path,{method,headers:{'content-type':'application/json',authorization:'Bearer '+agentToken},...(body===undefined?{}:{body:JSON.stringify(body)})});
 

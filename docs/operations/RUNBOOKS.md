@@ -151,15 +151,21 @@ reconciliation or an Ops-privileged, audited action.
 
 `pnpm test:database` and `pnpm test:live` create a throwaway schema per run and
 drop it on completion — **in the same Neon database as production.** An
-interrupted run leaves its schema behind. They hold only fixture data and are
-safe to drop, but they are on the production instance, so treat removal as a
-deliberate maintenance action rather than routine cleanup:
+interrupted run leaves its schema behind.
 
-```sql
-SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'lr\_test\_%';
+```bash
+pnpm db:cleanup-tests                                        # dry run
+CONFIRM_DROP_TEST_SCHEMAS=drop-test-schemas pnpm db:cleanup-tests
 ```
 
-Never drop `leroutier` (production) or `leroutier_dev` (development).
+The script only ever drops names beginning with `lr_test_`; `leroutier` and
+`*_dev` are excluded by construction and re-checked immediately before each
+drop. Without the confirmation variable it lists candidates and changes
+nothing.
+
+Environment separation, the guards that enforce it, and the plan to move
+development onto its own Neon project are in
+[`DATABASE_ENVIRONMENTS.md`](DATABASE_ENVIRONMENTS.md).
 
 ## Auth outage (OIDC unavailable)
 

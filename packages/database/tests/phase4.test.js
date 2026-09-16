@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID, randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import { createDatabase } from '../src/index.js';
 import { migrate } from '../src/migrations.js';
+import { dropDisposableSchema } from '../src/guards.js';
 import { seed,demo } from '../src/seed.js';
 import { serverConfig } from '@leroutier/config';
 import { transport } from '../src/transport.js';
@@ -38,7 +39,7 @@ async function issued(){const {b,p}=await paid();return {b,p,t:await ticket.issu
 const verify=t=>ticket.verify(driver,{serviceId:demo.service,stopSequence:0,code:t.token});
 before(async()=>{await migrate(db);await seed(db);api=createApi(db,config,undefined,/** @type {any} */(adapter));sessions={};for(const role of ['passenger','driver','ops']){const r=await api(new Request('http://localhost/api/v1/auth/demo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({role})}));sessions[role]=(await r.json()).data.token;}});
 beforeEach(async()=>{await db.transaction(async tx=>{await tx.query('DELETE FROM booking_segments');await tx.query("UPDATE bookings SET status='cancelled'");await tx.query("UPDATE services SET current_sequence=0,status='active'");});});
-after(async()=>{try{await db.transaction(tx=>tx.query(`DROP SCHEMA "${db.schema}" CASCADE`));}finally{await db.close();}});
+after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}});
 
 test('payment intent uses server amount and is idempotent',async()=>{const b=await hold(),key=randomUUID(),p=await pay.initiate(passenger,b.id,{},key);assert.equal(p.amountMinor,2500);assert.equal(p.status,'pending');assert.equal((await pay.initiate(passenger,b.id,{},key)).id,p.id);assert.equal((await d.booking(passenger,b.id)).status,'held');});
 test('trusted payment success confirms atomically',async()=>{const {b}=await paid();assert.equal((await d.booking(passenger,b.id)).status,'confirmed');});
