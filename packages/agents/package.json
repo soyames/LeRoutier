@@ -10,5 +10,8 @@
     "@leroutier/domain": "workspace:*",
     "@leroutier/database": "workspace:*",
     "@leroutier/notifications": "workspace:*"
+  },
+  "devDependencies": {
+    "@leroutier/config": "workspace:*"
   }
 }

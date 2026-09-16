@@ -24,9 +24,15 @@ import { tracking } from '@leroutier/database/tracking';
 import { routeGeometry } from '@leroutier/database/route-geometry';
 import { createRouter } from '@leroutier/routing';
 import { paymentAdapter } from './payment-adapter.js';
-import { authenticate as authenticateAgent, catalog, createActions, createWorkflowEngine } from '@leroutier/agents';
+import { authenticate as authenticateAgent, catalog, createActions, createWorkflowEngine, createModelProvider, createReasoning } from '@leroutier/agents';
+import { createUssdEngine, adapterFor as ussdAdapterFor } from '@leroutier/ussd';
 
 const API_PREFIX = '/api/v1';
+
+/** A body that is not the JSON envelope — currently only the USSD gateway. */
+class RawResponse {
+  constructor(body, contentType) { this.body = body; this.contentType = contentType; }
+}
 
 export function createApi(db, config, keyResolver=undefined, adapter=paymentAdapter(config)) {
   const domain=transport(db), auth=authentication(db,config,keyResolver),provision=provisioning(db,config);
@@ -36,7 +42,17 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const notify=notificationPolicies(db,config),rides=mobility(db),journey=journeys(db,config);
   const router=createRouter(config),geometry=routeGeometry(db,router),track=tracking(db,config);
   const actions=createActions({db,domain,payments:pay,payouts:payout,recovery:recover,parcels:parcel});
-  const workflows=createWorkflowEngine({db,actions,onEvent:(tx,event)=>notify.dispatchEvent(tx,event)});
+  const workflows=createWorkflowEngine({db,actions,onEvent:(tx,event)=>notify.dispatchEvent(tx,event),autonomy:config.agentAutonomy});
+  // Model-assisted triage. Optional by construction: with no provider
+  // configured every call reports unavailable and the deterministic paths are
+  // unchanged, which is what keeps this an improvement rather than a dependency.
+  // Validated against the real executable catalog, not a copy of it: a model
+  // proposing an action LeRoutier no longer has must fail, not drift.
+  const reasoning=createReasoning({db,provider:createModelProvider(config),actions,budget:config.model?.budget});
+  // USSD is a channel over these same services — not a second backend. It is
+  // handed the very objects every other route uses, so a capacity check or a
+  // fare it sees is the one the PWA sees.
+  const ussd=createUssdEngine({db,domain,parcels:parcel,payments:pay,tracking:track,config:config.ussd ?? {}});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
   async function limited(subject) {
     await db.transaction(async tx=>{
@@ -97,7 +113,42 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
         return {ignored:true,anomaly:true};
       }
     }
+    // USSD gateway callback. Public by necessity — a telecom gateway carries no
+    // LeRoutier session — so it is protected by provider verification, a size
+    // cap, a per-caller throttle inside the engine, and replay suppression.
+    // It is never a generic execution surface: the only thing a caller can do
+    // is advance a menu.
+    const ussdCallback=path.match(/^\/ussd\/webhook\/([a-z0-9-]{1,32})$/);
+    if(method==='POST' && ussdCallback) {
+      const name=ussdCallback[1];
+      // A provider that is not the configured one is refused outright, so a
+      // deployment cannot accidentally expose the never-verifying sandbox.
+      invariant(config.ussd?.provider && name===config.ussd.provider,'NOT_FOUND','Endpoint not found.',404);
+      const adapter=ussdAdapterFor(name);
+      invariant(adapter,'NOT_FOUND','Endpoint not found.',404);
+      const raw=await req.text();
+      invariant(raw.length<=8192,'INVALID_BODY','Request is too large.',413);
+      const verified=adapter.verify(raw,req.headers,config.ussd.webhookSecret);
+      // An unverified callback is still answered — a gateway must not be left
+      // hanging — but it can never bind an identity or reach a booking.
+      let parsed;
+      try { parsed=adapter.parse(raw.trim().startsWith('{')?JSON.parse(raw):Object.fromEntries(new URLSearchParams(raw))); }
+      catch { throw new DomainError('INVALID_BODY','Invalid USSD callback.'); }
+      await limited('ussd:'+name+':'+(parsed.sessionId||'anonymous'));
+      const result=await ussd.handle({...parsed,provider:name,verified:verified===true});
+      const rendered=adapter.render(result);
+      // Gateways speak plain text, not the JSON envelope every other route
+      // uses. RawResponse carries it out without losing the security headers.
+      return new RawResponse(rendered.body,rendered.contentType);
+    }
     if(method==='POST' && path==='/auth/demo') {invariant(config.demoLogin,'NOT_FOUND','Endpoint not found.',404);await limited('demo-login');return auth.demoSession((await body()).role);}
+    // The public catalogue is the one authenticated-free read surface with real
+    // breadth: every stop, every place, every route, every departure. Without a
+    // limit it is a free scraping and enumeration endpoint, so anonymous reads
+    // are metered per client address exactly as public parcel tracking is.
+    // Authenticated traffic is metered per identity further down.
+    const meterAnonymous=()=>limited('public-catalogue:'+((req.headers.get('x-forwarded-for')||'').split(',')[0].trim()||'local'));
+    if(method==='GET' && ['/stops','/places','/routes','/services'].includes(path)) await meterAnonymous();
     if(method==='GET' && path==='/stops') {
       const search=(url.searchParams.get('q') || '').slice(0,100);
       return list(`SELECT s.*,p.name AS city FROM stops s JOIN places p ON p.id=s.place_id
@@ -106,33 +157,19 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='GET' && path==='/places') return list('SELECT * FROM places WHERE name ILIKE $1 ORDER BY name LIMIT 100',['%'+(url.searchParams.get('q')||'').slice(0,100)+'%']);
     if(method==='GET' && path==='/routes') return list(`SELECT r.*,coalesce((SELECT json_agg(json_build_object('sequence',rs.sequence,'stopId',s.id,'name',s.name,'city',p.name) ORDER BY rs.sequence)
       FROM route_stops rs JOIN stops s ON s.id=rs.stop_id JOIN places p ON p.id=s.place_id WHERE rs.route_id=r.id),'[]') AS stops FROM routes r WHERE active=true ORDER BY name`);
+    // The same search the USSD channel runs. One query, one answer to
+    // "is there a seat?", whichever client is asking.
     if(method==='GET' && path==='/services') {
-      const origin=url.searchParams.get('originStopId'), destination=url.searchParams.get('destinationStopId');
-      invariant(!origin===!destination,'INVALID_JOURNEY','Both origin and destination are required.');
-      if(origin) {uuid(origin);uuid(destination);}
-      const services=await list(`SELECT s.*,r.name AS route_name,o.name AS operator_name,v.registration,
-        bdp.name AS departure_point_name,bdp.description AS departure_point_landmark,bdp.latitude AS departure_point_latitude,bdp.longitude AS departure_point_longitude,
-        bap.name AS arrival_point_name,bap.description AS arrival_point_landmark,bap.latitude AS arrival_point_latitude,bap.longitude AS arrival_point_longitude,
-        u.display_name AS driver_name,
-        (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$1) AS origin,
-        (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$2) AS destination
-        FROM services s JOIN routes r ON r.id=s.route_id JOIN operators o ON o.id=s.operator_id
-        JOIN service_assignments a ON a.service_id=s.id AND a.ended_at IS NULL JOIN vehicles v ON v.id=a.vehicle_id
-        LEFT JOIN users u ON u.id=a.driver_id
-        LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id
-        WHERE s.status IN ('scheduled','active') AND (s.departure_at>now() OR s.status='active')
-        ORDER BY s.departure_at LIMIT 50`,[origin,destination]);
-      const result=[];
-      for(const service of services) {
-        const from=origin?service.origin:service.current_sequence;
-        const to=destination?service.destination:(await list('SELECT max(sequence)::integer AS sequence FROM service_stops WHERE service_id=$1',[service.id]))[0].sequence;
-        if(from===null || to===null || from>=to || from<service.current_sequence) continue;
-        result.push({...service,availability:await domain.availability(service.id,from,to)});
-      }
-      return result;
+      return domain.search({originStopId:url.searchParams.get('originStopId'),destinationStopId:url.searchParams.get('destinationStopId')});
     }
     const available=path.match(/^\/services\/([^/]+)\/availability$/);
-    if(method==='GET' && available) return domain.availability(uuid(available[1]),Number(url.searchParams.get('origin')),Number(url.searchParams.get('destination')));
+    // Metered after validation: rejecting a malformed identifier must stay free,
+    // or the limiter becomes its own amplifier — one bad request, one DB write.
+    if(method==='GET' && available) {
+      const serviceId=uuid(available[1]);
+      await meterAnonymous();
+      return domain.availability(serviceId,Number(url.searchParams.get('origin')),Number(url.searchParams.get('destination')));
+    }
     // Human users authenticate first; service/agent principals (distinct identity
     // namespace) only apply to the dedicated agent API below.
     const human=await auth.authenticate(req).catch(error=>error);
@@ -420,6 +457,20 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       if(method==='GET') return geometry.read(routeGeom[1]);
       if(method==='POST') return geometry.generate(actor,routeGeom[1],{force:(await body()).force===true});
     }
+    // Model provider status. Two endpoints on purpose: usage is free to poll,
+    // health costs a real (tiny) call and is therefore explicit.
+    if(method==='GET' && path==='/ops/model-usage') {
+      invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
+      return reasoning.usage();
+    }
+    if(method==='POST' && path==='/ops/model-health') {
+      // Platform Ops only: it spends quota, so an operator admin cannot drain
+      // the shared budget by refreshing a dashboard.
+      invariant(actor.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform operations access required.',403);
+      await limited('model-health:'+actor.id);
+      // Never the key, never the Authorization header, never the raw response.
+      return reasoning.health();
+    }
     if(method==='GET' && path==='/ops/diagnostics') {
       invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
       return db.transaction(async tx=>{
@@ -500,7 +551,11 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   return async req=>{
     const origin=req.headers.get('origin');
     const allowed=!origin || config.corsOrigins.includes(origin);
-    const headers={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','vary':'Origin'};
+    // A JSON API is never a document: it is never framed, never referred from,
+    // and never sniffed into another content type. Transport security (HSTS) is
+    // added by the platform edge, so it is not duplicated here.
+    const headers={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','vary':'Origin',
+      'x-frame-options':'DENY','referrer-policy':'no-referrer','content-security-policy':"default-src 'none'; frame-ancestors 'none'"};
     if(origin && allowed) headers['access-control-allow-origin']=origin;
     const url=new URL(req.url);
     const rawPath=url.pathname.replace(/\/$/,'')||'/';
@@ -514,6 +569,9 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       if(req.method==='OPTIONS') return new Response(null,{status:204,headers:{...headers,'access-control-allow-methods':'GET,POST,PATCH,OPTIONS','access-control-allow-headers':'Authorization,Content-Type,Idempotency-Key'}});
       const data=await route(req,path,url,req.method,body(req));
       if(legacy){headers.deprecation='true';headers.sunset='2026-12-31T23:59:59Z';}
+      // One route answers a telecom gateway in plain text; everything else
+      // uses the JSON envelope. Both get the same security headers.
+      if(data instanceof RawResponse) return new Response(data.body,{headers:{...headers,'content-type':data.contentType}});
       return new Response(JSON.stringify({data}),{headers});
     } catch(error) {
       const known=error instanceof DomainError;
