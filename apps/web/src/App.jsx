@@ -166,8 +166,9 @@ export default function App() {
       </div>);
     }
   }
-  // The public home leads with the task, not with a sign-in card: authentication
-  // is offered at the action that needs it, and from Compte.
-  const home = workspace === PASSENGER && page === '';
-  return shell(<>{!home && <SessionPanel/>}{scoped.screens[page]}</>);
+  // Screens that need no account at all lead with the task rather than a
+  // sign-in card. Authentication is offered at the action that requires it,
+  // and from Compte.
+  const fullyPublic = workspace === PASSENGER && (page === '' || (page === 'parcels' && segments[1] === 'track'));
+  return shell(<>{!fullyPublic && <SessionPanel/>}{scoped.screens[page]}</>);
 }
