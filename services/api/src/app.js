@@ -98,6 +98,13 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       }
     }
     if(method==='POST' && path==='/auth/demo') {invariant(config.demoLogin,'NOT_FOUND','Endpoint not found.',404);await limited('demo-login');return auth.demoSession((await body()).role);}
+    // The public catalogue is the one authenticated-free read surface with real
+    // breadth: every stop, every place, every route, every departure. Without a
+    // limit it is a free scraping and enumeration endpoint, so anonymous reads
+    // are metered per client address exactly as public parcel tracking is.
+    // Authenticated traffic is metered per identity further down.
+    const meterAnonymous=()=>limited('public-catalogue:'+((req.headers.get('x-forwarded-for')||'').split(',')[0].trim()||'local'));
+    if(method==='GET' && ['/stops','/places','/routes','/services'].includes(path)) await meterAnonymous();
     if(method==='GET' && path==='/stops') {
       const search=(url.searchParams.get('q') || '').slice(0,100);
       return list(`SELECT s.*,p.name AS city FROM stops s JOIN places p ON p.id=s.place_id
@@ -132,7 +139,13 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       return result;
     }
     const available=path.match(/^\/services\/([^/]+)\/availability$/);
-    if(method==='GET' && available) return domain.availability(uuid(available[1]),Number(url.searchParams.get('origin')),Number(url.searchParams.get('destination')));
+    // Metered after validation: rejecting a malformed identifier must stay free,
+    // or the limiter becomes its own amplifier — one bad request, one DB write.
+    if(method==='GET' && available) {
+      const serviceId=uuid(available[1]);
+      await meterAnonymous();
+      return domain.availability(serviceId,Number(url.searchParams.get('origin')),Number(url.searchParams.get('destination')));
+    }
     // Human users authenticate first; service/agent principals (distinct identity
     // namespace) only apply to the dedicated agent API below.
     const human=await auth.authenticate(req).catch(error=>error);

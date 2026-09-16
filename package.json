@@ -7,6 +7,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
+    "dev:local": "pnpm --parallel --filter @leroutier/api --filter @leroutier/web dev:local",
     "lint": "eslint . --max-warnings 0",
     "test": "pnpm test:unit && pnpm test:api && pnpm test:frontend",
     "typecheck": "tsc --project jsconfig.json",
