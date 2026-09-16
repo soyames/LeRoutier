@@ -11,7 +11,7 @@
     "lint": "eslint . --max-warnings 0",
     "test": "pnpm test:unit && pnpm test:api && pnpm test:frontend",
     "typecheck": "tsc --project jsconfig.json",
-    "test:unit": "node --test packages/domain/tests/*.test.js packages/geo/tests/*.test.js packages/database/tests/guards.test.js",
+    "test:unit": "node --test packages/domain/tests/*.test.js packages/geo/tests/*.test.js packages/database/tests/guards.test.js packages/agents/tests/*.test.js",
     "test:database": "node --env-file=.env.local --test --test-concurrency=1 packages/database/tests/*.test.js",
     "test:api": "pnpm --filter @leroutier/api test",
     "test:frontend": "playwright test",

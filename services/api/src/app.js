@@ -24,7 +24,7 @@ import { tracking } from '@leroutier/database/tracking';
 import { routeGeometry } from '@leroutier/database/route-geometry';
 import { createRouter } from '@leroutier/routing';
 import { paymentAdapter } from './payment-adapter.js';
-import { authenticate as authenticateAgent, catalog, createActions, createWorkflowEngine } from '@leroutier/agents';
+import { authenticate as authenticateAgent, catalog, createActions, createWorkflowEngine, createModelProvider, createReasoning } from '@leroutier/agents';
 
 const API_PREFIX = '/api/v1';
 
@@ -37,6 +37,12 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const router=createRouter(config),geometry=routeGeometry(db,router),track=tracking(db,config);
   const actions=createActions({db,domain,payments:pay,payouts:payout,recovery:recover,parcels:parcel});
   const workflows=createWorkflowEngine({db,actions,onEvent:(tx,event)=>notify.dispatchEvent(tx,event),autonomy:config.agentAutonomy});
+  // Model-assisted triage. Optional by construction: with no provider
+  // configured every call reports unavailable and the deterministic paths are
+  // unchanged, which is what keeps this an improvement rather than a dependency.
+  // Validated against the real executable catalog, not a copy of it: a model
+  // proposing an action LeRoutier no longer has must fail, not drift.
+  const reasoning=createReasoning({db,provider:createModelProvider(config),actions,budget:config.model?.budget});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
   async function limited(subject) {
     await db.transaction(async tx=>{
@@ -432,6 +438,20 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(routeGeom) {
       if(method==='GET') return geometry.read(routeGeom[1]);
       if(method==='POST') return geometry.generate(actor,routeGeom[1],{force:(await body()).force===true});
+    }
+    // Model provider status. Two endpoints on purpose: usage is free to poll,
+    // health costs a real (tiny) call and is therefore explicit.
+    if(method==='GET' && path==='/ops/model-usage') {
+      invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
+      return reasoning.usage();
+    }
+    if(method==='POST' && path==='/ops/model-health') {
+      // Platform Ops only: it spends quota, so an operator admin cannot drain
+      // the shared budget by refreshing a dashboard.
+      invariant(actor.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform operations access required.',403);
+      await limited('model-health:'+actor.id);
+      // Never the key, never the Authorization header, never the raw response.
+      return reasoning.health();
     }
     if(method==='GET' && path==='/ops/diagnostics') {
       invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
