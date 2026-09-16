@@ -500,7 +500,11 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   return async req=>{
     const origin=req.headers.get('origin');
     const allowed=!origin || config.corsOrigins.includes(origin);
-    const headers={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','vary':'Origin'};
+    // A JSON API is never a document: it is never framed, never referred from,
+    // and never sniffed into another content type. Transport security (HSTS) is
+    // added by the platform edge, so it is not duplicated here.
+    const headers={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','vary':'Origin',
+      'x-frame-options':'DENY','referrer-policy':'no-referrer','content-security-policy':"default-src 'none'; frame-ancestors 'none'"};
     if(origin && allowed) headers['access-control-allow-origin']=origin;
     const url=new URL(req.url);
     const rawPath=url.pathname.replace(/\/$/,'')||'/';
