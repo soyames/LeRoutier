@@ -11,7 +11,7 @@ import { payments } from '../src/payments.js';
 import { earnings, payouts } from '../src/payouts.js';
 import { recovery } from '../src/recovery.js';
 import { recordIncident } from '../src/driver-actions.js';
-import { bootstrap, authenticate, createActions, createWorkflowEngine } from '@leroutier/agents';
+import { bootstrap, authenticate, createActions, createWorkflowEngine, createReasoning } from '@leroutier/agents';
 import { createApi } from '../../../services/api/src/app.js';
 
 const config={...serverConfig(),schema:'lr_test_'+randomUUID().replaceAll('-',''),demoLogin:true};
@@ -24,6 +24,7 @@ const token=()=>'lragt_'+randomBytes(32).toString('base64url');
 const tokens={};
 let platform,bound,readonly,api;
 const one=async(sql,args=[])=>(await db.transaction(async tx=>(await tx.query(sql,args)).rows[0]));
+const all=async(sql,args=[])=>(await db.transaction(async tx=>(await tx.query(sql,args)).rows));
 before(async()=>{
   await migrate(db);await seed(db);
   platform=await bootstrap(db,{name:'platform-agent',token:tokens.platform=token(),scopes:['service.read','incident.read','incident.manage','notification.send','payment.reconcile','payout.review','alert.create','workflow.run']});
@@ -32,7 +33,7 @@ before(async()=>{
   api=createApi(db,config);
 });
 beforeEach(async()=>{
-  await db.transaction(async tx=>{await tx.query('DELETE FROM booking_segments');await tx.query("UPDATE bookings SET status='cancelled'");await tx.query('DELETE FROM payment_events');await tx.query('DELETE FROM payments');await tx.query('DELETE FROM payout_events');await tx.query('DELETE FROM driver_earnings');await tx.query('DELETE FROM payout_requests');await tx.query('DELETE FROM payout_destinations');await tx.query('DELETE FROM agent_action_receipts');await tx.query('DELETE FROM workflow_approvals');await tx.query('DELETE FROM workflow_runs');await tx.query('DELETE FROM outbox');await tx.query("UPDATE services SET current_sequence=0,status='active'");});
+  await db.transaction(async tx=>{await tx.query('DELETE FROM booking_segments');await tx.query("UPDATE bookings SET status='cancelled'");await tx.query('DELETE FROM payment_events');await tx.query('DELETE FROM payments');await tx.query('DELETE FROM payout_events');await tx.query('DELETE FROM driver_earnings');await tx.query('DELETE FROM payout_requests');await tx.query('DELETE FROM payout_destinations');await tx.query('DELETE FROM agent_action_receipts');await tx.query('DELETE FROM agent_model_calls');await tx.query('DELETE FROM workflow_approvals');await tx.query('DELETE FROM workflow_runs');await tx.query('DELETE FROM outbox');await tx.query("UPDATE services SET current_sequence=0,status='active'");});
 });
 after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}});
 const agentRequest=(agentToken,path,method='GET',body=undefined,key=undefined)=>{
@@ -218,6 +219,132 @@ test('a deactivated principal stops working immediately',async()=>{
   assert.equal((await api(agentRequest(revokedToken,'/agent/me'))).status,200);
   await db.transaction(async tx=>tx.query('UPDATE agent_principals SET active=false WHERE id=$1',[revoked.id]));
   assert.equal((await api(agentRequest(revokedToken,'/agent/me'))).status,401,'a disabled principal fails closed');
+});
+
+// ------------------------------------------------------- model reasoning ----
+// The model layer is optional by construction. These tests hold it to that:
+// every failure mode must leave the deterministic platform exactly as it was.
+const SITUATION={serviceStatus:'delayed',delayMinutes:35,vehicleStationaryMinutes:18,passengersAffected:12,nextStopCity:'Bohicon'};
+const GOOD_REPLY={classification:'possible_breakdown',severity:'high',recommendedAction:'alert.create',reason:'Véhicule immobile depuis 18 minutes.'};
+/** A provider that answers from a script, without a network. */
+function fakeProvider(script,{configured=true,model='openrouter/free'}={}){
+  let call=0;
+  return {name:'openrouter',model,configured,
+    async complete(){const next=typeof script==='function'?script(++call):script;
+      if(next instanceof Error)throw next;
+      return {data:next,actualModel:'mistralai/mistral-7b:free',latencyMs:120};},
+    async health(){return {provider:'openrouter',configured,reachable:true,requestedModel:model,status:'ok'};}};
+}
+const reasoningWith=(provider,budget={})=>createReasoning({db,provider,actions,budget});
+
+test('a model recommendation is validated, recorded and never executed',async()=>{
+  const incidentsBefore=(await one('SELECT count(*)::integer AS n FROM incidents')).n;
+  const alertsBefore=(await one('SELECT count(*)::integer AS n FROM outbox WHERE event_type=$1',['alert.created'])).n;
+  const reasoning=reasoningWith(fakeProvider(GOOD_REPLY));
+  const result=await reasoning.recommend('incident.triage',SITUATION,{workflow:'delay-management',scopes:['incident.read','alert.create']});
+  assert.equal(result.available,true);
+  assert.equal(result.recommendation.recommendedAction,'alert.create');
+  assert.equal(result.actualModel,'mistralai/mistral-7b:free','the model that actually answered is captured');
+
+  const row=await one("SELECT * FROM agent_model_calls ORDER BY created_at DESC LIMIT 1");
+  assert.equal(row.status,'ok');
+  assert.equal(row.requested_model,'openrouter/free');
+  assert.equal(row.actual_model,'mistralai/mistral-7b:free');
+  // The situation itself is never stored — only a fingerprint of it.
+  assert.equal(row.input_hash.length,64);
+  assert.equal(JSON.stringify(row).includes('Bohicon'),false,'task input must not be persisted');
+
+  // A recommendation is not an action: nothing operational moved.
+  assert.equal(incidentsBefore,(await one('SELECT count(*)::integer AS n FROM incidents')).n,'a recommendation must not create an incident');
+  assert.equal(alertsBefore,(await one('SELECT count(*)::integer AS n FROM outbox WHERE event_type=$1',['alert.created'])).n,'a recommendation must not raise its own alert');
+});
+
+test('an action outside the task menu is refused and the refusal is recorded',async()=>{
+  const reasoning=reasoningWith(fakeProvider({...GOOD_REPLY,recommendedAction:'payout.execute'}));
+  const result=await reasoning.recommend('incident.triage',SITUATION,{scopes:['incident.read','alert.create','payout.review']});
+  assert.equal(result.available,false);
+  assert.equal(result.rejection,'action_not_permitted_for_task');
+  const row=await one("SELECT * FROM agent_model_calls ORDER BY created_at DESC LIMIT 1");
+  assert.equal(row.status,'rejected');
+  assert.equal(row.rejection_code,'action_not_permitted_for_task');
+  assert.equal((await one('SELECT count(*)::integer AS n FROM payout_requests')).n,0);
+});
+
+test('the daily budget is a wall, not a warning',async()=>{
+  const reasoning=reasoningWith(fakeProvider(GOOD_REPLY),{dailyCalls:2,perWorkflowDailyCalls:50,suppressDuplicatesHours:0});
+  // Distinct situations, so duplicate suppression is not what stops them.
+  for(const minutes of [10,20,30]){
+    await reasoning.recommend('incident.triage',{...SITUATION,delayMinutes:minutes},{workflow:'w',scopes:['alert.create']});
+  }
+  const rows=await all("SELECT status FROM agent_model_calls ORDER BY created_at");
+  assert.equal(rows.filter(r=>r.status==='ok').length,2,'exactly the budget was spent');
+  assert.equal(rows.at(-1).status,'budget_exceeded','the call past the budget never reached a provider');
+});
+
+test('a per-workflow cap protects the shared budget from one runaway workflow',async()=>{
+  const reasoning=reasoningWith(fakeProvider(GOOD_REPLY),{dailyCalls:100,perWorkflowDailyCalls:1,suppressDuplicatesHours:0});
+  await reasoning.recommend('incident.triage',{...SITUATION,delayMinutes:41},{workflow:'noisy',scopes:['alert.create']});
+  const blocked=await reasoning.recommend('incident.triage',{...SITUATION,delayMinutes:42},{workflow:'noisy',scopes:['alert.create']});
+  assert.equal(blocked.available,false);
+  assert.equal(blocked.status,'workflow_budget');
+  // A different workflow is unaffected by its neighbour's spending.
+  const other=await reasoning.recommend('incident.triage',{...SITUATION,delayMinutes:43},{workflow:'quiet',scopes:['alert.create']});
+  assert.equal(other.available,true);
+});
+
+test('the same situation twice costs one call and keeps the first conclusion',async()=>{
+  let calls=0;
+  const provider=fakeProvider(()=>{calls++;return GOOD_REPLY;});
+  const reasoning=reasoningWith(provider,{dailyCalls:100,perWorkflowDailyCalls:50,suppressDuplicatesHours:6});
+  const first=await reasoning.recommend('incident.triage',SITUATION,{scopes:['alert.create']});
+  const second=await reasoning.recommend('incident.triage',SITUATION,{scopes:['alert.create']});
+  assert.equal(calls,1,'a repeated situation must not be paid for twice');
+  assert.equal(second.status,'suppressed_duplicate');
+  assert.deepEqual(second.recommendation.classification,first.recommendation.classification);
+});
+
+test('every provider failure degrades to no recommendation, never to an error',async()=>{
+  for(const [label,thrown] of [['timeout',Object.assign(new Error('x'),{reason:'timeout'})],
+    ['provider error',Object.assign(new Error('x'),{reason:'provider_error'})],
+    ['malformed',Object.assign(new Error('x'),{reason:'malformed_output'})]]){
+    const reasoning=reasoningWith(fakeProvider(thrown),{suppressDuplicatesHours:0});
+    const result=await reasoning.recommend('incident.triage',{...SITUATION,delayMinutes:Math.random()},{scopes:['alert.create']});
+    assert.equal(result.available,false,`${label} should yield no recommendation`);
+    assert.ok(result.status,`${label} should carry a safe status`);
+  }
+});
+
+test('an unconfigured provider is a supported production state',async()=>{
+  const reasoning=reasoningWith(fakeProvider(GOOD_REPLY,{configured:false}));
+  const result=await reasoning.recommend('incident.triage',SITUATION,{scopes:['alert.create']});
+  assert.equal(result.available,false);
+  assert.equal(result.status,'not_configured');
+  assert.equal((await one("SELECT status FROM agent_model_calls ORDER BY created_at DESC LIMIT 1")).status,'unavailable');
+});
+
+test('a model outage cannot touch booking or payment',async()=>{
+  // The provider throws on every call for the duration of this test.
+  const reasoning=reasoningWith(fakeProvider(new Error('provider down')),{suppressDuplicatesHours:0});
+  await reasoning.recommend('incident.triage',SITUATION,{scopes:['alert.create']});
+
+  // The deterministic platform is unchanged: a booking still holds, still
+  // takes payment, still confirms.
+  const booking=await domain.hold(passenger,{serviceId:demo.service,origin:0,destination:3},randomUUID());
+  await domain.recordPayment(ops,booking.id,{provider:'demo',reference:randomUUID(),amountMinor:booking.amount_minor,currency:'XOF'},randomUUID());
+  const confirmed=await domain.transition(passenger,booking.id,'confirm');
+  assert.equal(confirmed.status,'confirmed','model availability must never gate a core journey');
+});
+
+test('usage reporting exposes counts and configuration, never a credential',async()=>{
+  const reasoning=reasoningWith(fakeProvider(GOOD_REPLY),{dailyCalls:7,suppressDuplicatesHours:0});
+  await reasoning.recommend('incident.triage',{...SITUATION,delayMinutes:77},{scopes:['alert.create']});
+  const usage=await reasoning.usage();
+  assert.equal(usage.provider,'openrouter');
+  assert.equal(usage.configured,true);
+  assert.equal(usage.requestedModel,'openrouter/free');
+  assert.equal(usage.dailyBudget,7);
+  assert.ok(usage.today.ok>=1);
+  assert.equal(/sk-|Bearer|api[_-]?key/i.test(JSON.stringify(usage)),false,'usage must not carry anything credential-shaped');
 });
 
 test('agent API endpoints enforce principal authentication',async()=>{

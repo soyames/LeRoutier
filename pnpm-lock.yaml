@@ -207,6 +207,10 @@ importers:
       '@leroutier/notifications':
         specifier: workspace:*
         version: link:../notifications
+    devDependencies:
+      '@leroutier/config':
+        specifier: workspace:*
+        version: link:../config
 
   packages/config:
     dependencies:
