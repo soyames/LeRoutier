@@ -122,7 +122,7 @@ deployment settings. DATABASE_URL and CORS_ORIGINS belong on the API project;
 VITE_API_URL belongs on each frontend. Production contains no automatic demo seed.
 Static frontend builds do not need database credentials.
 
-See [production identity and provisioning](../production-auth.md) for OIDC
+See [identity mapping and provisioning](../production-auth.md) for
 configuration, migration order, first-operator bootstrap and Ops workflows.
 All three apps support /auth/callback through the existing SPA fallback. Provider
 settings must be real registered values; incomplete configuration fails closed.
@@ -140,7 +140,7 @@ for zero function.
 | Project | Variables | Why |
 | --- | --- | --- |
 | `le-routier` (PWA) | `VITE_API_URL` | the only variable any frontend code reads; `same-origin` because `/api/v1/*` is rewritten to the API |
-| `le-routier-api` | `DATABASE_URL`, `CORS_ORIGINS`, `PAYMENT_PROVIDER`, `FEDAPAY_*`, `PAYOUT_APPROVAL_REQUIRED`, `AGENT_MODEL_PROVIDER`, `OPENROUTER_*`, `AUTH_*`, `OIDC_*`, `NOTIFICATION_*` | the only project that runs server code |
+| `le-routier-api` | `DATABASE_URL`, `CORS_ORIGINS`, `PAYMENT_PROVIDER`, `FEDAPAY_*`, `PAYOUT_APPROVAL_REQUIRED`, `AGENT_MODEL_PROVIDER`, `OPENROUTER_*`, `FIREBASE_*`, `USSD_*`, `NOTIFICATION_*` | the only project that runs server code |
 | legacy frontends | `VITE_API_URL` (+ 15 unused variables) | see below |
 
 Names only. Values appear in this repository nowhere, ever.

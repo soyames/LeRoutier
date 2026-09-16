@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { publicAuthConfig, serverConfig } from '../src/index.js';
-import { safeReturnPath } from '../src/oidc.js';
+import { publicAuthConfig, serverConfig, authConfig, FIREBASE_JWKS_URL } from '../src/index.js';
+import { safeReturnPath } from '../src/firebase.js';
 
 // The gate that decides whether sign-in is offered at all.
 //
@@ -9,53 +9,78 @@ import { safeReturnPath } from '../src/oidc.js';
 // button rather than a button that fails after the user has committed to it.
 // Everything here is a pure function, so it is tested without a browser.
 
-const COMPLETE = {
-  issuer: 'https://identity.example.invalid',
-  jwksUrl: 'https://identity.example.invalid/oauth/v2/keys',
-  audience: 'project-id-123',
-  oidcClientId: 'client-id-456',
-  oidcRedirectUris: ['https://le-routier.vercel.app/auth/callback'],
-  oidcScope: 'openid profile',
-  demoLogin: false,
-};
+const PROJECT = 'leroutier-example';
+const env = extra => ({
+  FIREBASE_PROJECT_ID: PROJECT,
+  FIREBASE_API_KEY: 'web-api-key-value',
+  FIREBASE_AUTH_DOMAIN: `${PROJECT}.firebaseapp.com`,
+  FIREBASE_APP_ID: '1:123:web:abc',
+  ...extra,
+});
 
+// ------------------------------------------------------- derived, not typed --
+test('issuer, audience and key set are derived from the project id', () => {
+  const config = authConfig(env());
+  assert.equal(config.issuer, `https://securetoken.google.com/${PROJECT}`);
+  assert.equal(config.audience, PROJECT);
+  assert.equal(config.jwksUrl, FIREBASE_JWKS_URL);
+});
+
+test('one variable cannot disagree with itself', () => {
+  // Three hand-entered values can drift apart; a mistyped issuer or audience is
+  // precisely what makes a verifier accept another project's tokens.
+  const a = authConfig(env({ FIREBASE_PROJECT_ID: 'project-one' }));
+  const b = authConfig(env({ FIREBASE_PROJECT_ID: 'project-two' }));
+  assert.notEqual(a.issuer, b.issuer);
+  assert.notEqual(a.audience, b.audience);
+  assert.ok(a.issuer.endsWith('project-one'));
+  assert.equal(a.jwksUrl, b.jwksUrl, 'the key set is the same for every Firebase project');
+});
+
+test('without a project id the verifier has nothing to verify against', () => {
+  const config = authConfig({});
+  assert.equal(config.issuer, undefined);
+  assert.equal(config.audience, undefined);
+  assert.equal(config.jwksUrl, undefined);
+});
+
+// -------------------------------------------------------- what is published --
 test('a complete configuration is published to the browser', () => {
-  const published = publicAuthConfig(COMPLETE);
-  assert.equal(published.oidc.authority, COMPLETE.issuer);
-  assert.equal(published.oidc.clientId, COMPLETE.oidcClientId);
-  assert.deepEqual(published.oidc.redirectUris, COMPLETE.oidcRedirectUris);
+  const published = publicAuthConfig(authConfig(env()));
+  assert.equal(published.firebase.projectId, PROJECT);
+  assert.equal(published.firebase.authDomain, `${PROJECT}.firebaseapp.com`);
+  assert.deepEqual(published.firebase.providers, ['google']);
   assert.equal(published.demoLogin, false);
 });
 
-test('nothing secret is ever published alongside it', () => {
-  const published = publicAuthConfig({ ...COMPLETE, databaseUrl: 'postgresql://u:p@host/db', fedapaySecretKey: 'sk-live-xyz' });
+test('only the four browser-facing identifiers, and the providers', () => {
+  const published = publicAuthConfig(authConfig(env()));
+  assert.deepEqual(Object.keys(published.firebase).sort(), ['apiKey', 'appId', 'authDomain', 'projectId', 'providers']);
+});
+
+test('nothing server-side is published alongside it', () => {
+  const published = publicAuthConfig({
+    ...authConfig(env()),
+    databaseUrl: 'postgresql://u:p@host/db',
+    fedapay: { secretKey: 'sk-live-xyz' },
+  });
   const text = JSON.stringify(published);
-  for (const secret of ['postgresql://', 'sk-live-xyz', 'jwksUrl', 'audience']) {
+  // Not a credential, and not even the issuer or key set the API verifies
+  // against: the browser needs neither and must not be told either.
+  for (const secret of ['postgresql://', 'sk-live-xyz', 'securetoken', 'jwks', 'googleapis']) {
     assert.equal(text.includes(secret), false, `${secret} reached the browser payload`);
   }
-  // The audience and the JWKS URL are server-side validation inputs; the
-  // browser needs neither, so neither is sent.
-  assert.deepEqual(Object.keys(published.oidc).sort(), ['authority', 'clientId', 'redirectUris', 'resource', 'scope']);
 });
 
-test('any missing required value disables sign-in entirely', () => {
-  for (const missing of ['issuer', 'jwksUrl', 'audience', 'oidcClientId']) {
-    assert.equal(publicAuthConfig({ ...COMPLETE, [missing]: undefined }).oidc, null, `${missing} missing must disable sign-in`);
+test('any missing Firebase value disables sign-in entirely', () => {
+  for (const missing of ['FIREBASE_PROJECT_ID', 'FIREBASE_API_KEY', 'FIREBASE_AUTH_DOMAIN', 'FIREBASE_APP_ID']) {
+    assert.equal(publicAuthConfig(authConfig(env({ [missing]: undefined }))).firebase, null,
+      `${missing} missing must disable sign-in`);
   }
-  assert.equal(publicAuthConfig({ ...COMPLETE, oidcRedirectUris: [] }).oidc, null, 'no redirect URI must disable sign-in');
 });
 
-test('a non-HTTPS issuer, JWKS or redirect URI disables sign-in', () => {
-  assert.equal(publicAuthConfig({ ...COMPLETE, issuer: 'http://identity.example.invalid' }).oidc, null);
-  assert.equal(publicAuthConfig({ ...COMPLETE, jwksUrl: 'http://identity.example.invalid/keys' }).oidc, null);
-  // The common local-development mistake: one http callback in the list takes
-  // the whole production configuration down rather than half-enabling it.
-  assert.equal(publicAuthConfig({ ...COMPLETE,
-    oidcRedirectUris: ['https://le-routier.vercel.app/auth/callback', 'http://localhost:4176/auth/callback'] }).oidc, null);
-});
-
-test('a malformed URL disables sign-in instead of throwing', () => {
-  assert.equal(publicAuthConfig({ ...COMPLETE, issuer: 'not a url' }).oidc, null);
+test('an empty string is as absent as undefined', () => {
+  assert.equal(publicAuthConfig(authConfig(env({ FIREBASE_API_KEY: '' }))).firebase, null);
 });
 
 test('demo login can never be on in a deployed environment', () => {
@@ -63,6 +88,13 @@ test('demo login can never be on in a deployed environment', () => {
   assert.equal(serverConfig({ ...base, VERCEL: '1' }).demoLogin, false);
   assert.equal(serverConfig({ ...base, NODE_ENV: 'production' }).demoLogin, false);
   assert.equal(serverConfig(base).demoLogin, true, 'it still works for local development');
+});
+
+test('serverConfig carries the same identity slice as authConfig', () => {
+  const full = serverConfig({ DATABASE_URL: 'postgresql://placeholder', ...env() });
+  assert.equal(full.issuer, `https://securetoken.google.com/${PROJECT}`);
+  assert.equal(full.audience, PROJECT);
+  assert.equal(full.jwksUrl, FIREBASE_JWKS_URL);
 });
 
 // ------------------------------------------------------------ return path --
@@ -87,8 +119,6 @@ test('the return path cannot be turned into an open redirect', () => {
 });
 
 test('the callback route is never itself a return destination', () => {
-  // Otherwise a completed sign-in would land back on the callback and try to
-  // redeem an already-used authorization code.
   assert.equal(safeReturnPath('/auth/callback'), '/');
   assert.equal(safeReturnPath('/auth/callback?code=abc&state=xyz'), '/');
 });

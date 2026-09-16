@@ -1,7 +1,7 @@
 {
   "name": "@leroutier/config",
   "dependencies": {
-    "oidc-client-ts": "^3.5.0"
+    "firebase": "^12.4.0"
   },
   "version": "0.1.0",
   "private": true,

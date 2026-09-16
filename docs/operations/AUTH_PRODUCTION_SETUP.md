@@ -1,271 +1,173 @@
 # Production authentication setup
 
-LeRoutier authenticates with **OIDC Authorization Code + PKCE** against an
-external identity provider. There is no password store, no OTP path and no
-second authentication system — if the provider is not configured, sign-in fails
-closed and the product stays usable for everything that needs no account.
+LeRoutier authenticates with **Firebase Authentication** and **Google Sign-In**.
+There is no password store, no OTP path and no second authentication system —
+if the provider is not configured, sign-in fails closed and the product stays
+usable for everything that needs no account.
 
-**This document does not choose a provider or any value for you.** It states
-exactly what the running code expects, so whoever owns the provider can fill it
-in once.
+Firebase is used for **authentication only**, on the free plan, with **no
+billing account**. See [`FIREBASE_FREE_TIER.md`](FIREBASE_FREE_TIER.md).
 
-## What the code requires
+## How it works
 
-### API — `le-routier-api` (server-side only)
+```
+PWA  →  Firebase Authentication (Google)
+     →  Firebase ID token
+     →  Authorization: Bearer <token>  →  le-routier-api
+     →  signature / issuer / audience / expiry verified against Google's public keys
+     →  existing LeRoutier identity mapping
+     →  roles read from the database
+```
 
-| Variable | Required | What the code does with it |
+**Google decides who you are. LeRoutier decides what you may do.** A token
+claiming `role: ops` grants nothing: only `sub` and `iss` are read from it.
+
+## Configuration
+
+Four variables, all on **`le-routier-api`**. None on `le-routier`.
+
+| Variable | What it is |
+| --- | --- |
+| `FIREBASE_PROJECT_ID` | the Firebase project |
+| `FIREBASE_API_KEY` | browser-facing Firebase key |
+| `FIREBASE_AUTH_DOMAIN` | `<project>.firebaseapp.com` |
+| `FIREBASE_APP_ID` | the registered web app |
+
+### Why all four live on the API
+
+Three of these are browser-facing values, so it would be reasonable to build
+them into the PWA. They are served by `/api/v1/auth/config` at runtime instead,
+which means **rotating a Firebase key is an API change, not a rebuild and
+redeploy of the app**. The PWA needs no authentication variable of its own.
+
+### Classification
+
+| Value | Class | Note |
 | --- | --- | --- |
-| `AUTH_ISSUER` | yes | `iss` the access token must carry. Must be HTTPS. |
-| `AUTH_JWKS_URL` | yes | Remote JWK set used to verify the signature. Must be HTTPS. |
-| `AUTH_AUDIENCE` | yes | `aud` the access token must carry. |
-| `OIDC_CLIENT_ID` | yes | Published to the browser by `/api/v1/auth/config`. |
-| `OIDC_REDIRECT_URIS` | yes | Comma-separated exact callback URLs. Each must be HTTPS. |
-| `OIDC_SCOPE` | no | Defaults to `openid profile`. |
-| `OIDC_RESOURCE` | no | Sent as RFC 8707 `resource` — see *Audience* below. |
+| `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_APP_ID` | **FRONTEND_SAFE** | every Firebase web app ships all four; they are restricted by **authorized domains**, not by secrecy |
+| Firebase service-account JSON | **SERVER_ONLY_SECRET** | **not used and not stored** — see below |
+| Google OAuth client secret | **SERVER_ONLY_SECRET** | belongs in the Firebase Console's Google provider settings, nowhere else |
 
-Signature algorithms accepted: **RS256** and **ES256**. Required claims:
-`sub`, `iss`, `aud`, `exp`, `iat`. Clock tolerance: 5 seconds.
+A Firebase web API key is *not* a credential. It identifies a project; it grants
+nothing on its own. What protects the project is the authorized-domain list and
+the fact that every privileged decision is made by LeRoutier's own API.
 
-All five required values must be present **and** valid HTTPS URLs, or
-`/api/v1/auth/config` returns `oidc: null` and the app shows "La connexion
-sécurisée n'est pas encore configurée". This is deliberate: a half-configured
-provider never produces a half-working sign-in.
+### Derived, never typed
 
-### Frontend
-
-The unified PWA needs **no** auth variables. It reads everything from
-`/api/v1/auth/config` at runtime, so rotating a client id is an API change
-only — no rebuild.
-
-## Redirect URIs
-
-The callback route is `/auth/callback`, served by the SPA rewrite.
+The issuer, audience and key set are computed from `FIREBASE_PROJECT_ID`:
 
 ```
-https://le-routier.vercel.app/auth/callback        # now, canonical
-https://leroutier.bj/auth/callback                 # future custom domain
+issuer   = https://securetoken.google.com/<projectId>
+audience = <projectId>
+jwks     = https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com
 ```
 
-Register **both** at the provider when the domain is acquired, and list both in
-`OIDC_REDIRECT_URIS`. The browser client only initialises when
-`window.location.origin + '/auth/callback'` appears in that list, so an origin
-missing from it simply cannot sign in — by design.
+They are not configurable, because a mistyped issuer or audience is exactly the
+mistake that makes a verifier accept another project's tokens. One variable
+cannot disagree with itself.
 
-The legacy apps, while they remain deployed, each need their own entry:
+Accepted algorithms: **RS256** and **ES256**. Required claims: `sub`, `iss`,
+`aud`, `exp`, `iat`. Clock tolerance: 5 seconds.
 
-```
-https://le-routier-passenger.vercel.app/auth/callback
-https://le-routier-driver.vercel.app/auth/callback
-https://le-routier-ops.vercel.app/auth/callback
-```
+If any of the four is missing, `/api/v1/auth/config` returns `firebase: null`
+and the app shows "La connexion sécurisée n'est pas encore configurée". A
+half-configured provider never produces a half-working sign-in.
 
-### Post-logout redirect
+## No Admin SDK, and why
 
-`window.location.origin + '/'`. Register `https://le-routier.vercel.app/` (and
-the future domain) as a post-logout redirect URI. If the provider exposes no
-end-session endpoint, the local session is still cleared and the user is told
-that provider sign-out is unavailable.
+Verifying an ID token needs no service account — only the project id and
+Google's public keys. `firebase-admin` is therefore **not installed**, no
+private key is stored anywhere, and there is no cold-start cost from a large SDK
+in a serverless function. A secret that is not stored cannot leak.
 
-## Audience — the one thing to get right
+The trade-off, stated: no `checkRevoked`. A token remains valid until it expires
+— at most an hour — even if the Google account is disabled meanwhile. Disabling
+an identity **in LeRoutier** takes effect immediately, which is the control that
+matters for this product.
 
-The API verifies the **access token**, not the id token. Many providers issue an
-opaque or userinfo-scoped access token by default, which will not verify.
+## Firebase Console setup
 
-Two supported shapes:
+| Setting | Value |
+| --- | --- |
+| Sign-in provider | **Google**, enabled |
+| Authorized domains | must include `le-routier.vercel.app` |
+| Web app | registered; supplies the four values above |
 
-1. **Provider supports RFC 8707 `resource`** — set `OIDC_RESOURCE` to the API
-   identifier and `AUTH_AUDIENCE` to the same value. The browser requests a
-   token for that resource and the API accepts it.
-2. **Provider uses a fixed API audience** (an "API"/"audience" concept) — leave
-   `OIDC_RESOURCE` unset if the provider attaches the audience itself, and set
-   `AUTH_AUDIENCE` to the audience it issues.
+> The Google provider's **Web SDK configuration** is where an external OAuth
+> client id and secret go, if the project uses one. That secret stays in the
+> console. It never enters this repository, Vercel, or a browser bundle.
 
-If sign-in succeeds in the browser but `/api/v1/me` returns 401, the access
-token audience does not match `AUTH_AUDIENCE`. That is the first thing to check.
-
-**A multi-valued `aud` is fine.** The verifier matches by membership, so a token
-whose `aud` is an array is accepted as long as `AUTH_AUDIENCE` is one of its
-values. Covered by test.
-
-## ZITADEL
-
-The selected production provider. Everything below is from ZITADEL's own
-documentation; nothing here is a guess, and no value is invented.
-
-### Create the application
-
-In the ZITADEL Console, inside your project: **Applications → New**.
-
-| Setting | Value | Why |
-| --- | --- | --- |
-| Type | **User Agent** | ZITADEL's SPA type — browser-only, **no client secret** |
-| Authentication method | **PKCE** | Authorization Code + PKCE, which is what the client already does |
-| Redirect URI | `https://le-routier.vercel.app/auth/callback` | exact; no wildcards |
-| Post-logout URI | `https://le-routier.vercel.app/` | exact |
-| **Token Settings → Token Type** | **JWT** | ⚠️ **the setting that matters most** |
-
-> If ZITADEL asks you for a **client secret**, the application was created as
-> the wrong type. A User Agent app has none. Stop and recreate it.
-
-**Why the token type matters.** ZITADEL's claims table states that `sub`, `iss`,
-`aud`, `exp` and `iat` appear in the access token **"When JWT"** only. Left on
-the default *Bearer Token (Opaque)*, the access token carries no claims, and
-LeRoutier rejects every request — after a sign-in that appeared to succeed.
-
-### The audience
-
-ZITADEL's own documentation for the `aud` claim:
-
-> "The audience of the token, by default all client id's and the project id are
-> included."
-
-So `aud` is normally an **array**, and `AUTH_AUDIENCE` may be **either** the
-client id **or** the project id. **Use the project id**: client ids change if the
-application is ever recreated, the project id does not.
-
-To guarantee it rather than rely on the default, add ZITADEL's reserved
-audience scope, which is why `OIDC_SCOPE` is configurable:
-
-```
-OIDC_SCOPE=openid profile urn:zitadel:iam:org:project:id:{projectId}:aud
-```
-
-> "By adding this scope, the requested project id will be added to the audience
-> of the access token."
-
-**Leave `OIDC_RESOURCE` unset.** ZITADEL uses that reserved scope, not RFC 8707
-`resource`.
-
-### Issuer and JWKS — read them, don't type them
-
-ZITADEL serves discovery at `${YOUR_DOMAIN}/.well-known/openid-configuration`.
-Take `issuer` and `jwks_uri` from that document rather than assembling paths:
-
-```bash
-curl -s https://<your-instance>/.well-known/openid-configuration | \
-  node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.issuer,d.jwks_uri)"
-```
-
-### Production variables
-
-All on **`le-routier-api`**, none on `le-routier`:
-
-```
-AUTH_ISSUER=<issuer from discovery>
-AUTH_JWKS_URL=<jwks_uri from discovery>
-AUTH_AUDIENCE=<ZITADEL project id>
-OIDC_CLIENT_ID=<User Agent application client id>
-OIDC_REDIRECT_URIS=https://le-routier.vercel.app/auth/callback
-OIDC_SCOPE=openid profile urn:zitadel:iam:org:project:id:<projectId>:aud
-```
-
-There is **no `OIDC_CLIENT_SECRET`**, and there must never be one.
-
-### Verify before announcing
-
-```bash
-node --env-file=<reviewed env file> scripts/verify-oidc.mjs
-```
-
-Checks configuration completeness, fetches discovery, and confirms the
-configured issuer and JWKS match the provider's own metadata, that RS256/ES256
-is offered and that PKCE S256 is advertised.
-
-Then sign in once and pipe the access token in to settle the audience question
-empirically — the script verifies signature, issuer, audience and expiry exactly
-as the API does, prints the claims, and **never prints the token**:
-
-```bash
-node --env-file=<reviewed env file> scripts/verify-oidc.mjs < token.txt
-```
+Add a custom domain to the authorized list when one is acquired. Nothing else
+changes: the callback is same-origin and there is no redirect URI to register.
 
 ## Scopes
 
-Default `openid profile`. LeRoutier reads only `sub` and `iss` from the token:
+`openid`, `profile`, `email`. Nothing else, ever, without a product decision and
+a privacy-policy change to match.
 
-> Custom `role`, `operator` or permission claims are **deliberately ignored**.
-
-Roles come from the database, never from the token. A provider cannot grant
-someone Ops access by adding a claim.
+LeRoutier does **not** request Gmail, Drive, Calendar, Contacts or Photos, and
+cannot read them. This is asserted by test against the source, so a scope added
+in a hurry fails the build rather than quietly outgrowing the published policy.
 
 ## What happens on first sign-in
 
-1. The access token is verified against the JWKS.
-2. `sub` + `iss` are mapped to a LeRoutier identity. A new `sub` creates one
-   `users` row with role `passenger` and an empty passenger profile — nothing
-   more.
-3. An existing identity whose `iss` does not match is **rejected**, never
-   silently relinked.
-4. `identity.onboarded` is written to the audit trail.
-5. The passenger completes their profile (name, phone) before their first
-   booking.
+1. Firebase authenticates with Google and issues an ID token.
+2. The API verifies it and takes **only** `sub` and `iss`.
+3. A new subject becomes a **passenger**: `role = passenger`,
+   `operator_id = null`, a passenger profile row, `needs_profile = true`,
+   and an `identity.onboarded` audit event.
+4. Concurrent first logins produce exactly one identity.
+5. A known subject cannot be re-bound to a different issuer.
 
-Becoming a driver, convoyeur or Ops user is never self-service: it happens
-through operator onboarding (independent) or provisioning by a company
-administrator.
+Custom claims, email address, email domain and Google profile grant **nothing**.
+Becoming a driver, convoyeur or Ops happens only through LeRoutier's own
+provisioning, and is covered by tests.
 
-## Session behaviour
+## Sessions
 
-- Tokens are held **in memory only** and are never written to `localStorage` or
-  `sessionStorage`. A page reload requires signing in again. This is a
-  deliberate security property, asserted by the browser suite.
-- Only the PKCE state lives in `sessionStorage`, as the protocol requires.
-- Token expiry clears the session and shows "Votre session a expiré."
-- A 401 from any API call clears the session immediately.
-- Sign-in returns the user to the page they came from — including an
-  interrupted booking, which is resumed automatically. Return paths are
-  validated as same-origin absolute paths, so the callback cannot be used as an
-  open redirect.
+Tokens live in memory and in `sessionStorage` for the tab, never in
+`localStorage` — a shared handset at a station must not sign the next person in
+as the last one. The SDK refreshes a token shortly before expiry, and the token
+is requested per API call rather than held, so a long booking does not fail on a
+token that went stale while the user was reading.
 
-## Verification checklist
+Signing out clears the Firebase session and LeRoutier's own state, and is
+asserted to leave nothing behind.
 
-Once the provider is configured:
+## Verify
 
 ```bash
-curl -s https://le-routier.vercel.app/api/v1/auth/config
+pnpm auth:verify
 ```
 
-Expect `demoLogin: false` and a populated `oidc` block with `authority`,
-`clientId`, `scope` and `redirectUris`. `oidc: null` means at least one required
-value is missing or not HTTPS.
+Checks the four variables, the derived issuer and audience, that the published
+browser payload carries nothing server-side, and that Google's key set is
+reachable and offers an accepted algorithm.
 
-Then, in a browser:
+Then sign in once and pipe the ID token in to confirm a real one end to end. The
+script verifies signature, issuer, audience and expiry exactly as the API does,
+prints the claims, and **never prints the token**:
 
-1. open `https://le-routier.vercel.app/account` and sign in;
-2. confirm you land back on `/account`, not on the home page;
-3. complete the profile;
-4. open `https://le-routier.vercel.app/trips`, pick a departure while signed
-   out in a private window, and confirm sign-in returns you to that trip with
-   the booking resumed;
-5. confirm `/ops` shows "Espace non autorisé" for a plain passenger identity.
-
-`pnpm smoke:prod` asserts `demoLogin: false` in production on every run.
-
-## Never
-
-- Do not enable `ALLOW_DEMO_LOGIN` in production. It is force-disabled whenever
-  `VERCEL` is set or `NODE_ENV=production`, and the smoke test fails if demo
-  login is ever reported as enabled.
-- Do not add a password, OTP or API-key login path.
-- Do not put any auth secret in a `VITE_*` variable — those ship to the browser.
+```bash
+node --env-file=<reviewed env file> scripts/verify-auth.mjs < token.txt
+```
 
 ## Status
 
 | Key | Status |
 | --- | --- |
-| `OIDC_CODE` | **READY** |
-| `OIDC_PROVIDER_CONFIGURATION` | **PENDING** |
-| `OIDC_REAL_LOGIN` | **PENDING** |
+| `FIREBASE_AUTH_CODE` | **READY** |
+| `FIREBASE_ADMIN_BACKEND` | **NOT USED — by design**; token verification needs no service account |
+| `GOOGLE_SIGN_IN` | **READY** — provider enabled, scopes limited to identity |
+| `PRODUCTION_CONFIG` | **READY** — four variables set on `le-routier-api` |
+| `REAL_LOGIN` | see [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) |
+| `FREE_TIER_ONLY` | **ENFORCED** — [`FIREBASE_FREE_TIER.md`](FIREBASE_FREE_TIER.md) |
 
-Verified on the production API: no `AUTH_*` or `OIDC_*` variable is set on
-`le-routier-api`, and `GET /api/v1/auth/config` returns:
+**Authentication is not READY until one real production sign-in has succeeded.**
 
-```json
-{"data":{"demoLogin":false,"oidc":null}}
-```
+## Never
 
-That is the correct fail-closed state, not a defect. Sign-in is not offered
-because it is not configured; everything that needs no account keeps working.
-
-**Identity is not READY and must not be described as such** until one real
-production login has succeeded end to end.
+- A client secret in the browser, in this repository, or in Vercel.
+- A service-account JSON anywhere but the owner's own machine.
+- A role, operator or permission taken from a token claim.
+- A second sign-in path "just for staff".

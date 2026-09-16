@@ -15,9 +15,8 @@ variables. Server-only; nothing is prefixed with `VITE_*`.
 | `DATABASE_URL` | yes | Neon PostgreSQL, SSL required |
 | `DATABASE_SCHEMA` | no | defaults to `leroutier` |
 | `CORS_ORIGINS` | yes | comma-separated exact frontend origins (no wildcards) |
-| `AUTH_ISSUER` / `AUTH_JWKS_URL` / `AUTH_AUDIENCE` | yes for sign-in | production fails closed until all three are valid HTTPS |
-| `OIDC_CLIENT_ID` / `OIDC_SCOPE` / `OIDC_REDIRECT_URIS` | yes for sign-in | public PKCE client; redirect URIs must end `/auth/callback` per app |
-| `OIDC_RESOURCE` | optional | provider-specific |
+| `FIREBASE_PROJECT_ID` | yes for sign-in | production fails closed until all three are valid HTTPS |
+| `FIREBASE_API_KEY` / `FIREBASE_AUTH_DOMAIN` / `FIREBASE_APP_ID` | yes for sign-in | browser-facing Firebase identifiers, served at runtime by `/api/v1/auth/config` |
 | `PAYMENT_PROVIDER` | `fedapay` | enables collections |
 | `FEDAPAY_ENVIRONMENT` | `live` | production never falls back to sandbox |
 | `FEDAPAY_SECRET_KEY` | yes for collections | FedaPay dashboard API key |
@@ -58,23 +57,26 @@ every row below is created through the real onboarding and Ops flows.
 
 ## 2. Auth provider setup
 
-> Full detail — every variable the code expects, both callback URLs, the
-> audience pitfall and a verification checklist — is in
+> Full detail — every variable the code expects, why no service account and no
+> client secret are stored, and a verification checklist — is in
 > [`AUTH_PRODUCTION_SETUP.md`](AUTH_PRODUCTION_SETUP.md).
 > The end-to-end pilot script, including the two controlled money tests, is in
 > [`PILOT_TEST_PLAN.md`](PILOT_TEST_PLAN.md).
 
-- [ ] Configure the OIDC provider (issuer, JWKS URL, audience).
-- [ ] Register one public PKCE client per app (Passenger/Driver/Ops).
-- [ ] Set callback URLs exactly: `https://le-routier-passenger.vercel.app/auth/callback`, same for `-driver` and `-ops`.
-- [ ] Set `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_AUDIENCE`, `OIDC_CLIENT_ID`, `OIDC_REDIRECT_URIS` on `le-routier-api`.
-- [ ] `GET /api/v1/auth/config` returns an OIDC block and `demoLogin:false`.
+- [ ] Enable the Google provider in Firebase Authentication (free Spark plan —
+      billing must stay disabled; see [`FIREBASE_FREE_TIER.md`](FIREBASE_FREE_TIER.md)).
+- [ ] Register a **web** app in the Firebase project; its four identifiers are
+      the four variables below.
+- [ ] Set `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_APP_ID` on `le-routier-api`.
+- [ ] Confirm the production domain is on the Firebase authorized-domain list.
+- [ ] `GET /api/v1/auth/config` returns a populated `firebase` block and `demoLogin:false`.
+- [ ] `pnpm auth:verify` passes against the deployed API.
 
 ## 3. Bootstrap the first operator
 
 Use the one-time CLI (`packages/database/scripts/bootstrap.js`) with an
 ignored env file on your machine. Required values: `BOOTSTRAP_CONFIRM=provision-first-operator`,
-`AUTH_ISSUER`, `BOOTSTRAP_OPERATOR_KEY`, `BOOTSTRAP_OPERATOR_NAME`,
+`FIREBASE_PROJECT_ID`, `BOOTSTRAP_OPERATOR_KEY`, `BOOTSTRAP_OPERATOR_NAME`,
 `BOOTSTRAP_OPS_SUBJECT`, `BOOTSTRAP_OPS_NAME` (optional:
 `BOOTSTRAP_PLATFORM_OPS`, driver fields). The bootstrap:
 

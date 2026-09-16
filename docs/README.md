@@ -47,7 +47,8 @@ removed rather than left to mislead.
 - [`operations/VERCEL.md`](operations/VERCEL.md) — projects, environment-variable ownership, deployment
 - [`operations/PILOT_ROLLOUT.md`](operations/PILOT_ROLLOUT.md) — how the pilot starts
 - [`operations/PILOT_TEST_PLAN.md`](operations/PILOT_TEST_PLAN.md) — what the pilot verifies
-- [`operations/AUTH_PRODUCTION_SETUP.md`](operations/AUTH_PRODUCTION_SETUP.md) — configuring the OIDC provider
+- [`operations/AUTH_PRODUCTION_SETUP.md`](operations/AUTH_PRODUCTION_SETUP.md) — Firebase Authentication and Google Sign-In
+- [`operations/FIREBASE_FREE_TIER.md`](operations/FIREBASE_FREE_TIER.md) — what Firebase is used for, and why billing stays off
 - [`operations/SLO_AND_MONITORING.md`](operations/SLO_AND_MONITORING.md) — objectives and what is watched
 - [`operations/USSD_ARCEP_APPLICATION.md`](operations/USSD_ARCEP_APPLICATION.md) — the regulator pack for a USSD shortcode
 
@@ -62,7 +63,7 @@ removed rather than left to mislead.
 ## API
 
 - [`api/README.md`](api/README.md) — endpoints and contracts
-- [`production-auth.md`](production-auth.md) — production authentication configuration
+- [`production-auth.md`](production-auth.md) — identity mapping, first operator bootstrap, Ops provisioning
 
 ## Research
 

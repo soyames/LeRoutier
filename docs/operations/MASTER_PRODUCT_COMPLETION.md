@@ -20,9 +20,13 @@ different claims, and only the first is true today.
 
 | Key | Status |
 | --- | --- |
-| `OIDC_CODE` | **READY** — PKCE S256, JWT access-token verification, DB-authoritative roles, 26 auth tests |
-| `OIDC_PROVIDER_CONFIGURATION` | **PENDING** — no ZITADEL application exists; no `AUTH_*`/`OIDC_*` variable is set on `le-routier-api` |
-| `OIDC_REAL_LOGIN` | **PENDING** — `/api/v1/auth/config` returns `oidc: null`, which is the correct fail-closed state |
+| `FIREBASE_AUTH_CODE` | **READY** — Firebase ID-token verification, DB-authoritative roles, 30 auth tests |
+| `FIREBASE_ADMIN_BACKEND` | **NOT USED — by design** — verification needs no service account, so no private key is stored anywhere |
+| `GOOGLE_SIGN_IN` | **READY** — provider enabled; scopes limited to openid/profile/email, asserted by test |
+| `PRODUCTION_CONFIG` | **READY** — four variables set on `le-routier-api`; web app registered; `le-routier.vercel.app` authorised |
+| `REAL_LOGIN` | **PENDING** — requires one real Google sign-in in production |
+| `FREE_TIER_ONLY` | **ENFORCED** — authentication only, Spark plan, no billing account, no Admin SDK |
+| `LEGAL_URLS` | **READY** — `/privacy`, `/terms`, `/legal`, `/cancellations`, `/cookies` resolve without an account |
 | `USSD_CODE` | **READY** |
 | `USSD_INTERNAL_ENGINE` | **READY** — journeys, sessions, idempotency, security, 57 tests |
 | `USSD_PROVIDER_ADAPTER` | **READY (unconfirmed)** — sandbox, generic HMAC and MTN implemented; MTN's field mapping awaits the portal Swagger |
@@ -67,7 +71,7 @@ different claims, and only the first is true today.
 | AE | Accessibility | PLANNED | WCAG 2.1 AA where practical. |
 | AF | PWA mass-use quality | PLANNED | Update prompt, stale-version behaviour. |
 | AG | Notification scale | PLANNED | Retry/backoff/dead-letter. |
-| AH | OIDC canonical | BLOCKED_EXTERNAL | Provider choice and credentials are the owner's. |
+| AH | Identity canonical | DONE | Firebase Authentication + Google Sign-In. ZITADEL was abandoned before any integration; no dual auth system exists. |
 | AI | Custom-domain readiness | PLANNED | No architecture rewrite required. |
 | AJ | Legal/customer-facing basics | PLANNED | Placeholders, clearly marked for legal review. |
 | AK | Support & incident management | PLANNED | Severity, escalation, postmortem. |

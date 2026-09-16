@@ -46,13 +46,16 @@ Run `pnpm release:check` for the mechanical half of this page.
 
 | Requirement | Status | Evidence | Action |
 | --- | --- | --- | --- |
-| OIDC + PKCE, memory-only tokens | `DONE` | `tests/e2e/auth.spec.js` | — |
+| Firebase ID-token verification | `DONE` | signature, issuer, audience, expiry against Google's keys; `services/api/tests/auth.test.js` |
 | Production fails closed when unconfigured | `DONE` | `auth.spec.js`; no permissive fallback | — |
 | Demo login impossible in production | `DONE` | `services/api/tests/http.test.js` | — |
 | Authorization enforced server-side | `DONE` | [`AUTHORIZATION_MATRIX.md`](../security/AUTHORIZATION_MATRIX.md) with a test per row | — |
-| **ZITADEL application created** | `BLOCKED_EXTERNAL` | provider selected; requirements verified against ZITADEL's own docs ([`AUTH_PRODUCTION_SETUP.md`](AUTH_PRODUCTION_SETUP.md)) | owner creates a **User Agent** app with **Token Type: JWT** |
-| **Auth variables set** | `PENDING` | none present on `le-routier-api`; `auth/config` returns `oidc: null` | set the five variables, redeploy |
-| **Real production login** | `PENDING` | cannot be performed without the above | `pnpm auth:verify`, then one real sign-in |
+| Google Sign-In configured | `DONE` | provider enabled; web app registered; `le-routier.vercel.app` authorised |
+| Auth variables set | `DONE` | four values on `le-routier-api`; `auth/config` publishes them at runtime |
+| No service-account material anywhere | `DONE` | Admin SDK not installed; secret scan rejects service-account shapes and `GOCSPX-` |
+| Scopes limited to identity | `DONE` | `openid profile email` only, asserted against the source by test |
+| Free tier only, no billing | `DONE` | [`FIREBASE_FREE_TIER.md`](FIREBASE_FREE_TIER.md) — auth only; no Firestore, Storage or Functions |
+| **Real production login** | `PENDING` | everything is configured; one real sign-in remains | owner or maintainer signs in once |
 | MFA for Platform Ops | `BLOCKED_EXTERNAL` | not enforceable by this application | enforce at the provider |
 
 ## 4. Money
@@ -181,7 +184,7 @@ Run `pnpm release:check` for the mechanical half of this page.
 
 | Requirement | Status | Action |
 | --- | --- | --- |
-| Privacy policy | `NOT_DONE` | ⚖ draft and review; must match [`PRIVACY_AND_RETENTION.md`](../security/PRIVACY_AND_RETENTION.md) |
+| Privacy policy | `PARTIAL` | published at `/privacy`, and its Google/Firebase section matches the implementation (asserted by test) | ⚖ full legal review |
 | Terms of service | `NOT_DONE` | ⚖ legal |
 | Cancellation and refund terms | `NOT_DONE` | ⚖ business decision, then implement |
 | Prohibited parcel categories notice | `NOT_DONE` | ⚖ business and legal |

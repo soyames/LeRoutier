@@ -171,7 +171,9 @@ the legacy apps exactly as before.
 Attaching `https://leroutier.bj` requires no code change and no rebuild:
 
 1. attach the domain to the `le-routier` Vercel project;
-2. add `https://leroutier.bj/auth/callback` to `OIDC_REDIRECT_URIS`, and to the
+2. add `leroutier.bj` to the Firebase authorized-domain list. There is no
+   redirect URI to register: the sign-in flow is same-origin, so the domain is
+   the only thing Firebase needs to know about.
    provider's registered redirect URIs.
 
 That is the whole list. `VITE_API_URL=same-origin` follows the new domain

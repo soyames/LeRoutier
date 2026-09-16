@@ -18,6 +18,13 @@ test-results/
 *.key
 # Credential exports must never enter this repository.
 leroutier-db.txt
+# Provider credential exports: Firebase service accounts and Google OAuth
+# clients. Named by their own download patterns so a file dragged in from
+# Downloads cannot be committed by a routine `git add -A`.
+*firebase-adminsdk*.json
+client_secret_*.json
+*service-account*.json
+.fb-*
 
 # local databases / caches
 *.sqlite

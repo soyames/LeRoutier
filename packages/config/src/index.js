@@ -7,14 +7,35 @@
  * eventually disagree, and the one that disagreed would be the one deciding
  * whether sign-in works.
  */
+/**
+ * Google's public keys for Firebase ID tokens. Fixed by Firebase's design, the
+ * same for every project on earth, and therefore a constant rather than a
+ * setting — one fewer value anybody can mistype.
+ */
+export const FIREBASE_JWKS_URL =
+  'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
+
 export function authConfig(env = process.env) {
+  const projectId = env.FIREBASE_PROJECT_ID;
   return {
     demoLogin: env.ALLOW_DEMO_LOGIN === 'true' && !env.VERCEL && env.NODE_ENV !== 'production',
-    issuer: env.AUTH_ISSUER, audience: env.AUTH_AUDIENCE, jwksUrl: env.AUTH_JWKS_URL,
-    oidcClientId: env.OIDC_CLIENT_ID,
-    oidcScope: env.OIDC_SCOPE || 'openid profile',
-    oidcResource: env.OIDC_RESOURCE,
-    oidcRedirectUris: (env.OIDC_REDIRECT_URIS || '').split(',').map(s => s.trim()).filter(Boolean),
+    firebaseProjectId: projectId,
+    // Issuer, audience and key set are **derived** from the project id, never
+    // entered by hand. Firebase fixes all three, and a mistyped issuer or
+    // audience is exactly the mistake that makes a verifier accept another
+    // project's tokens. One variable cannot disagree with itself.
+    issuer: projectId ? `https://securetoken.google.com/${projectId}` : undefined,
+    audience: projectId,
+    jwksUrl: projectId ? FIREBASE_JWKS_URL : undefined,
+    // The browser-facing Firebase identifiers. Public by design — they appear
+    // in every Firebase web app's source — but served at runtime rather than
+    // built in, so rotating them is an API change and not a rebuild.
+    firebaseWeb: {
+      apiKey: env.FIREBASE_API_KEY,
+      authDomain: env.FIREBASE_AUTH_DOMAIN,
+      projectId,
+      appId: env.FIREBASE_APP_ID,
+    },
   };
 }
 
@@ -192,14 +213,30 @@ export function firstMilePolicy(env = process.env) {
   };
 }
 
+/**
+ * What the browser is told about signing in.
+ *
+ * Only the four Firebase web identifiers, which are public by design, and the
+ * providers that are actually offered. No server-side value, no key material,
+ * and nothing derived from a service account has any business here.
+ *
+ * Incomplete configuration publishes `firebase: null` rather than something
+ * half-working: a sign-in button that cannot finish is worse than no button,
+ * because the user only discovers it after committing to the attempt.
+ */
 export function publicAuthConfig(config) {
-  let oidc=null;
-  try {
-    if(config.issuer && config.jwksUrl && config.audience && config.oidcClientId && config.oidcRedirectUris?.length &&
-      [config.issuer,config.jwksUrl,...config.oidcRedirectUris].every(value=>new URL(value).protocol==='https:')) {
-      oidc={authority:config.issuer,clientId:config.oidcClientId,scope:config.oidcScope || 'openid profile',
-        resource:config.oidcResource,redirectUris:config.oidcRedirectUris};
-    }
-  } catch { /* Incomplete or invalid production login configuration stays unavailable. */ }
-  return {demoLogin:config.demoLogin,oidc};
+  const web = config.firebaseWeb ?? {};
+  const complete = Boolean(config.firebaseProjectId && web.apiKey && web.authDomain && web.appId);
+  return {
+    demoLogin: config.demoLogin,
+    firebase: complete
+      ? {
+        apiKey: web.apiKey, authDomain: web.authDomain,
+        projectId: web.projectId, appId: web.appId,
+        // Identity and basic profile only. Nothing here asks for Gmail,
+        // Drive, Calendar or Contacts, and the privacy policy says so.
+        providers: ['google'],
+      }
+      : null,
+  };
 }

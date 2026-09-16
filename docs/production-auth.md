@@ -1,53 +1,20 @@
-# Production identity and provisioning
+# Identity mapping and provisioning
 
 LeRoutier keeps one shared API and PostgreSQL domain. Identity proof comes from
-an OIDC provider; authorization comes from the database on every request.
-No provider has been selected or configured by this change. Missing settings
-disable production sign-in and authenticated API operations fail closed.
-Demo login remains forbidden on Vercel and whenever NODE_ENV is production.
+Firebase Authentication; **authorization comes from the database on every
+request**. Missing configuration disables production sign-in and authenticated
+API operations fail closed. Demo login remains forbidden on Vercel and whenever
+NODE_ENV is production.
 
 ## Provider setup
 
-Register a **public browser client**, Authorization Code with mandatory PKCE S256,
-without a client secret. The provider must issue RS256 or ES256 **JWT access
-tokens** for the API audience; opaque access tokens are not supported. ID tokens
-are consumed by the OIDC client, never used as API credentials. Enable token
-endpoint CORS for the exact frontend origins. Use a distinct API audience from
-the browser client ID. Configure the provider to issue short-lived access tokens.
+Moved. Firebase Authentication and Google Sign-In are configured in
+[`operations/AUTH_PRODUCTION_SETUP.md`](operations/AUTH_PRODUCTION_SETUP.md),
+which is the single source for provider configuration.
 
-Set these names on the **API project**, separately for Preview and Production:
-
-| Variable | Required value |
-| --- | --- |
-| AUTH_ISSUER | Exact HTTPS issuer, including any trailing slash |
-| AUTH_JWKS_URL | Provider's HTTPS public signing-key endpoint |
-| AUTH_AUDIENCE | API resource identifier accepted in access-token aud |
-| OIDC_CLIENT_ID | Public browser application's registered client ID |
-| OIDC_SCOPE | Provider-supported scopes, including openid; default openid profile |
-| OIDC_RESOURCE | Optional standards-based resource parameter, when required by provider |
-| OIDC_REDIRECT_URIS | Comma-separated exact HTTPS app origins plus /auth/callback |
-
-Register each callback with the provider. Register each app origin plus `/` as
-an allowed post-logout URL. Configure all three frontend origins in the existing
-CORS_ORIGINS. Preview URLs need explicit registration; no wildcard callback
-policy is introduced. Local OIDC testing can use locally trusted HTTPS origins;
-the browser tests use an intercepted provider with ephemeral test-only keys.
-No invented provider endpoints belong in a deployment.
-
-Keep DATABASE_URL and CORS_ORIGINS on the API project and VITE_API_URL on the three
-frontend projects. No identity or database secret belongs in frontend env files
-or VITE variables. `/auth/config` exposes only the public OIDC configuration.
-Current Vercel Root Directories and SPA rewrites are unchanged; `/auth/callback`
-is handled by the common provider before application routing starts.
-
-The browser uses oidc-client-ts for state correlation, code exchange and PKCE.
-Temporary state is held in sessionStorage and removed after the callback. Tokens
-remain in memory; a page reload requires sign-in again (the provider may reuse
-its SSO session). No silent refresh or persistent refresh token is enabled.
-Expiry clears the local session. Sign-out always clears local identity and cached
-API data, and uses the provider's end-session endpoint when available, without
-putting token hints in URLs. Providers requiring an ID-token logout hint may keep
-their SSO session; the local LeRoutier session is still closed.
+What matters here is the half that does not change with the provider: a
+verified subject becomes a LeRoutier identity, and LeRoutier decides what that
+identity may do.
 
 ## Mapping and authorization
 
@@ -55,7 +22,7 @@ The API verifies signature, algorithm, issuer, audience, expiry, required exp/ia
 sub claims and nbf when present. A verified subject maps to users.auth_subject;
 users.auth_issuer pins it to the configured issuer. Repeated and concurrent first
 login creates one Passenger user and passenger_profile. Display name and phone
-come from explicit profile completion; JWT role/operator claims are ignored.
+come from explicit profile completion; token role/operator claims are ignored.
 An existing identity without a matching issuer is rejected, never silently linked.
 If migrating existing non-demo accounts, a database administrator must first
 verify their issuer/subject mappings; this release does not guess them.
@@ -85,7 +52,9 @@ Never paste credentials into a command, terminal output or documentation.
 
 Obtain the initial person's **verified subject** from the chosen provider. In an
 ignored local environment file set the BOOTSTRAP_* names listed in .env.example,
-alongside the intended DATABASE_URL, DATABASE_SCHEMA and AUTH_ISSUER. Set
+alongside the intended DATABASE_URL, DATABASE_SCHEMA and FIREBASE_PROJECT_ID —
+the issuer the first identity is pinned to is derived from the project id by the
+same code the API uses, so it cannot be typed differently here. Set
 BOOTSTRAP_CONFIRM to `provision-first-operator` after reviewing the target.
 Run `pnpm db:bootstrap`. It logs success/failure only, without identifiers.
 
@@ -152,5 +121,5 @@ sign-in across the three deployed callback URLs remains an operator rollout chec
 once valid provider settings and initial identities are available.
 
 References: [OIDC Core](https://openid.net/specs/openid-connect-core-1_0.html),
-[oidc-client-ts](https://authts.github.io/oidc-client-ts/),
+the Firebase Web SDK,
 [jose JWT verification](https://github.com/panva/jose/blob/main/docs/jwt/verify/functions/jwtVerify.md).

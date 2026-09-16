@@ -26,10 +26,10 @@ can see it.
 
 | Data | Why it exists | Retention today | Who can read it |
 | --- | --- | --- | --- |
-| OIDC subject + issuer | to recognise a returning person | life of the account | the person; Platform Ops |
+| Firebase subject + issuer | to recognise a returning person | life of the account | the person; Platform Ops |
 | Display name | to address people, and for manifests | life of the account | the person; their operator when travelling; Platform Ops |
 | Phone number | boarding contact, parcel coordination | life of the account | the person; the operator for a relevant journey or parcel; Platform Ops |
-| Session token | to stay signed in | **memory only — never stored** | nobody |
+| Session token | to stay signed in | **session-scoped, cleared with the tab** | nobody |
 | Booking, segments, seat | the reservation itself | **⚖ LEGAL REVIEW** — indefinite today | the passenger; their operator; Platform Ops |
 | Ticket QR token | to board without a paper ticket | until the service completes | the passenger; scanning crew |
 | Boarding / alighting events | manifest truth and capacity release | with the booking | the operator; Platform Ops |
@@ -90,7 +90,7 @@ that interacts with an erasure request is **⚖ LEGAL REVIEW**.
 | FedaPay | the amount, currency and a LeRoutier reference needed to take a payment | journey details, parcel contents, location |
 | Gozem | **nothing.** The handoff is a link the passenger chooses to follow | LeRoutier sends no booking, no identity, no position |
 | OpenStreetMap / CARTO | tile requests from the user's browser, as any map does | no LeRoutier identifier is attached |
-| OIDC provider | authentication, by definition | no travel, parcel or payment data |
+| Google / Firebase Authentication | authentication and basic profile only — identity, name, email | no travel, parcel or payment data; LeRoutier requests no Gmail, Drive, Calendar or Contacts scope |
 | Neon, Vercel | infrastructure processors | — |
 
 Gozem is worth restating because it is easy to assume otherwise: LeRoutier

@@ -38,7 +38,7 @@ compromise is modelled as an event, not prevented here.
 
 ## Assets
 
-**Identity** (OIDC subject bindings, sessions, agent tokens) ·
+**Identity** (Firebase subject bindings, sessions, agent tokens) ·
 **Passenger PII** (name, phone) · **Crew PII** (licence, phone) ·
 **Location** (vehicle GPS history, passenger first-mile position) ·
 **Parcel parties** (sender, receiver, pickup codes) ·
@@ -55,10 +55,10 @@ make every other compromise invisible.
 
 | # | Threat | Sev | Like | Controls | Residual |
 | --- | --- | --- | --- | --- | --- |
-| S1 | Forged API token | Critical | Low | JWTs validated against the provider's JWKS with issuer and audience pinned; production **fails closed** when unconfigured — it never falls back to a permissive mode | Depends on the provider's key hygiene |
+| S1 | Forged API token | Critical | Low | Firebase ID tokens verified against Google's published keys, with issuer and audience pinned to this project; production **fails closed** when unconfigured | Depends on Google's key hygiene |
 | S2 | Demo login reachable in production | Critical | Low | `ALLOW_DEMO_LOGIN` defaults false; production config refuses it; browser tests assert the control is absent | Configuration error remains possible — covered by the smoke test |
-| S3 | Replayed authorization code | High | Low | Authorization Code + **PKCE**; `state` verified; a callback whose state does not match is rejected (`tests/e2e/auth.spec.js`) | — |
-| S4 | Token theft from browser storage | High | Low | Tokens are held **in memory only** — never `localStorage`, never a cookie; a sign-out clears privileged data (tested) | XSS during a live session still reaches the in-memory token; CSP is the mitigation |
+| S3 | Replayed authorization code | High | Low | The OAuth exchange is performed by Firebase against Google; LeRoutier never handles an authorization code | Moved to Google |
+| S4 | Token theft from browser storage | High | Low | Session-scoped persistence only — never `localStorage`; sign-out is asserted to leave nothing behind | XSS during a live session still reaches the token; CSP is the mitigation |
 | S5 | Stolen agent token | High | Low | Tokens stored only as SHA-256 digests; scoped; operator-bound; deactivatable; every use audited | No automatic rotation yet — **open** |
 | S6 | Agent impersonating a human | High | Very low | Agent principals are a distinct identity type and can never be an Ops user; approvals execute under the deciding human's identity | — |
 | S7 | Subject rebound to another issuer | Critical | Very low | A known subject cannot be re-bound to a different issuer (`provisioning.test.js`) | — |
@@ -145,12 +145,24 @@ Open items are tracked in
 [`../operations/MASTER_PRODUCT_COMPLETION.md`](../operations/MASTER_PRODUCT_COMPLETION.md)
 §22–§28 and §33–§34.
 
+### Identity provider
+
+Google, through Firebase Authentication, decides **who** somebody is. LeRoutier
+decides **what they may do**, from its own database, and reads only `sub` and
+`iss` from a token. A custom claim, an email address or a Google Workspace
+domain grants nothing — tested.
+
+LeRoutier holds **no service-account credential**: verification uses Google's
+public keys, so there is no key to steal from this system. A Google outage makes
+new sign-ins impossible; it cannot forge one.
+
 ## Trust boundaries
 
 1. **Browser → API.** Everything from the browser is untrusted, including the
    fields of an authenticated user's own request.
 2. **API → database.** The API holds the only database credential.
 3. **Provider → API.** FedaPay is trusted **only** through a valid signature.
+   Google is trusted **only** through a token its published keys verify.
 4. **Agent → API.** A scoped, operator-bound, auditable client.
 5. **Repository → deployment.** CI holds no production credential; the
    production database URL is a write-only Vercel variable on the API project.
@@ -161,8 +173,8 @@ Ranked by consequence rather than likelihood, these are the failures worth
 spending the next increment of effort on:
 
 1. **A compromised Platform Ops identity.** It is the widest privilege and has
-   no second factor enforced by this system. Provider-side MFA is the control,
-   and it is outside the application — carried as an external dependency.
+   no second factor enforced by this system. Google account security — including
+   2-step verification — is the control, and it sits with the account holder.
 2. **Database credential compromise.** It bypasses every application control,
    including the audit log. Custody and rotation are the only mitigations.
 3. **Provider key compromise.** Valid signatures would forge payment success at
