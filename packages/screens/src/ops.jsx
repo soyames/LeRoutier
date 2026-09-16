@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
-import { Card, Badge, StatCard, SectionTitle, ApiState } from '@leroutier/ui';
+import { Card, Badge, StatCard, SectionTitle, ApiState, ErrorState, SkeletonCards } from '@leroutier/ui';
 import { status, fcfa } from '@leroutier/ui';
 import { Provisioning } from './provisioning.jsx';
+// Leaflet loads only when an operator actually opens a map.
+const TransportMap = lazy(() => import('./map.jsx'));
 import { BusFront, Armchair, Radio, ShieldAlert, WalletCards, ShieldCheck, Package, MapPin, Home, Users, Check } from 'lucide-react';
 
 // Ops screens are mounted at /ops/* in the unified app and at /* in the legacy
@@ -115,6 +117,54 @@ export function Today(){
   </>;
 }
 
+// Live fleet: the active services of this operator only. Position, freshness,
+// progress, next stop and a confirmed deviation — the operational picture.
+// A company never sees another operator's vehicles: the API scopes the query.
+function FleetTracking(){
+  const {user}=useSession();
+  const fleet=useApi(user?.role==='ops'?'/ops/fleet-tracking':null);
+  const [selected,setSelected]=useState(null);
+  if(fleet.loading) return <SkeletonCards count={1} lines={3}/>;
+  if(fleet.error) return <ErrorState text="Impossible de charger le suivi de la flotte." onRetry={fleet.reload}/>;
+  const active=fleet.data||[];
+  if(!active.length) return <Card className="stack"><strong>Aucun service en circulation</strong>
+    <p className="small muted">Le suivi apparaît dès qu’un service est en cours.</p></Card>;
+  const current=active.find(s=>s.serviceId===selected)??active[0];
+  const SIGNAL={live:['Suivi en direct','success'],delayed:['Signal retardé','warning'],
+    stale:['Dernière position connue','warning'],unavailable:['Pas de signal','neutral']};
+  return <div className="stack">
+    {active.map(service=>{
+      const [label,tone]=SIGNAL[service.signal]??SIGNAL.unavailable;
+      return <Card key={service.serviceId} className="stack">
+        <div className="between wrap">
+          <div>
+            <strong>{service.stops?.[0]?.city} → {service.stops?.at(-1)?.city}</strong>
+            {service.nextStop && <span className="small muted"> · prochain arrêt {service.nextStop.city}</span>}
+          </div>
+          <div className="end">
+            <Badge tone={tone}>{label}</Badge>
+            {/* Only a sustained, accuracy-checked deviation is surfaced. */}
+            {service.offRoute && <Badge tone="danger">Hors itinéraire</Badge>}
+          </div>
+        </div>
+        <div className="summary">
+          {service.progress && <div className="row"><span>Progression</span>
+            <span>{Math.round(service.progress.fraction*100)} % · {Math.round(service.progress.remainingM/1000)} km restants</span></div>}
+          {service.signalAgeSeconds!==null && <div className="row"><span>Dernière position</span>
+            <span>il y a {service.signalAgeSeconds<60?`${service.signalAgeSeconds} s`:`${Math.round(service.signalAgeSeconds/60)} min`}</span></div>}
+          {!service.route?.available && <div className="row"><span>Itinéraire routier</span><span>non généré</span></div>}
+        </div>
+        {service.position && service.route?.available &&
+          <button className="btn btn-soft" onClick={()=>setSelected(service.serviceId)}>Voir sur la carte</button>}
+      </Card>;
+    })}
+    {current?.position && current?.route?.available && <Suspense fallback={<SkeletonCards count={1} lines={4}/>}>
+      <TransportMap route={current.route.coordinates} progressFraction={current.progress?.fraction??null}
+        vehicle={current.position} stops={current.stops??[]} ariaLabel="Carte de la flotte en circulation"/>
+    </Suspense>}
+  </div>;
+}
+
 export function Services(){
   const {user,request,online}=useSession();
   const fleet=useApi(user?'/ops/fleet':null);
@@ -123,6 +173,8 @@ export function Services(){
   async function act(path,body){setError('');setNotice('');try{await request(path,{method:'POST',body});fleet.reload();setNotice('Action enregistrée.');}catch(e){setError(e.message);}}
   const services=fleet.data?.services||[];
   return <>
+    <SectionTitle icon={Radio} title="Flotte en circulation"/>
+    <FleetTracking/>
     <SectionTitle icon={Radio} title="Services & lignes"/>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {fleet.loading || fleet.error || !services.length ? <ApiState resource={fleet} empty="Aucun service publié. Créez une ligne et un service dans Paramètres → Administration, ou ajoutez ici votre premier service."/> : services.map(s=><Card key={s.id} className="stack"><div className="between"><div><h3>{s.registration || 'Sans affectation'}</h3><span className="small muted">{s.driver_name || 'Sans conducteur'} · {s.route_name} · {new Date(s.departure_at).toLocaleString('fr-FR')}</span></div><Badge tone={status('service',s.status).tone}>{status('service',s.status).label}</Badge></div>

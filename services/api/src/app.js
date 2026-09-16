@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DomainError, invariant, uuid } from '@leroutier/domain';
 import { transport } from '@leroutier/database/transport';
-import { validatePosition } from '@leroutier/geo';
+import { validateVehiclePosition } from '@leroutier/geo';
 import { enqueue } from '@leroutier/notifications';
 import { authentication } from './auth.js';
 import { publicAuthConfig } from '@leroutier/config';
@@ -20,6 +20,9 @@ import { walkUpBookings } from '@leroutier/database/walkup';
 import { notificationPolicies } from '@leroutier/database/notifications';
 import { mobility } from '@leroutier/database/mobility';
 import { journeys } from '@leroutier/database/journeys';
+import { tracking } from '@leroutier/database/tracking';
+import { routeGeometry } from '@leroutier/database/route-geometry';
+import { createRouter } from '@leroutier/routing';
 import { paymentAdapter } from './payment-adapter.js';
 import { authenticate as authenticateAgent, catalog, createActions, createWorkflowEngine } from '@leroutier/agents';
 
@@ -31,6 +34,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const earn=earnings(db),payout=payouts(db,adapter,config),recover=recovery(db),parcel=parcels(db);
   const onboard=onboarding(db),loc=locations(db),settle=operatorSettlements(db,adapter),walkUp=walkUpBookings(db);
   const notify=notificationPolicies(db,config),rides=mobility(db),journey=journeys(db,config);
+  const router=createRouter(config),geometry=routeGeometry(db,router),track=tracking(db,config);
   const actions=createActions({db,domain,payments:pay,payouts:payout,recovery:recover,parcels:parcel});
   const workflows=createWorkflowEngine({db,actions,onEvent:(tx,event)=>notify.dispatchEvent(tx,event)});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
@@ -317,6 +321,11 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='POST' && path==='/mobility/handoff') return rides.recordHandoff(actor,await body());
     // Journey timeline: derived from real booking/service/boarding-point state.
     // localTravelMinutes is an optional client-side estimate and is never stored.
+    // Live vehicle tracking for the passenger's own journey: road geometry,
+    // latest position, progress, next stop and an arrival estimate aimed at
+    // their alighting stop rather than the end of the line.
+    const journeyTracking=path.match(/^\/journeys\/([^/]+)\/tracking$/);
+    if(method==='GET' && journeyTracking) return track.forBooking(actor,journeyTracking[1]);
     const timeline=path.match(/^\/journeys\/([^/]+)\/timeline$/);
     if(method==='GET' && timeline) {
       const travel=url.searchParams.get('localTravelMinutes');
@@ -344,7 +353,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
         JOIN places p ON p.id=s.place_id WHERE ss.service_id=$1 ORDER BY sequence`,[rows[0].id]);
       return {...rows[0],stops};
     }
-    const service=path.match(/^\/services\/([^/]+)\/(manifest|advance|positions|status|recovery|schedule)$/);
+    const service=path.match(/^\/services\/([^/]+)\/(manifest|advance|positions|status|recovery|schedule|tracking)$/);
     if(service) {
       const id=uuid(service[1]),action=service[2];
       if(method==='GET' && action==='manifest') return domain.manifest(actor,id);
@@ -355,18 +364,30 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
         return (await tx.query('SELECT latitude,longitude,observed_at FROM vehicle_positions WHERE service_id=$1 ORDER BY observed_at DESC LIMIT 1',[id])).rows[0] || null;
       });
       if(method==='POST' && action==='positions') {
-        const input=validatePosition(await body());
+        const input=validateVehiclePosition(await body());
         return db.transaction(async tx=>{
-          await domain.authorizeService(tx,actor,id);
+          const service=await domain.authorizeService(tx,actor,id);
+          // A vehicle only reports while it is actually running a service.
+          invariant(['scheduled','active','disrupted'].includes(service.status),
+            'SERVICE_CLOSED','This service is no longer tracking its vehicle.',409);
           const previous=(await tx.query('SELECT observed_at FROM vehicle_positions WHERE service_id=$1 ORDER BY observed_at DESC LIMIT 1',[id])).rows[0];
           invariant(!previous || new Date(input.observedAt)>new Date(previous.observed_at),'STALE_POSITION','A newer position is already stored.',409);
           const assignment=(await tx.query('SELECT vehicle_id FROM service_assignments WHERE service_id=$1 AND ended_at IS NULL',[id])).rows[0];
-          const result=await tx.query(`INSERT INTO vehicle_positions(service_id,vehicle_id,actor_id,latitude,longitude,observed_at)
-            VALUES($1,$2,$3,$4,$5,$6) RETURNING latitude,longitude,observed_at`,[id,assignment.vehicle_id,actor.id,input.latitude,input.longitude,input.observedAt]);
+          // Without an active assignment there is no vehicle to attribute the
+          // position to; this previously threw and returned a 500.
+          invariant(assignment?.vehicle_id,'NO_ASSIGNMENT','No vehicle is assigned to this service.',409);
+          const result=await tx.query(`INSERT INTO vehicle_positions(service_id,vehicle_id,actor_id,latitude,longitude,observed_at,accuracy_m,speed_mps,heading_deg,source)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING latitude,longitude,observed_at`,
+          [id,assignment.vehicle_id,actor.id,input.latitude,input.longitude,input.observedAt,
+            input.accuracyM,input.speedMps,input.headingDeg,input.source]);
           await tx.query('INSERT INTO outbox(event_type,aggregate_id,payload) VALUES($1,$2,$3)',['service.position',id,JSON.stringify({serviceId:id,observedAt:input.observedAt})]);
           return result.rows[0];
         });
       }
+      // Route geometry, live position, progress, next stop and arrival estimate
+      // for crew and operations. Passengers use /journeys/:bookingId/tracking,
+      // which is scoped to their own booking and their own alighting stop.
+      if(method==='GET' && action==='tracking') return track.forService(actor,id,domain.authorizeService);
       if(method==='POST' && action==='status') {
         const input=await body();
         return db.transaction(async tx=>{
@@ -391,6 +412,14 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     }
     // Operational diagnostics: machine-readable counts for the Ops console.
     // Counts only — no party data, no secrets, no mutation. Ops-auth required.
+    // Live fleet for operations, scoped to the caller's own operator.
+    if(method==='GET' && path==='/ops/fleet-tracking') return track.fleet(actor);
+    // Road geometry for a route: read it, or ask the engine to (re)generate it.
+    const routeGeom=path.match(/^\/routes\/([^/]+)\/geometry$/);
+    if(routeGeom) {
+      if(method==='GET') return geometry.read(routeGeom[1]);
+      if(method==='POST') return geometry.generate(actor,routeGeom[1],{force:(await body()).force===true});
+    }
     if(method==='GET' && path==='/ops/diagnostics') {
       invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
       return db.transaction(async tx=>{
