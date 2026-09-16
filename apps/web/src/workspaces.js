@@ -11,16 +11,19 @@ export function workspacesFor(user) {
   // Anyone with an account can travel: the passenger workspace is universal.
   const available = [{ id: PASSENGER, label: 'Voyageur', hint: 'Rechercher, réserver, suivre', path: '/trips' }];
   const independent = user.role === 'driver' && user.operator_type === 'independent' && user.owner_user_id === user.id;
+  // Workspaces are named after the job and the company, never after a role
+  // string: "Conducteur — Baobab Express", not "driver".
+  const company = user.operator_name ? ` — ${user.operator_name}` : '';
   if (user.role === 'driver' || user.role === 'convoyeur') {
     available.push({
       id: WORK,
-      label: user.role === 'convoyeur' ? 'Convoyeur' : independent ? 'Mon activité' : 'Conduite',
-      hint: user.role === 'convoyeur' ? 'Manifeste, colis, comptant'
+      label: user.role === 'convoyeur' ? `Convoyeur${company}` : independent ? 'Mon activité de transport' : `Conducteur${company}`,
+      hint: user.role === 'convoyeur' ? 'Manifeste, colis, encaissement'
         : independent ? 'Service, recettes, retraits' : 'Service assigné',
       path: '/work/today',
     });
   }
-  if (user.role === 'ops') available.push({ id: OPS, label: 'Exploitation', hint: 'Services, flotte, équipage', path: '/ops/today' });
+  if (user.role === 'ops') available.push({ id: OPS, label: `Exploitation${company}`, hint: 'Services, flotte, équipage', path: '/ops/today' });
   return available;
 }
 

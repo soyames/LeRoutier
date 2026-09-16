@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useApi, useSession } from '@leroutier/config/client';
 import { Card, Badge, SectionTitle, ApiState, EmptyState } from '@leroutier/ui';
-import { Bell, BellOff, ShieldCheck } from 'lucide-react';
+import { Bell, BellOff, ShieldCheck, Bus, Package as PackageIcon, Wallet, TriangleAlert } from 'lucide-react';
 
 // One notification centre for every workspace. Content is role-aware because
 // the API only ever returns notifications addressed to the caller's identity —
@@ -50,6 +50,18 @@ const TEMPLATES = {
 };
 const tone = severity => (severity === 'urgent' ? 'danger' : severity === 'warning' ? 'warning' : 'neutral');
 const when = value => new Date(value).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+const clock = value => new Date(value).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+// A notification belongs to a subject the user recognises, never to a backend
+// event name.
+const SUBJECTS = {
+  booking: { label: 'Voyage', icon: Bus }, service: { label: 'Voyage', icon: Bus },
+  parcel: { label: 'Colis', icon: PackageIcon }, payout: { label: 'Argent', icon: Wallet },
+  incident: { label: 'Exploitation', icon: TriangleAlert }, boarding_point: { label: 'Exploitation', icon: TriangleAlert },
+  none: { label: 'Information', icon: Bell },
+};
+const subjectOf = notification => SUBJECTS[notification.entityType] ?? SUBJECTS.none;
+const isToday = value => new Date(value).toDateString() === new Date().toDateString();
 
 // Deep-link target for a notification's related entity.
 export function notificationTarget(notification) {
@@ -83,24 +95,30 @@ export function NotificationCentre({ onOpen }) {
     {notifications.loading || notifications.error ? <ApiState resource={notifications} empty=""/>
       : !notifications.data?.length
         ? <EmptyState icon={BellOff} title="Aucune notification" text="Vos alertes de voyage, de paiement et de service apparaîtront ici."/>
-        : <div className="stack">{notifications.data.map(n => <button key={n.id} type="button"
-          className={`note-row ${n.read ? '' : 'unread'} ${n.severity === 'urgent' ? 'urgent' : ''}`}
-          onClick={() => open(n)} disabled={busy === n.id || !online}>
-          <Bell size={17}/>
-          <div>
-            <div className="between wrap">
-              <strong className="small">{TEMPLATES[n.template] ?? n.template}</strong>
-              <Badge tone={tone(n.severity)}>{n.category === 'critical' ? 'essentiel' : n.category === 'marketing' ? 'info' : 'opérationnel'}</Badge>
-            </div>
-            <span className="small muted">{when(n.createdAt)}</span>
-            {n.data?.departureAt && <span className="small muted"> · départ {new Date(n.data.departureAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</span>}
-            {n.data?.boardingPointName && <span className="small muted"> · {n.data.boardingPointName}</span>}
-            {n.data?.trackingNumber && <span className="small muted"> · {n.data.trackingNumber}</span>}
-            {/* Honest channel state: an unconfigured provider is shown as such. */}
-            {n.channels && Object.entries(n.channels).some(([c, s]) => c !== 'in_app' && s === 'unavailable') &&
-              <span className="small muted"> · envoi externe indisponible</span>}
-          </div>
-        </button>)}</div>}
+        : <>{[['Aujourd’hui', notifications.data.filter(n => isToday(n.createdAt))],
+          ['Plus tôt', notifications.data.filter(n => !isToday(n.createdAt))]]
+          .filter(([, rows]) => rows.length)
+          .map(([heading, rows]) => <div className="stack" key={heading}>
+            <span className="eyebrow">{heading}</span>
+            {rows.map(n => { const subject = subjectOf(n); const Icon = subject.icon; return <button key={n.id} type="button"
+              className={`note-row ${n.read ? '' : 'unread'} ${n.severity === 'urgent' ? 'urgent' : ''}`}
+              onClick={() => open(n)} disabled={busy === n.id || !online}>
+              <Icon size={17}/>
+              <div>
+                <div className="between wrap">
+                  <strong className="small">{TEMPLATES[n.template] ?? subject.label}</strong>
+                  {n.severity !== 'info' && <Badge tone={tone(n.severity)}>{n.severity === 'urgent' ? 'à traiter' : 'attention'}</Badge>}
+                </div>
+                <span className="small muted">{subject.label} · {isToday(n.createdAt) ? clock(n.createdAt) : when(n.createdAt)}</span>
+                {n.data?.departureAt && <span className="small muted"> · départ {clock(n.data.departureAt)}</span>}
+                {n.data?.boardingPointName && <span className="small muted"> · {n.data.boardingPointName}</span>}
+                {n.data?.trackingNumber && <span className="small muted"> · {n.data.trackingNumber}</span>}
+                {/* Honest channel state: an unconfigured provider is shown as such. */}
+                {n.channels && Object.entries(n.channels).some(([c, s]) => c !== 'in_app' && s === 'unavailable') &&
+                  <span className="small muted"> · envoi externe indisponible</span>}
+              </div>
+            </button>; })}
+          </div>)}</>}
     <NotificationPreferences/>
   </div>;
 }

@@ -5,14 +5,14 @@ const apps = [
   {
     name: 'passenger', port: 4173, role: 'Voyageur', title: 'Voyageur',
     routes: [
-      ['/', 'Voyagez entre les villes du Bénin, simplement.'],
-      ['/trips', 'Départs disponibles'],
+      ['/', 'Trouvez votre départ.'],
+      ['/trips', 'Trouvez votre départ.'],
       ['/tickets', 'Mes billets'],
-      ['/stations', "Gares & points d'arrêt"],
+      ['/stations', 'Gares & points d’arrêt'],
       ['/tracking', 'Suivi de mon trajet'],
       ['/account', 'Mon compte'],
     ],
-    nav: ['Billets', '/tickets', 'Trajets', '/trips'],
+    nav: ['Billets', '/tickets', 'Colis', '/parcels'],
   },
   {
     name: 'driver', port: 4174, role: 'Chauffeur', title: 'Chauffeur',
