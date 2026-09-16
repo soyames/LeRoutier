@@ -172,6 +172,32 @@ export function agentAutonomy(env = process.env) {
 export const PROVIDERS = ['gemini', 'openrouter', 'local'];
 
 /**
+ * A Google Application Default Credentials document, as one value.
+ *
+ * The credential is stored whole rather than split into three variables. Three
+ * parts can be two-thirds configured — a rotation that updates the secret and
+ * forgets the refresh token leaves something that looks configured and fails on
+ * every call. A single JSON value is atomic: it is either the credential or it
+ * is nothing.
+ *
+ * Only `authorized_user` is accepted. A `service_account` document here would
+ * mean a private key sitting in an environment variable, which is precisely the
+ * shape this design exists to avoid.
+ *
+ * Never throws. It is called while the API is being constructed, where a
+ * malformed value must leave the model unavailable, not stop the server.
+ */
+export function googleCredential(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return {};
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return {}; }
+  if (!parsed || typeof parsed !== 'object' || parsed.type !== 'authorized_user') return {};
+  const { client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken } = parsed;
+  if (!clientId || !clientSecret || !refreshToken) return {};
+  return { clientId, clientSecret, refreshToken, quotaProjectId: parsed.quota_project_id };
+}
+
+/**
  * Model provider configuration.
  *
  * `AGENT_MODEL_PROVIDER` selects; an unrecognised value selects nothing rather
@@ -186,6 +212,7 @@ export function modelConfig(env = process.env) {
   // a situation is sent, so it is never inferred from a key being present.
   const fallbackProvider = named(env.AGENT_MODEL_FALLBACK_PROVIDER);
   const oauthGemini = !env.GEMINI_AUTH_MODE || env.GEMINI_AUTH_MODE === 'oauth';
+  const adc = oauthGemini ? googleCredential(env.GOOGLE_GEMINI_CREDENTIALS) : {};
   // Bounds the whole completion, retry ladder included. Measured free-tier
   // latency runs from 2 s to 49 s, so this is the point at which LeRoutier
   // decides a recommendation is not coming and carries on without one.
@@ -204,18 +231,17 @@ export function modelConfig(env = process.env) {
     gemini: {
       // OAuth is the only authentication LeRoutier implements for Gemini, so
       // GEMINI_AUTH_MODE exists to be checked rather than to be chosen: any
-      // other value withholds the credentials and leaves the provider
+      // other value withholds the credential and leaves the provider
       // unconfigured. Someone who sets it to `api_key` should get no model, not
       // a silently different trust model.
-      ...(oauthGemini ? {
-        clientId: env.GOOGLE_GEMINI_CLIENT_ID,
-        clientSecret: env.GOOGLE_GEMINI_CLIENT_SECRET,
-        refreshToken: env.GOOGLE_GEMINI_REFRESH_TOKEN,
-      } : {}),
+      clientId: adc.clientId,
+      clientSecret: adc.clientSecret,
+      refreshToken: adc.refreshToken,
       authMode: oauthGemini ? 'oauth' : null,
       // Quota attribution for a user OAuth credential. Google cannot tell which
-      // project's free allowance a call belongs to without it.
-      projectId: env.GOOGLE_GEMINI_PROJECT_ID,
+      // project's free allowance a call belongs to without it. The credential
+      // may name its own; an explicit setting wins.
+      projectId: env.GOOGLE_GEMINI_PROJECT_ID || adc.quotaProjectId,
       baseUrl: env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta',
       // Verified against the free tier on 2026-09-16: available on every
       // attempt, ~1.7 s median, strict JSON every time, and the model Google's

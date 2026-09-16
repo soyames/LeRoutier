@@ -27,9 +27,11 @@ if (config.provider === 'gemini') {
   console.log(`  auth mode            ${g.authMode ?? '(rejected — only oauth is implemented)'}`);
   console.log(`  endpoint             ${g.baseUrl}`);
   console.log(`  quota project        ${g.projectId ?? '(none — the call is unattributed)'}`);
-  // Presence only. The values themselves are never read out.
-  const present = name => (g[name] ? 'set' : 'MISSING');
-  console.log(`  credential           client_id ${present('clientId')}, client_secret ${present('clientSecret')}, refresh_token ${present('refreshToken')}`);
+  // Presence only. The values themselves are never read out. All three come
+  // from one GOOGLE_GEMINI_CREDENTIALS document, so "partly set" means the
+  // document was rejected rather than that somebody forgot a variable.
+  const complete = g.clientId && g.clientSecret && g.refreshToken;
+  console.log(`  credential           ${complete ? 'authorized_user document accepted' : 'MISSING or rejected — see GOOGLE_GEMINI_CREDENTIALS'}`);
   if (g.baseUrl.includes('aiplatform')) fail('the endpoint is Vertex AI, which requires a billing account.');
   if (/[?&]key=/.test(g.baseUrl)) fail('the endpoint carries an API key. Gemini is reached with OAuth only.');
 }

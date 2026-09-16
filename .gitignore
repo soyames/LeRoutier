@@ -24,6 +24,7 @@ leroutier-db.txt
 *firebase-adminsdk*.json
 client_secret_*.json
 *service-account*.json
+application_default_credentials.json
 .fb-*
 
 # local databases / caches

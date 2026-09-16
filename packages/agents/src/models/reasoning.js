@@ -71,12 +71,23 @@ export function createReasoning({ db, provider, actions = {}, budget = {} }) {
   /** Every outcome is recorded, including the ones that never reached a provider. */
   async function record(entry) {
     await db.transaction(tx => tx.query(
-      `INSERT INTO agent_model_calls(provider,task,workflow,workflow_run_id,requested_model,actual_model,status,latency_ms,input_hash,recommendation,rejection_code,fallback_from)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      `INSERT INTO agent_model_calls(provider,task,workflow,workflow_run_id,requested_model,actual_model,status,latency_ms,input_hash,recommendation,rejection_code,fallback_from,quota_exhausted,cooldown_until)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [entry.provider, entry.task, entry.workflow ?? null, entry.workflowRunId ?? null, entry.requestedModel ?? 'none',
         entry.actualModel ?? null, entry.status, entry.latencyMs ?? null, entry.inputHash,
         entry.recommendation ? JSON.stringify(entry.recommendation) : null, entry.rejectionCode ?? null,
-        entry.fallbackFrom ?? null]));
+        entry.fallbackFrom ?? null, entry.quotaExhausted === true,
+        entry.cooldownUntil ? new Date(entry.cooldownUntil).toISOString() : null]));
+  }
+
+  /**
+   * When the provider may be tried again, if it has told us.
+   * Best-effort: a provider that does not track a window, or a store that
+   * cannot be read, simply yields nothing to record.
+   */
+  async function coolingUntil() {
+    try { return provider.cooldownUntil ? await provider.cooldownUntil() : null; }
+    catch { return null; }
   }
 
   /**
@@ -128,7 +139,8 @@ export function createReasoning({ db, provider, actions = {}, budget = {} }) {
      *
      * @returns {Promise<{ available: boolean, status: string, recommendation?: object,
      *   rejection?: string, actualModel?: string|null, latencyMs?: number,
-     *   providerUsed?: string, fallbackFrom?: string|null }>}
+     *   providerUsed?: string, fallbackFrom?: string|null,
+     *   quotaExhausted?: boolean, cooldownUntil?: number|null }>}
      */
     async recommend(taskName, situation, { workflow = null, workflowRunId = null, scopes = [], operatorId = null, targetOperatorId = null } = {}) {
       const task = TASKS[taskName];
@@ -162,8 +174,15 @@ export function createReasoning({ db, provider, actions = {}, budget = {} }) {
         });
       } catch (error) {
         const reason = error instanceof ModelUnavailable ? error.reason : MODEL_REASONS.providerError;
-        await record({ ...base, status: reason === MODEL_REASONS.timeout ? 'timeout' : 'error', rejectionCode: reason });
-        return { available: false, status: reason };
+        const quotaExhausted = reason === MODEL_REASONS.rateLimited;
+        // Two vocabularies, deliberately not merged. The caller gets the reason
+        // code it has always got; the row gets the storage status. Quota is
+        // filed as `unavailable` rather than `error` because it is a capacity
+        // state that ends by itself, not a fault anyone should investigate.
+        const stored = quotaExhausted ? 'unavailable' : reason === MODEL_REASONS.timeout ? 'timeout' : 'error';
+        const cooldownUntil = quotaExhausted ? await coolingUntil() : null;
+        await record({ ...base, status: stored, rejectionCode: reason, quotaExhausted, cooldownUntil });
+        return { available: false, status: reason, quotaExhausted, cooldownUntil };
       }
 
       // Which provider actually answered, not which one was asked. A
@@ -191,10 +210,17 @@ export function createReasoning({ db, provider, actions = {}, budget = {} }) {
                 count(*) FILTER (WHERE status='rejected')::integer AS rejected,
                 count(*) FILTER (WHERE status IN ('error','timeout','unavailable'))::integer AS failed,
                 count(*) FILTER (WHERE status='suppressed')::integer AS suppressed,
+                count(*) FILTER (WHERE quota_exhausted)::integer AS quota_exhausted,
+                count(*) FILTER (WHERE fallback_from IS NOT NULL)::integer AS fallback_used,
                 max(latency_ms)::integer AS slowest_ms
          FROM agent_model_calls WHERE day=(now() AT TIME ZONE 'UTC')::date`);
       return {
         provider: provider.name, configured: provider.configured, requestedModel: provider.model ?? null,
+        fallbackProvider: provider.fallbackTo ?? null,
+        // Present and in the future means the primary is resting. Ops seeing
+        // "no recommendations today" needs to be able to tell an exhausted free
+        // tier from something broken.
+        cooldownUntil: await coolingUntil(),
         dailyBudget: limits.dailyCalls, today,
       };
     },

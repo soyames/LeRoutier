@@ -24,7 +24,7 @@ import { tracking } from '@leroutier/database/tracking';
 import { routeGeometry } from '@leroutier/database/route-geometry';
 import { createRouter } from '@leroutier/routing';
 import { paymentAdapter } from './payment-adapter.js';
-import { authenticate as authenticateAgent, catalog, createActions, createWorkflowEngine, createModelProvider, createReasoning } from '@leroutier/agents';
+import { authenticate as authenticateAgent, catalog, createActions, createWorkflowEngine, createModelProvider, createReasoning, databaseCooldownStore } from '@leroutier/agents';
 import { createUssdEngine, adapterFor as ussdAdapterFor } from '@leroutier/ussd';
 
 const API_PREFIX = '/api/v1';
@@ -47,7 +47,12 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   // unchanged, which is what keeps this an improvement rather than a dependency.
   // Validated against the real executable catalog, not a copy of it: a model
   // proposing an action LeRoutier no longer has must fail, not drift.
-  const reasoning=createReasoning({db,provider:createModelProvider(config),actions,budget:config.model?.budget});
+  // The cooldown store is shared through the database on purpose: this API is
+  // serverless, so a window remembered only in one instance is forgotten the
+  // moment it recycles, and the next cold instance calls a provider that has
+  // already refused.
+  const reasoning=createReasoning({db,actions,budget:config.model?.budget,
+    provider:createModelProvider(config,fetch,{cooldownStore:databaseCooldownStore(db)})});
   // The engine is given `reasoning`, not a provider: only the one workflow that
   // triages incidents may ask a model anything, and only through the budget,
   // projection and validation that createReasoning wraps around it.
