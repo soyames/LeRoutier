@@ -88,7 +88,10 @@ export function Today(){
       </div>
     </Card>}
     {diagnostics.data && <>
-      <div className="kpi-scroll">
+      {/* The strip scrolls sideways on a phone, so it has to be reachable by
+          keyboard — otherwise the indicators past the fold are unreachable
+          without a touchscreen. */}
+      <div className="kpi-scroll" tabIndex={0} role="group" aria-label="Indicateurs du jour">
         <StatCard label="Services aujourd’hui" value={todayServices.length} icon={Radio}/>
         <StatCard label="Paiements échoués" value={diagnostics.data.payments.failed} icon={WalletCards} tone={diagnostics.data.payments.failed?'danger':'default'}/>
         <StatCard label="Incidents ouverts" value={diagnostics.data.incidents.open} icon={ShieldAlert}/>
