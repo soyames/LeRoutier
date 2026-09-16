@@ -119,20 +119,26 @@ Run `pnpm release:check` for the mechanical half of this page.
 
 | Requirement | Status | Evidence | Action |
 | --- | --- | --- | --- |
-| OpenRouter provider implemented | `DONE` | OpenAI-compatible, behind the provider interface | — |
-| Production provider configured | `DONE` | `AGENT_MODEL_PROVIDER=openrouter` on `le-routier-api` | — |
-| **Live connectivity verified** | `DONE` | two live calls: auth accepted, valid structured output, validated against the catalog, nothing executed | — |
+| Gemini provider implemented | `DONE` | Developer API + OAuth bearer, behind the same provider interface | — |
+| Gemini authenticated without an API key | `DONE` | refresh credential → short-lived access token; no `GEMINI_API_KEY`, no `x-goog-api-key` path exists | — |
+| Production provider configured | `DONE` | `AGENT_MODEL_PROVIDER=gemini`, `GEMINI_MODEL=gemini-3.6-flash` on `le-routier-api` | — |
+| Flash model verified on the free tier | `DONE` | 3/3 available, median 1.7 s, strict JSON each time; `gemini-2.5-flash` is retired and 404s | re-check with `pnpm model:verify` before changing it |
+| **Live connectivity verified** | `DONE` | real completion with synthetic facts: 1.45–1.53 s, valid structured French, validated against the catalog, nothing executed | — |
+| OpenRouter retained as fallback | `DONE` | `AGENT_MODEL_FALLBACK_PROVIDER=openrouter`; opt-in per task, low-risk only | — |
 | Local MiniCPM still selectable | `DONE` | `AGENT_MODEL_PROVIDER=local`, no key required | — |
 | Model failure is safe | `DONE` | every path degrades to "no recommendation"; a booking completes while the provider throws on every call | — |
 | Model cannot execute anything | `DONE` | suggestion validated against the real catalog, scopes and approval gates | — |
-| No PII leaves for a model | `DONE` | allowlist projections, asserted by `unsafeFields()` in tests | — |
+| No PII leaves for a model | `DONE` | allowlist projections, asserted by `unsafeFields()` in tests — including that an incident's free text never travels | — |
 | Prompt injection mitigated | `DONE` | separate policy/content turns; no free-form command path | — |
-| Secrets never exposed | `DONE` | no key, header or payload in any error, log or response — four failure modes tested | — |
-| Usage ceilings enforced | `DONE` | daily and per-workflow caps in the database; duplicate suppression | — |
-| CI never spends quota | `DONE` | every provider call in the suite uses an injected fetch | — |
-| **API key stored as Sensitive** | `NOT_DONE` | `OPENROUTER_API_KEY` is a **Config** variable, unlike `DATABASE_URL` and `FEDAPAY_*`, and is exposed to **Preview** as well as Production | re-add as Sensitive, Production-only — see [`VERCEL.md`](VERCEL.md) |
-| Model latency suitable for a request path | `NOT_DONE` | measured 6.5 s–49 s on the free tier | keep model calls in the workflow tick; never in a user request |
-| Triage wired into a workflow | `NOT_DONE` | the layer, its endpoints and its safety are complete; no workflow calls `recommend()` yet | enable per workflow under `observe` first |
+| Secrets never exposed | `DONE` | no credential, header or payload in any error, log or response; a token failure is asserted not to carry the credential | — |
+| No reasoning trace requested or stored | `DONE` | `thinkingBudget: 0`, measured at 0 thought tokens; only validated fields are persisted | — |
+| Usage ceilings enforced | `DONE` | daily and per-workflow caps in the database; duplicate suppression; cooldown after a quota error | — |
+| CI never spends quota | `DONE` | every provider call uses an injected fetch, and the Gemini suite makes a real network call fail the test | — |
+| Gemini credentials stored as Sensitive | `DONE` | client secret and refresh token re-added as Sensitive, Production-only; client id and project id remain identifiers | — |
+| **Triage wired into a workflow** | `DONE` | `incident-triage` on `incident.created` at `recommend` autonomy, behind a deterministic threshold | watch `fallback_from` and rejection rates during the pilot |
+| **OpenRouter key stored as Sensitive** | `NOT_DONE` | `OPENROUTER_API_KEY` is a **Config** variable, unlike `DATABASE_URL` and `FEDAPAY_*` | re-add as Sensitive, Production-only — see [`VERCEL.md`](VERCEL.md) |
+| Model latency suitable for a request path | `NOT_DONE` | Gemini 1.5 s, OpenRouter 6.5–49 s on the free tier | keep model calls in the workflow tick; never in a user request |
+| Free-tier quota sufficient for the pilot | `NOT_DONE` | `429 RESOURCE_EXHAUSTED` after a handful of calls in quick succession | measure real incident volume before relying on it; billing stays disabled |
 
 ## 8. Security
 

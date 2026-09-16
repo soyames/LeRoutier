@@ -97,7 +97,7 @@ bus, no second authorization model, no direct database access for agents.
 | 5 | Risk classes | DONE (pre-existing) | `read` / `low_risk` / `privileged` / `financial`. |
 | 6 | Domain events | DONE (pre-existing) | Single outbox; no second event system. |
 | 7 | Workflow engine | DONE (pre-existing) | `packages/agents/src/workflows.js` — trigger, steps, retries, approval, audit. |
-| 8 | Service delay agent | PARTIAL | `delay-management` notifies and surfaces; ETA recalculation still derives from the tracking endpoint on read. |
+| 8 | Service delay agent | PARTIAL | `delay-management` notifies and surfaces; `incident-triage` adds model-assisted classification behind a deterministic threshold. ETA recalculation still derives from the tracking endpoint on read. |
 | 9 | Breakdown/recovery agent | DONE (pre-existing) | `breakdown-recovery`, Ops approval required. |
 | 10 | Passenger journey agent | IN PROGRESS | First-mile recomputation exists; reminder suppression to verify. |
 | 11 | Payment agent | DONE (pre-existing) | `payment-reconciliation`, approval-gated, cannot fabricate success. |
@@ -106,7 +106,7 @@ bus, no second authorization model, no direct database access for agents.
 | 14 | Uncollected parcel workflow | DONE | Thresholds configurable; clock runs from the `ready_for_pickup` event; each stage fires once per arrival. Tested. |
 | 15 | Notification agent | IN PROGRESS | Channel availability honest; retry/dead-letter to complete. |
 | 16 | Ops copilot experience | PLANNED | Proactive summaries with evidence and action. |
-| 17 | Explainability | PLANNED | Operational reasons, never chain-of-thought. |
+| 17 | Explainability | DONE | Stored: classification, severity, one-sentence reason, proposed action, provider, model, latency, validation result. Never a reasoning trace — `thinkingBudget: 0`, measured at 0 thought tokens. |
 | 18 | Human approval queue | DONE (pre-existing) | `workflow_approvals`, exactly-once decisions. |
 | 19 | Agent failure behaviour | DONE (pre-existing) | Domain transaction safety independent of agent availability. |
 | 20 | Idempotency | DONE (pre-existing) | `agent_action_receipts`, one open run per (workflow, aggregate, trigger). |
@@ -114,17 +114,17 @@ bus, no second authorization model, no direct database access for agents.
 | 22 | Agentic threat model | DONE | Agentic surface section of `THREAT_MODEL.md`. |
 | 23 | Prompt-injection defence | DONE | Structural: no free-form command path. Test asserts injected payload text creates no action. |
 | 24 | Data minimization | DONE | Allowlist projections, proven by `unsafeFields()` rather than trusted. Never a name, phone, coordinate, pickup code or payout destination. |
-| 25 | Model provider abstraction | DONE | [`../architecture/MODEL_PROVIDERS.md`](../architecture/MODEL_PROVIDERS.md) — OpenRouter and a local MiniCPM behind one interface; an unrecognised name selects nothing. |
+| 25 | Model provider abstraction | DONE | [`../architecture/MODEL_PROVIDERS.md`](../architecture/MODEL_PROVIDERS.md) — Gemini Flash (primary, OAuth), OpenRouter (named fallback), local MiniCPM, none. An unrecognised name selects nothing, and the fallback is never inferred from a key. |
 | 26 | Deterministic before generative | DONE | No invariant lives in a prompt. A booking completes through payment while the provider throws on every call. |
-| 27 | Cost control | DONE | Daily and per-workflow ceilings in the database, plus duplicate suppression. Never called on routine events. |
-| 28 | Agent observability | PARTIAL | `agent_model_calls` records provider, task, requested and actual model, status and latency. No aggregated dashboard yet. |
+| 27 | Cost control | DONE | Daily and per-workflow ceilings in the database, duplicate suppression, and a cooldown after a quota error. Never called on routine events; a deterministic threshold gates the one workflow that asks. |
+| 28 | Agent observability | PARTIAL | `agent_model_calls` records the provider that *answered*, the one it fell back from (migration 013), task, requested and actual model, status and latency. No aggregated dashboard yet. |
 | 29 | Agentic UI status | IN PROGRESS | Ops shows recommendation/approval states. |
 | 30 | Multi-tenancy | DONE (pre-existing) | Operator binding enforced server-side and tested. |
 | 31 | Offline operations | DONE (pre-existing) | Crew queue syncs, then domain events fire. |
-| 32 | Agentic support | PARTIAL | `incident.triage` and `parcel.triage` exist with narrow menus. No customer-facing assistant, by design. |
+| 32 | Agentic support | PARTIAL | `incident.triage` and `parcel.triage` exist with narrow menus, and `incident-triage` now wires triage into a real workflow at `recommend` autonomy. No customer-facing assistant, by design. |
 | 33 | Agentic pilot mode | DONE | `observe` autonomy: reads run, mutations are recorded as proposals, run completes, `workflow.step_observed` audited. |
 | 34 | Autonomy policy | DONE | Per-workflow autonomy; an unrecognised value resolves to the safest level, never the loosest. |
-| 35 | Agentic tests | PARTIAL | 37 model tests plus 17 agentic tests. Load cases outstanding. |
+| 35 | Agentic tests | PARTIAL | 72 model tests plus 24 agentic tests, including OAuth refresh, cooldown, fallback and the wired workflow. Load cases outstanding. |
 | 36 | Agentic load/scale | PLANNED | Local/Docker only. |
 | 37 | Agentic documentation | DONE | `AGENTIC_WORKFLOWS.md` extended with autonomy, untrusted content and the parcel workflows. |
 | 38 | Agentic readiness gate | DONE | Section 7 of `PRODUCTION_READINESS.md`. |

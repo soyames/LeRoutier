@@ -11,8 +11,134 @@ const digest = x => createHash('sha256').update(JSON.stringify(x)).digest('hex')
 // Built-in workflow definitions. Step shapes:
 //   { action:'catalog.name', approval?:boolean, input:(ctx)=>input }  — typed catalog action
 //   { name:'step', run:(ctx,executor)=>result }                        — engine-local step
-export function createWorkflows({ actions }) {
+/**
+ * @param {{ actions: Record<string, any>, reasoning?: any,
+ *   triage?: { minDelayMinutes?: number, minStationaryMinutes?: number } }} deps
+ */
+export function createWorkflows({ actions, reasoning = null, triage = {} }) {
+  // Deterministic thresholds decide whether a situation is worth reasoning
+  // about at all. They are configuration because "how late is late" is an
+  // operator's judgement, not a constant to invent in a scheduler.
+  const minDelay = Number.isFinite(triage.minDelayMinutes) ? Number(triage.minDelayMinutes) : 15;
+  const minStationary = Number.isFinite(triage.minStationaryMinutes) ? Number(triage.minStationaryMinutes) : 10;
+
   return {
+    // The one workflow that asks a model anything.
+    //
+    // Shape, in order, and the order is the safety property:
+    //   deterministic facts → deterministic threshold → PII-free projection
+    //   → model → catalog validation → an Ops approval carrying the evidence.
+    //
+    // It proposes; it never acts. Running at `recommend` means even the alert
+    // that carries the recommendation is something a human releases, and a
+    // model that is slow, absent, over quota or wrong changes nothing at all:
+    // `breakdown-recovery` and `parcel-breakdown` react to the same event and
+    // do not consult it.
+    'incident-triage': {
+      trigger: 'incident.created', autonomy: 'recommend',
+      description: 'Classify an open incident from operational facts and propose one low-risk next step for Ops to release.',
+      steps: [
+        { name: 'gather', reads: true, run: async (ctx, executor) => {
+          if (!reasoning) return { skip: true, why: 'no_reasoning' };
+          const facts = await executor.db.transaction(async tx => (await tx.query(
+            `WITH latest AS (
+               SELECT observed_at FROM vehicle_positions WHERE service_id=$1 ORDER BY observed_at DESC LIMIT 1
+             ), moving AS (
+               -- The last fix that was more than ~150 m from the newest one.
+               -- How long ago that was is how long the vehicle has been where
+               -- it is, which is the fact a stationary breakdown shows up as.
+               SELECT max(p.observed_at) AS observed_at FROM vehicle_positions p, (
+                 SELECT latitude, longitude FROM vehicle_positions WHERE service_id=$1 ORDER BY observed_at DESC LIMIT 1
+               ) newest
+               WHERE p.service_id=$1
+                 AND (abs(p.latitude-newest.latitude) > 0.0015 OR abs(p.longitude-newest.longitude) > 0.0015)
+             )
+             SELECT s.status AS service_status, s.operator_id, s.departure_at, s.current_sequence,
+                    i.kind AS incident_kind, i.status AS incident_status,
+                    (SELECT count(*) FROM bookings b WHERE b.service_id=s.id AND b.status IN ('held','confirmed','boarded'))::integer AS passengers,
+                    (SELECT count(*) FROM parcels p JOIN parcel_service_assignments a ON a.parcel_id=p.id AND a.service_id=s.id
+                       WHERE p.status IN ('loaded','in_transit') AND a.status IN ('loaded','in_transit'))::integer AS parcels,
+                    (SELECT pl.name FROM service_stops ss JOIN stops st ON st.id=ss.stop_id JOIN places pl ON pl.id=st.place_id
+                       WHERE ss.service_id=s.id AND ss.sequence > s.current_sequence ORDER BY ss.sequence LIMIT 1) AS next_stop_city,
+                    (SELECT count(*) FROM vehicles v WHERE v.operator_id=s.operator_id AND v.status='active'
+                       AND NOT EXISTS(SELECT 1 FROM service_assignments sa WHERE sa.vehicle_id=v.id AND sa.ended_at IS NULL))::integer AS spare_vehicles,
+                    (SELECT count(*) FROM services alt WHERE alt.operator_id=s.operator_id AND alt.route_id=s.route_id
+                       AND alt.id<>s.id AND alt.status IN ('scheduled','active'))::integer AS alternative_services,
+                    (SELECT observed_at FROM latest) AS last_fix_at,
+                    (SELECT observed_at FROM moving) AS last_movement_at
+             FROM incidents i JOIN services s ON s.id=i.service_id WHERE i.id=$2 AND i.service_id=$1`,
+            [ctx.serviceId, ctx.incidentId])).rows[0]);
+          if (!facts) return { skip: true, why: 'no_such_incident' };
+
+          const ago = at => (at ? Math.max(0, Math.round((Date.now() - new Date(at).getTime()) / 60_000)) : null);
+          // Behind schedule is measured against departure for a service that
+          // has not left, and is otherwise unknown rather than guessed: a
+          // fabricated delay is worse than no delay.
+          const delayMinutes = facts.service_status === 'scheduled' && facts.departure_at
+            ? Math.max(0, ago(facts.departure_at)) : null;
+          const signalAgeMinutes = ago(facts.last_fix_at);
+          const situation = {
+            serviceStatus: facts.service_status,
+            delayMinutes,
+            // No movement recorded at all means stationary since the first fix.
+            vehicleStationaryMinutes: facts.last_fix_at ? ago(facts.last_movement_at ?? facts.last_fix_at) : null,
+            signal: signalAgeMinutes === null ? 'unavailable' : signalAgeMinutes <= 10 ? 'live' : 'stale',
+            signalAgeMinutes,
+            passengersAffected: facts.passengers,
+            parcelsAffected: facts.parcels,
+            nextStopCity: facts.next_stop_city,
+            openIncidentKind: facts.incident_status === 'resolved' ? null : facts.incident_kind,
+            replacementVehiclesAvailable: facts.spare_vehicles,
+            alternativeServicesAvailable: facts.alternative_services,
+          };
+          // The gate. A model is asked only when deterministic code already
+          // considers the situation abnormal — an incident nobody is waiting
+          // on, on a service carrying nobody, is not worth a remote call.
+          const material = (situation.passengersAffected > 0 || situation.parcelsAffected > 0)
+            && (['breakdown', 'accident', 'medical'].includes(situation.openIncidentKind)
+              || (situation.delayMinutes ?? 0) >= minDelay
+              || (situation.vehicleStationaryMinutes ?? 0) >= minStationary);
+          return { skip: !material, why: material ? null : 'below_threshold', situation, operatorId: facts.operator_id };
+        } },
+        { name: 'triage', reads: true, when: ctx => !ctx.gather.skip, run: async (ctx, executor) => {
+          // Never throws for a model problem: `recommend` returns a status.
+          const verdict = await reasoning.recommend('incident.triage', ctx.gather.situation, {
+            workflow: 'incident-triage',
+            workflowRunId: ctx.workflowRunId,
+            // A bound agent is checked against its own grant. A system run has
+            // no grant to check, so the task's allowlist is the authority —
+            // see reasoning.scopesFor.
+            scopes: executor.agent?.scopes ?? reasoning.scopesFor('incident.triage'),
+            operatorId: executor.agent?.operatorId ?? null,
+            targetOperatorId: ctx.gather.operatorId,
+          });
+          // Only explainability fields are kept. No prompt, no raw completion,
+          // no reasoning trace — the model was asked not to produce one.
+          return {
+            available: verdict.available,
+            status: verdict.status,
+            recommendation: verdict.recommendation ?? null,
+            provider: verdict.providerUsed ?? null,
+            actualModel: verdict.actualModel ?? null,
+            latencyMs: verdict.latencyMs ?? null,
+            fallbackUsed: Boolean(verdict.fallbackFrom),
+          };
+        } },
+        { name: 'surface', when: ctx => !ctx.gather.skip && ctx.triage?.available, run: async (ctx, executor) => {
+          const { classification, severity, reason } = ctx.triage.recommendation;
+          const proposal = ctx.triage.recommendation.recommendedAction
+            ? ` Piste proposée : ${ctx.triage.recommendation.recommendedAction}.`
+            : ' Aucune action proposée.';
+          await actions['alert.create'].run(executor, {
+            kind: 'recovery', serviceId: ctx.serviceId,
+            // Labelled as a suggestion, with its evidence, so nobody reads it
+            // as a decision LeRoutier has already taken.
+            message: `Analyse assistée (${severity}/${classification}) : ${reason}${proposal} À valider par l'exploitation.`,
+          });
+          return { surfaced: true };
+        } },
+      ],
+    },
     'payment-reconciliation': {
       trigger: 'payment.anomaly', description: 'A provider webhook could not be reconciled automatically; propose a trusted reconciliation for review.',
       steps: [{ action: 'payment.reconcile', approval: true, input: ctx => ({ paymentId: ctx.paymentId }) }],
@@ -172,8 +298,8 @@ export function createWorkflows({ actions }) {
 // in its own transaction inside the same outbox drain, so a notification
 // failure can never roll back the business transaction that produced the event
 // and never blocks workflow processing.
-export function createWorkflowEngine({ db, actions, onEvent = null, autonomy = null }) {
-  const definitions = createWorkflows({ actions });
+export function createWorkflowEngine({ db, actions, onEvent = null, autonomy = null, reasoning = null, triage = {} }) {
+  const definitions = createWorkflows({ actions, reasoning, triage });
   const autonomyConfig = { default: 'auto_low_risk', workflows: {}, ...(autonomy ?? {}) };
 
   /**

@@ -21,6 +21,12 @@ can see it.
   receiver, a phone number, a pickup code or a payment.
 - **No behavioural surveillance.** No session replay, no cross-site tracking,
   no advertising identifiers, no third-party analytics script.
+- **A model is sent facts, never records.** What leaves for Gemini is built by
+  an allowlist projection — statuses, durations, counts, a public city name —
+  so a field nobody listed cannot leak however the caller assembles its data.
+  The prompt, the completion text and any reasoning trace are never stored; only
+  the classification, severity, one-sentence reason and proposed action that
+  survived validation. See [`../architecture/MODEL_PROVIDERS.md`](../architecture/MODEL_PROVIDERS.md).
 
 ## Data inventory
 
@@ -43,6 +49,7 @@ can see it.
 | Notifications | the record of what a person was told | **⚖ LEGAL REVIEW** — indefinite today | the recipient; Platform Ops |
 | Audit events | who did what | **deliberately never pruned** | operator Ops within scope; Platform Ops |
 | Agent action receipts | idempotency and accountability | with the workflow run | Platform Ops |
+| Model call records | to know what was asked, of whom, and whether it was believed | **⚖ LEGAL REVIEW** — indefinite today | Platform Ops |
 | Request rate counters | abuse control | short-lived, per minute window | nobody, operationally |
 
 ### Vehicle GPS deserves its own paragraph
@@ -91,6 +98,8 @@ that interacts with an erasure request is **⚖ LEGAL REVIEW**.
 | Gozem | **nothing.** The handoff is a link the passenger chooses to follow | LeRoutier sends no booking, no identity, no position |
 | OpenStreetMap / CARTO | tile requests from the user's browser, as any map does | no LeRoutier identifier is attached |
 | Google / Firebase Authentication | authentication and basic profile only — identity, name, email | no travel, parcel or payment data; LeRoutier requests no Gmail, Drive, Calendar or Contacts scope |
+| Google Gemini (model) | for an abnormal incident only: statuses, durations, counts and a public city name | **no** name, phone, email, coordinate, pickup code, payment reference or identifier of any kind — and never the free text a driver typed into an incident |
+| OpenRouter (fallback model) | the same projection, only when Gemini is unavailable and only for low-risk triage | as above |
 | Neon, Vercel | infrastructure processors | — |
 
 Gozem is worth restating because it is easy to assume otherwise: LeRoutier

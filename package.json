@@ -37,7 +37,8 @@
     "release:check": "node scripts/release-check.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "ussd:dev": "node --env-file=docker/postgres.env services/ussd/src/simulator.js",
-    "auth:verify": "node scripts/verify-auth.mjs"
+    "auth:verify": "node scripts/verify-auth.mjs",
+    "model:verify": "node scripts/verify-model.mjs"
   },
   "engines": {
     "node": ">=22.13.0"

@@ -137,7 +137,17 @@ is the whole design: an agent is a constrained client, never a second way in.
   incident notes and station descriptions are content. They are never policy.
 - **Deterministic before generative.** Capacity, fares, payment state, payout
   eligibility, permissions, geometry and state machines are code. No invariant
-  lives in a prompt. Today no model is on any critical path at all.
+  lives in a prompt. Exactly one workflow consults a model — `incident-triage`,
+  at `recommend` autonomy — and it proposes an Ops alert, nothing more. No model
+  is on any critical path.
+- **The model's backend identity is not a user's.** Gemini is reached with
+  LeRoutier's own Google OAuth credential: a refresh token exchanged for a
+  one-hour access token, held in memory, never persisted to Neon and never sent
+  to a browser. It is deliberately not an API key, which would be a permanent
+  bearer secret. A passenger's Firebase identity is never used to call a model,
+  and the model credential authenticates nobody. Compromise of it costs free
+  Gemini quota on a billing-disabled project — it grants no access to LeRoutier
+  data, because the credential only travels *outward*.
 - **Approval gates.** Money and privileged operational change require a human,
   recorded, exactly once.
 

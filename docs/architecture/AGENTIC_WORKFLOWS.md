@@ -176,7 +176,15 @@ action from a narrow per-task menu, which LeRoutier then validates against its
 own catalog before anything is shown to Ops. It executes nothing, approves
 nothing, and receives no party data. **No model is on any critical path**, and a
 test holds a booking through payment to confirmation while the provider throws
-on every call. See [`MODEL_PROVIDERS.md`](MODEL_PROVIDERS.md).
+on every call.
+
+Exactly one workflow consults it: **`incident-triage`**, on `incident.created`,
+at `recommend` autonomy. A deterministic threshold decides the situation is
+abnormal *and* that somebody is actually affected before any remote call is
+made; the answer becomes an Ops alert that a human releases. The primary model
+is **Gemini Flash** over Google OAuth, with OpenRouter as a named fallback for
+low-risk tasks and a local MiniCPM for data that must not leave the machine.
+See [`MODEL_PROVIDERS.md`](MODEL_PROVIDERS.md).
 
 The FedaPay webhook emits `payment.anomaly` / `payout.anomaly` only for
 signature-valid events that fail strict correlation, so anomalies are always
