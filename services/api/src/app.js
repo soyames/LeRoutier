@@ -42,13 +42,17 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const notify=notificationPolicies(db,config),rides=mobility(db),journey=journeys(db,config);
   const router=createRouter(config),geometry=routeGeometry(db,router),track=tracking(db,config);
   const actions=createActions({db,domain,payments:pay,payouts:payout,recovery:recover,parcels:parcel});
-  const workflows=createWorkflowEngine({db,actions,onEvent:(tx,event)=>notify.dispatchEvent(tx,event),autonomy:config.agentAutonomy});
   // Model-assisted triage. Optional by construction: with no provider
   // configured every call reports unavailable and the deterministic paths are
   // unchanged, which is what keeps this an improvement rather than a dependency.
   // Validated against the real executable catalog, not a copy of it: a model
   // proposing an action LeRoutier no longer has must fail, not drift.
   const reasoning=createReasoning({db,provider:createModelProvider(config),actions,budget:config.model?.budget});
+  // The engine is given `reasoning`, not a provider: only the one workflow that
+  // triages incidents may ask a model anything, and only through the budget,
+  // projection and validation that createReasoning wraps around it.
+  const workflows=createWorkflowEngine({db,actions,onEvent:(tx,event)=>notify.dispatchEvent(tx,event),
+    autonomy:config.agentAutonomy,reasoning,triage:config.model?.triage??{}});
   // USSD is a channel over these same services — not a second backend. It is
   // handed the very objects every other route uses, so a capacity check or a
   // fare it sees is the one the PWA sees.

@@ -62,9 +62,18 @@ try {
     if (/"type"\s*:\s*"service_account"/.test(text)) failures++;
     if (/"private_key(?:_id)?"\s*:\s*"/.test(text)) failures++;
     if (/\bGOCSPX-[A-Za-z0-9_-]{10,}/.test(text)) failures++;
+    // A Google OAuth refresh credential mints access tokens for as long as
+    // nobody revokes it, and a live access token does the same for an hour.
+    // Both are matched by shape, because neither has a filename to watch.
+    if (/\b1\/\/[A-Za-z0-9_-]{20,}/.test(text)) failures++;
+    if (/\bya29\.[A-Za-z0-9_-]{20,}/.test(text)) failures++;
     // Firebase Admin belongs to the server. Importing it into anything the
     // browser loads is how a service account ends up in a bundle.
     if (isBundle && /firebase-admin|googleapis\.com\/auth\/cloud-platform/.test(text)) failures++;
+    // The Gemini credential is server-side configuration. Its *names* appearing
+    // in a bundle would mean the server config module reached the browser,
+    // which is the step before its values do.
+    if (isBundle && /GOOGLE_GEMINI_|oauth2\.googleapis\.com\/token/.test(text)) failures++;
   }
 
   for (const file of files) {
