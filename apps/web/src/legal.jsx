@@ -5,7 +5,10 @@ const UPDATED = '16 septembre 2026';
 const SUPPORT_EMAIL = 'leroutierbj@gmail.com';
 
 function LegalLayout({ title, intro, children }) {
-  return <div className="stack" style={{ maxWidth: 920, margin: '0 auto' }}>
+  // A landmark, because these pages are routed above the app shell and so do
+  // not inherit its <main>. Without one, a screen reader has no way to skip
+  // the page furniture and reach the policy itself.
+  return <main className="stack" style={{ maxWidth: 920, margin: '0 auto' }}>
     <Card className="stack">
       <SectionTitle title={title}/>
       {intro && <p className="muted">{intro}</p>}
@@ -13,7 +16,7 @@ function LegalLayout({ title, intro, children }) {
     </Card>
     {children}
     <LegalFooter/>
-  </div>;
+  </main>;
 }
 
 function Section({ title, children }) {
