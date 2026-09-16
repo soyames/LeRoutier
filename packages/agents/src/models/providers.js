@@ -8,8 +8,9 @@
 // Everything here is server-side. No key, header or raw provider payload is
 // ever returned to a caller or written to a log.
 
-import { ModelUnavailable, MODEL_REASONS } from './errors.js';
+import { ModelUnavailable, MODEL_REASONS, retryAfterMs } from './errors.js';
 import { createGoogleTokenSource } from './google-oauth.js';
+import { memoryCooldownStore } from './cooldown-store.js';
 
 // Re-exported so every caller keeps one import for "the model layer".
 export { ModelUnavailable, MODEL_REASONS };
@@ -304,10 +305,17 @@ export function geminiProvider(config = {}, fetchImpl = fetch, tokenSource = nul
 
       if (response.status === 401 && attempt === 0) { tokens.forget(); continue; }
       if (!response.ok) {
+        // The error body is read for its retry metadata only. Google states how
+        // long to wait in a RetryInfo detail as well as in the header, and
+        // guessing a cooldown when the provider has told you is wasteful in
+        // both directions. Nothing from the body is logged or stored.
+        let body = null;
+        try { body = await response.json(); } catch { /* an error without a body is still an error */ }
         // 503 UNAVAILABLE is routine on the free tier — shared capacity, not a
         // fault — so it is a provider error the ladder and the fallback may act
         // on, never something that stops the product.
-        throw new ModelUnavailable(reasonForStatus(response.status), `provider responded ${response.status}`);
+        throw new ModelUnavailable(reasonForStatus(response.status), `provider responded ${response.status}`,
+          retryAfterMs(response, body));
       }
       try { return await response.json(); }
       catch { throw new ModelUnavailable(MODEL_REASONS.malformedOutput, 'provider response was not JSON'); }
@@ -403,31 +411,53 @@ export function geminiProvider(config = {}, fetchImpl = fetch, tokenSource = nul
 /**
  * Stops asking a provider that has just said no.
  *
- * Free capacity is shared: a quota error means "not for a while", and retrying
- * into it burns the next window as well. Repeated hard failures get the same
- * treatment, because a provider that has failed three times in a row is having
- * an outage, not an unlucky request.
+ * Free capacity is shared and opportunistic: a quota error means "not for a
+ * while", and retrying into it burns the next window as well. Repeated hard
+ * failures get the same treatment, because a provider that has failed three
+ * times in a row is having an outage, not an unlucky request.
  *
- * The window lives in memory, so it is per serverless instance rather than
- * global. That is the honest limit of doing this without another shared store,
- * and it still removes the retry storm inside a single instance, which is where
- * one event fanning out to several workflows actually produces it.
+ * Two layers, because the API is serverless:
+ *
+ *   - an in-process window, which is free to check and catches the burst inside
+ *     one instance — where a single event fanning out to several workflows
+ *     actually produces a storm;
+ *   - a **shared** store, so the next cold instance does not cheerfully call a
+ *     provider that has already refused. Without it a rate limit becomes a
+ *     rate-limit storm at exactly the moment capacity is scarcest.
+ *
+ * The shared store is best-effort by construction: if it cannot be read or
+ * written, the in-process window still applies and the call still happens. A
+ * bookkeeping table must never be able to take the model layer down.
  */
-export function withCooldown(provider, { cooldownMs = 10 * 60_000, failuresBeforeCooldown = 3, now = Date.now } = {}) {
+export function withCooldown(provider, { cooldownMs = 10 * 60_000, failuresBeforeCooldown = 3, now = Date.now, store = memoryCooldownStore() } = {}) {
   let until = 0;
   let consecutiveFailures = 0;
 
-  const enter = reason => {
-    until = now() + cooldownMs;
+  async function enter(reason, retryAfter) {
+    // The provider's own Retry-After beats a configured guess in both
+    // directions: it stops us hammering a longer window, and stops us sulking
+    // for ten minutes when Google asked for thirty seconds.
+    until = now() + (retryAfter ?? cooldownMs);
     consecutiveFailures = 0;
-    return reason;
-  };
+    try { await store.enter(provider.name, until, reason); } catch { /* best effort, never fatal */ }
+  }
 
   return {
     ...provider,
     get cooling() { return now() < until; },
+    /** When this provider may be used again, according to the shared store. */
+    async cooldownUntil() {
+      let shared = null;
+      try { shared = await store.until(provider.name); } catch { /* fall back to the local window */ }
+      const latest = Math.max(until, shared ?? 0);
+      return latest > now() ? latest : null;
+    },
     async complete(request) {
-      if (now() < until) throw new ModelUnavailable(MODEL_REASONS.rateLimited, 'provider is in cooldown after a quota or repeated failure');
+      const cooling = await this.cooldownUntil();
+      if (cooling) {
+        throw new ModelUnavailable(MODEL_REASONS.rateLimited,
+          'provider is in cooldown after a quota or repeated failure', cooling - now());
+      }
       try {
         const result = await provider.complete(request);
         consecutiveFailures = 0;
@@ -436,8 +466,8 @@ export function withCooldown(provider, { cooldownMs = 10 * 60_000, failuresBefor
         const reason = error instanceof ModelUnavailable ? error.reason : MODEL_REASONS.providerError;
         // A quota error is definitive; a malformed answer is the model's fault,
         // not the provider's, and must not take the provider offline.
-        if (reason === MODEL_REASONS.rateLimited) enter(reason);
-        else if (reason !== MODEL_REASONS.malformedOutput && ++consecutiveFailures >= failuresBeforeCooldown) enter(reason);
+        if (reason === MODEL_REASONS.rateLimited) await enter(reason, error.retryAfterMs);
+        else if (reason !== MODEL_REASONS.malformedOutput && ++consecutiveFailures >= failuresBeforeCooldown) await enter(reason, null);
         throw error;
       }
     },
@@ -459,6 +489,9 @@ export function fallbackChain(primary, secondary) {
     model: primary.model,
     configured: primary.configured || secondary.configured,
     fallbackTo: secondary.name,
+    // The primary's window is the one worth reporting: it is the provider whose
+    // exhaustion Ops needs to see.
+    cooldownUntil: () => (primary.cooldownUntil ? primary.cooldownUntil() : Promise.resolve(null)),
     async complete(request) {
       try {
         return await primary.complete(request);
@@ -483,12 +516,18 @@ export function fallbackChain(primary, secondary) {
  * An unrecognised name yields no provider rather than a default: silently
  * choosing a remote model for someone who asked for a local one would be the
  * worst possible failure mode of this function.
+ *
+ * @param {object} [config] the full server config; only `config.model` is read
+ * @param {typeof fetch} [fetchImpl]
+ * @param {{ cooldownStore?: { until: Function, enter: Function, clear: Function } }} [deps]
+ *   a cooldown shared across serverless instances; defaults to per-instance
  */
-export function createModelProvider(config = {}, fetchImpl = fetch) {
+export function createModelProvider(config = {}, fetchImpl = fetch, { cooldownStore } = {}) {
   const model = config.model ?? {};
+  const shared = { ...model.cooldown, ...(cooldownStore ? { store: cooldownStore } : {}) };
   const build = name => {
-    if (name === 'gemini') return withCooldown(geminiProvider(model.gemini ?? {}, fetchImpl), model.cooldown);
-    if (name === 'openrouter') return withCooldown(openRouterProvider(model.openrouter ?? {}, fetchImpl), model.cooldown);
+    if (name === 'gemini') return withCooldown(geminiProvider(model.gemini ?? {}, fetchImpl), shared);
+    if (name === 'openrouter') return withCooldown(openRouterProvider(model.openrouter ?? {}, fetchImpl), shared);
     // A local server is not a shared resource, so it gets no cooldown.
     if (name === 'local') return localProvider(model.local ?? {}, fetchImpl);
     return null;

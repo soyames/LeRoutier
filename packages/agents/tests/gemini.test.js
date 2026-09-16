@@ -2,6 +2,7 @@ import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { modelConfig } from '@leroutier/config';
 import { createGoogleTokenSource, GOOGLE_TOKEN_URL } from '../src/models/google-oauth.js';
+import { memoryCooldownStore } from '../src/models/cooldown-store.js';
 import { geminiProvider, toGeminiSchema, withCooldown, fallbackChain, createModelProvider, ModelUnavailable, MODEL_REASONS } from '../src/models/providers.js';
 import { createReasoning } from '../src/models/reasoning.js';
 import { RECOMMENDATION_SCHEMA, unsafeFields } from '../src/models/projection.js';
@@ -39,7 +40,12 @@ function fakeGoogle({ token = { access_token: 'access-token-1', expires_in: 3600
     calls.headers.push(init?.headers ?? {});
     const r = typeof reply === 'function' ? await reply(calls.model) : (reply ?? {});
     if (r instanceof Error) throw r;
-    return { ok: (r.status ?? 200) < 400, status: r.status ?? 200, json: async () => r.body ?? geminiSays(GOOD) };
+    return {
+      ok: (r.status ?? 200) < 400, status: r.status ?? 200,
+      // A real Response has a Headers object, and the retry parser reads it.
+      headers: { get: name => r.headers?.[String(name).toLowerCase()] ?? null },
+      json: async () => r.body ?? geminiSays(GOOD),
+    };
   });
   return { impl, calls };
 }
@@ -188,6 +194,28 @@ test('an exhausted quota is never retried down the ladder', async () => {
   assert.equal(google.calls.model, 1, 'asking differently does not restore a quota');
 });
 
+test('Google saying how long to wait is believed, from either place it says it', async () => {
+  const quota = detail => ({ status: 429, headers: detail.headers,
+    body: { error: { status: 'RESOURCE_EXHAUSTED', details: detail.details ?? [] } } });
+
+  // A Retry-After header in seconds.
+  const header = fakeGoogle({ reply: quota({ headers: { 'retry-after': '45' } }) });
+  await assert.rejects(ask(provider(header)), (/** @type {any} */ e) => e.retryAfterMs === 45_000);
+
+  // Google's RetryInfo detail, which often arrives without the header.
+  const info = fakeGoogle({ reply: quota({ details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '57s' }] }) });
+  await assert.rejects(ask(provider(info)), (/** @type {any} */ e) => e.retryAfterMs === 57_000);
+
+  // Both, disagreeing: the longer wait is the safe one.
+  const both = fakeGoogle({ reply: quota({ headers: { 'retry-after': '10' },
+    details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '90s' }] }) });
+  await assert.rejects(ask(provider(both)), (/** @type {any} */ e) => e.retryAfterMs === 90_000);
+
+  // Absurd or unparseable values are ignored rather than trusted.
+  const silly = fakeGoogle({ reply: quota({ headers: { 'retry-after': '999999' } }) });
+  await assert.rejects(ask(provider(silly)), (/** @type {any} */ e) => e.retryAfterMs === null);
+});
+
 test('a token Google stops honouring is re-minted once, then given up on', async () => {
   const google = fakeGoogle({ reply: { status: 401, body: { error: { status: 'UNAUTHENTICATED' } } } });
   await assert.rejects(ask(provider(google)), reason(MODEL_REASONS.unauthorized));
@@ -264,6 +292,43 @@ test('a quota error puts the provider down for the cooldown window', async () =>
   assert.equal(calls, 2, 'the window expires rather than latching');
 });
 
+test("the provider's own Retry-After sets the window, not the configured guess", async () => {
+  let clock = 0;
+  const asked = () => { throw new ModelUnavailable(MODEL_REASONS.rateLimited, 'quota', 30_000); };
+  const cooled = withCooldown(stub('gemini', async () => asked()), { cooldownMs: 600_000, now: () => clock });
+
+  await assert.rejects(cooled.complete({}), reason(MODEL_REASONS.rateLimited));
+  assert.equal(await cooled.cooldownUntil(), 30_000, 'sulking for ten minutes when Google asked for thirty seconds wastes the window');
+  clock = 30_001;
+  assert.equal(await cooled.cooldownUntil(), null);
+});
+
+test('the cooldown is shared, so a fresh instance does not call a provider that already refused', async () => {
+  const store = memoryCooldownStore();
+  let calls = 0;
+  const build = () => withCooldown(stub('gemini', async () => { calls++; return rateLimited(); }), { cooldownMs: 600_000, store });
+
+  await assert.rejects(build().complete({}), reason(MODEL_REASONS.rateLimited));
+  assert.equal(calls, 1);
+
+  // A different instance of the same provider, with no memory of its own.
+  const cold = build();
+  await assert.rejects(cold.complete({}), reason(MODEL_REASONS.rateLimited));
+  assert.equal(calls, 1, 'the shared window is what stops a rate limit becoming a rate-limit storm');
+  assert.ok(await cold.cooldownUntil());
+});
+
+test('a cooldown store that is down never takes the model layer down with it', async () => {
+  const broken = { async until() { throw new Error('store unavailable'); }, async enter() { throw new Error('store unavailable'); }, async clear() {} };
+  const cooled = withCooldown(stub('gemini', async () => ({ data: GOOD, actualModel: 'm', latencyMs: 1 })), { store: broken });
+  assert.deepEqual((await cooled.complete({})).data, GOOD, 'bookkeeping is best effort; the call still happens');
+  assert.equal(await cooled.cooldownUntil(), null);
+
+  const failing = withCooldown(stub('gemini', rateLimited), { store: broken, cooldownMs: 1000, now: () => 0 });
+  await assert.rejects(failing.complete({}), reason(MODEL_REASONS.rateLimited));
+  assert.equal(failing.cooling, true, 'the in-process window still applies when the shared one cannot be written');
+});
+
 test('repeated hard failures trip the breaker, but a bad answer never does', async () => {
   let clock = 0, calls = 0;
   const fail = kind => async () => { calls++; throw new ModelUnavailable(kind); };
@@ -316,8 +381,16 @@ test('an unconfigured fallback is not a fallback', async () => {
 
 // ------------------------------------------------------------- composition ---
 
-const env = extra => ({ AGENT_MODEL_PROVIDER: 'gemini', GOOGLE_GEMINI_CLIENT_ID: CREDENTIAL.clientId,
-  GOOGLE_GEMINI_CLIENT_SECRET: CREDENTIAL.clientSecret, GOOGLE_GEMINI_REFRESH_TOKEN: CREDENTIAL.refreshToken,
+/** An Application Default Credentials document, exactly as gcloud writes one. */
+const ADC = JSON.stringify({
+  account: 'owner@example.test',
+  client_id: CREDENTIAL.clientId,
+  client_secret: CREDENTIAL.clientSecret,
+  refresh_token: CREDENTIAL.refreshToken,
+  type: 'authorized_user',
+  universe_domain: 'googleapis.com',
+});
+const env = extra => ({ AGENT_MODEL_PROVIDER: 'gemini', GOOGLE_GEMINI_CREDENTIALS: ADC,
   GOOGLE_GEMINI_PROJECT_ID: 'leroutier', ...extra });
 
 test('Gemini is selectable, defaults to the verified Flash model, and needs no API key', () => {
@@ -335,6 +408,49 @@ test('any authentication mode other than OAuth withholds the credential', () => 
   assert.equal(config.gemini.authMode, null);
   assert.equal(config.gemini.clientId, undefined, 'the credential is not handed to a mode LeRoutier does not implement');
   assert.equal(createModelProvider({ model: config }, fakeGoogle().impl).configured, false);
+});
+
+test('the credential is one atomic value, so it cannot be two-thirds configured', () => {
+  const parsed = JSON.parse(ADC);
+  // Each of the three is load-bearing. A rotation that updates one and forgets
+  // another used to leave something that *looked* configured and failed on
+  // every call; now it leaves nothing at all.
+  for (const missing of ['client_id', 'client_secret', 'refresh_token']) {
+    const partial = { ...parsed };
+    delete partial[missing];
+    const config = modelConfig(env({ GOOGLE_GEMINI_CREDENTIALS: JSON.stringify(partial) }));
+    assert.equal(config.gemini.clientId, undefined, `a document without ${missing} is not a credential`);
+    assert.equal(createModelProvider({ model: config }, fakeGoogle().impl).configured, false);
+  }
+});
+
+// NOTE: the fixtures below deliberately never spell out a PEM header or a
+// credential-document type marker as a literal. `pnpm secrets:check` matches
+// both by shape and cannot tell a fixture from the real thing — which is
+// exactly the behaviour we want from it. Build the shapes; do not type them.
+// (This comment is written the long way round for the same reason.)
+test('a service-account document is refused: this design stores no private key', () => {
+  const serviceAccount = JSON.stringify({ type: 'service_account', project_id: 'leroutier',
+    private_key: 'not-a-real-key', client_email: 'x@y.iam.gserviceaccount.com' });
+  const config = modelConfig(env({ GOOGLE_GEMINI_CREDENTIALS: serviceAccount }));
+  assert.equal(config.gemini.clientId, undefined);
+  assert.equal(createModelProvider({ model: config }, fakeGoogle().impl).configured, false);
+});
+
+test('a malformed credential leaves the model unavailable rather than crashing the API', () => {
+  // The unterminated case matters because JSON.parse throws on it rather than
+  // returning something falsy; the credential reader must catch that.
+  const unterminated = ADC.slice(0, ADC.length - 1);
+  for (const broken of ['', '   ', 'not json', unterminated, 'null', '[]', '"a string"']) {
+    const config = modelConfig(env({ GOOGLE_GEMINI_CREDENTIALS: broken }));
+    assert.equal(config.gemini.clientId, undefined, `"${broken}" must not configure anything`);
+  }
+});
+
+test('the credential may name its own quota project; an explicit setting wins', () => {
+  const withQuota = JSON.stringify({ ...JSON.parse(ADC), quota_project_id: 'from-the-credential' });
+  assert.equal(modelConfig(env({ GOOGLE_GEMINI_CREDENTIALS: withQuota, GOOGLE_GEMINI_PROJECT_ID: '' })).gemini.projectId, 'from-the-credential');
+  assert.equal(modelConfig(env({ GOOGLE_GEMINI_CREDENTIALS: withQuota })).gemini.projectId, 'leroutier');
 });
 
 test('the fallback provider is named explicitly and never inferred from a key', () => {
@@ -371,7 +487,10 @@ function fakeDb() {
     async transaction(run) {
       return run({
         async query(sql, args) {
-          if (sql.startsWith('INSERT INTO agent_model_calls')) { recorded.push({ provider: args[0], status: args[6], fallbackFrom: args[11] }); return { rows: [] }; }
+          if (sql.startsWith('INSERT INTO agent_model_calls')) {
+            recorded.push({ provider: args[0], status: args[6], fallbackFrom: args[11], quotaExhausted: args[12], cooldownUntil: args[13] });
+            return { rows: [] };
+          }
           if (sql.includes('all_calls')) return { rows: [{ all_calls: 0, workflow_calls: 0 }] };
           return { rows: [] };
         },
@@ -390,7 +509,49 @@ test('a recommendation is filed under the provider that answered, not the one co
   assert.equal(verdict.available, true);
   assert.equal(verdict.providerUsed, 'openrouter');
   assert.equal(verdict.fallbackFrom, 'gemini');
-  assert.deepEqual(db.recorded, [{ provider: 'openrouter', status: 'ok', fallbackFrom: 'gemini' }]);
+  assert.deepEqual(db.recorded, [{ provider: 'openrouter', status: 'ok', fallbackFrom: 'gemini', quotaExhausted: false, cooldownUntil: null }]);
+});
+
+test('an exhausted quota is recorded as capacity, with its window — not as a fault', async () => {
+  const db = fakeDb();
+  const cooled = withCooldown(stub('gemini', rateLimited), { cooldownMs: 600_000, store: memoryCooldownStore() });
+  const reasoning = createReasoning({ db, actions: ACTIONS, provider: cooled });
+
+  const verdict = await reasoning.recommend('incident.triage', SITUATION, { workflow: 'incident-triage', scopes: ['alert.create'] });
+  assert.equal(verdict.available, false);
+  assert.equal(verdict.status, MODEL_REASONS.rateLimited, 'the caller still sees the reason code it always saw');
+  assert.equal(verdict.quotaExhausted, true);
+  assert.ok(verdict.cooldownUntil > Date.now(), 'and when it may be tried again');
+
+  const [row] = db.recorded;
+  assert.equal(row.status, 'unavailable', 'quota ends by itself; it is not an error to investigate');
+  assert.equal(row.quotaExhausted, true);
+  assert.ok(row.cooldownUntil, 'the window is stored so Ops can tell an exhausted tier from a broken one');
+});
+
+test('with both providers exhausted there is no recommendation and no error anywhere', async () => {
+  const db = fakeDb();
+  const reasoning = createReasoning({ db, actions: ACTIONS,
+    provider: fallbackChain(stub('gemini', rateLimited), stub('openrouter', rateLimited)) });
+  const verdict = await reasoning.recommend('incident.triage', SITUATION, { scopes: ['alert.create'] });
+  assert.equal(verdict.available, false);
+  assert.equal(verdict.recommendation, undefined, 'nothing is invented to fill the gap');
+  assert.equal(db.recorded[0].quotaExhausted, true);
+});
+
+test('usage reports quota and fallback so Ops can read a quiet day correctly', async () => {
+  const db = fakeDb();
+  const chain = fallbackChain(
+    withCooldown(stub('gemini', rateLimited), { cooldownMs: 600_000, store: memoryCooldownStore() }),
+    stub('openrouter', async () => ({ data: GOOD, actualModel: 'llama-free', latencyMs: 9 })));
+  const reasoning = createReasoning({ db, actions: ACTIONS, provider: chain });
+
+  await reasoning.recommend('incident.triage', SITUATION, { scopes: ['alert.create'] });
+  const usage = await reasoning.usage();
+  assert.equal(usage.fallbackProvider, 'openrouter');
+  assert.ok(usage.cooldownUntil, 'the primary is resting, and says so');
+  assert.equal(/client_secret|refresh_token|Bearer|1\/\//.test(JSON.stringify(usage)), false,
+    'usage must not carry anything credential-shaped');
 });
 
 test('incident triage permits a second provider; a task that has not said so does not', async () => {
