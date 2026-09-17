@@ -1,107 +1,63 @@
-# Firebase — what LeRoutier uses, and what it costs
+# Firebase and Google: zero-billing operating policy
 
-**Hard rule: billing is never enabled.** No code, command, deployment script,
-extension, Cloud Function or Google Cloud API in this repository may require a
-billing account. If a capability needs one, it is not activated — it is written
-down here as unavailable, with what LeRoutier does instead.
+Billing must remain disabled. Do not link a billing account, enable Blaze,
+paid Identity Platform, Vertex AI, Cloud Functions, Firestore, Firebase Storage,
+paid Google APIs or a paid model tier. No automatic upgrade is permitted.
 
-Firebase is used for **authentication only**.
+## Features actually used
 
-## What is used
-
-| Feature | Plan | Quota | Status |
-| --- | --- | --- | --- |
-| **Firebase Authentication** — Google sign-in | Spark (free) | 50 000 monthly active users on the no-cost tier | **in use** |
-| **Firebase Web SDK** (`firebase/app`, `firebase/auth`) | free | — | **in use** |
-| **Google Secure Token public keys** | free, unauthenticated | — | **in use** — this is what verifies a token |
-
-Nothing else. No Firestore, no Realtime Database, no Storage, no Hosting, no
-Cloud Functions, no Cloud Messaging, no Analytics, no App Check, no Extensions.
-
-## What is deliberately not used
-
-| Not used | Why |
-| --- | --- |
-| **Firestore / Realtime Database** | Neon PostgreSQL is LeRoutier's authoritative database. A second user store would be a second answer to "who is this?" |
-| **Firebase Storage** | nothing is stored in Firebase |
-| **Cloud Functions** | the backend is `le-routier-api` on Vercel. Cloud Functions require the Blaze plan — a billing account — which settles it |
-| **Firebase Hosting** | the PWA is on Vercel |
-| **Identity Platform (upgraded Auth)** | multi-tenancy, SAML, OIDC providers and MFA are paid. Not needed; not enabled |
-| **Phone authentication** | billed per verification beyond a small free allowance, and needs a billing account for production volume |
-| **App Check** | free tier exists, but its enforcement APIs and reCAPTCHA Enterprise path lead to billing. Not enabled |
-| **Firebase Analytics** | LeRoutier does not do behavioural tracking — see the privacy policy |
-
-## The Admin SDK is not installed
-
-Verifying a Firebase ID token needs **no service account**: an ID token is an
-RS256 JWT signed by Google, with
-
-```
-iss = https://securetoken.google.com/<projectId>
-aud = <projectId>
-```
-
-verified against Google's public key set. LeRoutier's existing `jose` verifier
-already does exactly that, so the migration from the previous provider was
-configuration rather than new code.
-
-Consequences, all good ones:
-
-- **No private key exists in Vercel**, in CI, or anywhere else. A secret that is
-  not stored cannot leak.
-- **No cold-start cost** from a large SDK in a serverless function.
-- **No new dependency** on the server at all.
-
-What is given up: `checkRevoked`. A token stays valid until it expires — at most
-an hour — even if the Firebase user is disabled in the meantime. Revoking
-*LeRoutier* access is immediate and unaffected: an identity disabled in the
-database fails every request at once, which is the control that matters.
-
-If revocation-on-Google's-side is ever wanted, it needs `firebase-admin` and a
-service account. That is a deliberate decision to take then, not a default now.
-
-## Quotas, and what happens at the edge
-
-| Limit | Free allowance | If reached |
+| Feature | Configuration | Limit / failure behavior |
 | --- | --- | --- |
-| Monthly active users | 50 000 | further sign-ins are refused by Google; LeRoutier shows its existing "connexion indisponible" state and everything that needs no account keeps working |
-| Sign-in requests per IP | Google's abuse throttling | the same |
-| Key-set fetches | none stated; cached by `jose` | — |
+| Firebase Authentication, Google social sign-in | Spark, Web SDK; public runtime configuration | Google abuse and request limits apply; sign-in failure leaves public search and parcel tracking usable |
+| Firebase public signing keys | jose JWKS cache; no service account | Unavailable keys fail authentication closed |
+| Gemini Developer API | Google OAuth, Sensitive GOOGLE_GEMINI_CREDENTIALS; gemini-3.6-flash | Free quota is opportunistic; shared database cooldown honors Retry-After/RetryInfo; core journeys continue |
+| OpenRouter fallback | Explicitly selected free model, low-risk tasks only | No financial, identity or capacity authority; failure produces no recommendation |
+| MiniCPM | Local only | Never silently selected as a remote provider |
 
-For LeRoutier's pilot this is not a near-term constraint. A transport platform
-serving 50 000 people a month is far past the point where the billing question
-should be revisited on its own merits.
+The previous ?50,000 MAU then sign-ins stop? statement conflated basic Firebase
+Authentication with upgraded Identity Platform pricing. Basic social sign-in is
+a no-cost Firebase feature; do not use the Identity Platform pricing table as a
+quota promise for this project. Google's published authentication limits include
+account creation abuse limits (100 new accounts/hour/IP) and endpoint-specific
+limits. These may change; throttling never authorizes billing.
 
-**Degradation is honest, not silent.** The product already treats sign-in as an
-optional capability: searching trips, comparing fares and tracking a parcel need
-no account, and the sign-in card states plainly when authentication is
-unavailable rather than failing at the moment someone tries to book.
+Sources checked 2026-09-17:
+[Firebase pricing plans](https://firebase.google.com/docs/projects/billing/firebase-pricing-plans),
+[Authentication limits](https://firebase.google.com/docs/auth/limits),
+[Identity Platform pricing](https://cloud.google.com/identity-platform/pricing).
 
-## Project configuration
+The public Firebase project ID returned by production is leroutier-df848.
+The Gemini OAuth Google project is leroutier. These are distinct configuration
+identifiers; the verifier derives issuer and audience from FIREBASE_PROJECT_ID.
 
-| Setting | Value | Free |
-| --- | --- | --- |
-| Project | `leroutier-df848` | yes |
-| Web app | registered via the Firebase Management API | yes |
-| Sign-in provider | Google, enabled | yes |
-| Authorized domains | `localhost`, `leroutier-df848.firebaseapp.com`, `leroutier-df848.web.app`, `le-routier.vercel.app` | yes |
+## Authentication controls
 
-The Google provider is configured against the owner's existing Google Auth
-Platform project. **That OAuth client's secret belongs in the Firebase Console**
-— in the Google provider's Web SDK configuration — and never in this repository,
-in Vercel, or in a browser bundle. LeRoutier itself never needs it: a browser
-app cannot keep a secret, which is the whole reason this flow does not use one.
+RS256 Firebase tokens are checked for signature, issuer, audience, expiry and
+issued-at time. DB roles alone control authorization. First login creates one
+Passenger and one passenger profile, with no operator. Token claims, email,
+domain and profile fields cannot grant a role. No Admin SDK or private signing
+key is needed. Firebase-side revocation is not checked; DB identity deactivation
+blocks the next request. Firebase ID tokens can otherwise remain valid until expiry.
 
-## Verifying no billing was enabled
+The browser requests only openid/profile/email. Persistence is session-scoped,
+falling back to memory if session storage cannot be used. CSP permits Google's
+auth helper and the project's auth iframe. Popup sign-in is primary; redirect
+fallback remains subject to browser storage restrictions described by
+[Firebase](https://firebase.google.com/docs/auth/web/redirect-best-practices).
+The real owner sign-in remains a manual verification gate.
 
-Firebase and Google Cloud both refuse Blaze-only operations outright without a
-billing account, so any attempt would have failed loudly rather than silently
-incurring cost. Two positive checks:
+## Platform Ops MFA
 
-- The Firebase console shows the **Spark** plan for `leroutier-df848`.
-- No `firebase-admin`, `firebase-functions` or `firebase-tools` dependency
-  exists in this repository — `pnpm why firebase-admin` finds nothing.
+LeRoutier does not enforce a second factor. Firebase MFA requires the upgraded
+Identity Platform feature set; it is not activated under the owner's no-billing
+policy. Compensating controls are Google account two-step verification/passkeys
+(managed by the owner), individual Ops accounts, no shared credentials, DB
+deactivation, scoped roles, audit, and human financial approval. Do not claim
+these controls are app-enforced MFA.
 
-```bash
-pnpm auth:verify        # configuration and Google's key set, no billing surface
-```
+## Verification boundary
+
+No billing mutation was performed. Repository dependency and configuration
+inspection proves the app does not require paid Firebase features; it does not
+prove an account's current billing state. Console/account verification is
+read-only. Never infer ?billing cannot be enabled? merely from application code.

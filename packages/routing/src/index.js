@@ -45,7 +45,7 @@ export function createRouter(config = {}, fetchImpl = globalThis.fetch) {
     /**
      * Road geometry through the given stops, in order.
      * @param {{longitude:number,latitude:number}[]} stops
-     * @returns {Promise<{coordinates:[number,number][], distanceM:number, provider:string}>}
+     * @returns {Promise<{coordinates:[number,number][], distanceM:number, durationS:number, legs:any[], provider:string}>}
      */
     async route(stops) {
       if (!configured) throw new RoutingUnavailable(ROUTING_REASONS.NOT_CONFIGURED, 'No routing engine is configured.');
@@ -59,19 +59,18 @@ export function createRouter(config = {}, fetchImpl = globalThis.fetch) {
       // OSRM: /route/v1/driving/{lon,lat};{lon,lat}?overview=full&geometries=geojson
       const path = stops.map(s => `${s.longitude},${s.latitude}`).join(';');
       const endpoint = `${url.replace(/\/$/, '')}/route/v1/driving/${path}?overview=full&geometries=geojson&continue_straight=false`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const signal = AbortSignal.timeout(timeoutMs);
       let response;
       try {
         response = await fetchImpl(endpoint, {
-          signal: controller.signal,
+          signal,
           headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
         });
       } catch (error) {
         throw new RoutingUnavailable(
-          error?.name === 'AbortError' ? ROUTING_REASONS.PROVIDER_TIMEOUT : ROUTING_REASONS.PROVIDER_ERROR,
+          ['AbortError','TimeoutError'].includes(error?.name) ? ROUTING_REASONS.PROVIDER_TIMEOUT : ROUTING_REASONS.PROVIDER_ERROR,
           'The routing engine did not respond.');
-      } finally { clearTimeout(timer); }
+      }
 
       if (!response.ok) {
         // The provider's status is enough for Ops; its body is not shown.
@@ -88,14 +87,19 @@ export function createRouter(config = {}, fetchImpl = globalThis.fetch) {
       if (!Array.isArray(coordinates) || coordinates.length < 2) {
         throw new RoutingUnavailable(ROUTING_REASONS.NO_ROUTE, 'No road route connects these stops.');
       }
-      if (!coordinates.every(c => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1]))) {
+      if (coordinates.length > 100000 || !coordinates.every(c => Array.isArray(c) && isCoordinate({longitude:c[0],latitude:c[1]}))) {
         throw new RoutingUnavailable(ROUTING_REASONS.MALFORMED_GEOMETRY, 'Routing geometry was malformed.');
       }
       const distanceM = Math.round(Number(leg.distance));
       if (!Number.isFinite(distanceM) || distanceM <= 0) {
         throw new RoutingUnavailable(ROUTING_REASONS.MALFORMED_GEOMETRY, 'Routing distance was missing.');
       }
-      return { coordinates, distanceM, provider };
+      const durationS = Math.round(Number(leg.duration));
+      if (!Number.isFinite(durationS) || durationS <= 0 || !Array.isArray(leg.legs) || leg.legs.length !== stops.length - 1 ||
+        !leg.legs.every(l => Number.isFinite(l.distance) && l.distance >= 0 && Number.isFinite(l.duration) && l.duration >= 0)) {
+        throw new RoutingUnavailable(ROUTING_REASONS.MALFORMED_GEOMETRY, 'Routing duration or legs were missing.');
+      }
+      return { coordinates, distanceM, durationS, legs: leg.legs.map(l => ({distanceM:Math.round(l.distance),durationS:Math.round(l.duration)})), provider };
     },
   };
 }

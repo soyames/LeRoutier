@@ -41,6 +41,7 @@ function useOpsActions(){
 export function Today(){
   const {user,online}=useSession();
   const diagnostics=useApi(user?'/ops/diagnostics':null);
+  const health=useApi(user && !user.operator_id?'/ops/health':null);
   const fleet=useApi(user?'/ops/fleet':null);
   const approvals=useApi(user?'/agent/approvals':null);
   const operatorsList=useApi(user && !user.operator_id?'/operators':null);
@@ -69,6 +70,15 @@ export function Today(){
     diagnostics.reload();approvals.reload();
   }
   return <>
+    {user && !user.operator_id && <Card className="stack">
+      <h2>État technique de la plateforme</h2>
+      {health.error ? <p role="alert">Le contrôle technique est indisponible.</p> : health.data ? <>
+        <p>Base de données : disponible · Migrations : {health.data.migrations.matched?'à jour':'à vérifier'}</p>
+        <p>Notifications en échec : {health.data.counts.notification_failed} · Canaux indisponibles : {health.data.counts.notification_unavailable}</p>
+        <p>Événements à reprendre : {health.data.counts.dispatch_dead} · Modèles en pause : {health.data.counts.model_cooldowns} · Réponses IA refusées : {health.data.counts.model_rejected}</p>
+        <p>Erreurs récentes : {health.data.signals.reduce((sum,s)=>sum+s.count,0)}. Alertes consultables ici ; aucun envoi externe configuré.</p>
+      </> : <p>Contrôle en cours…</p>}
+    </Card>}
     <SectionTitle icon={Home} title="Aujourd’hui"/>
     <Card className="hero stack"><span className="eyebrow">{user?.verification_status==='verified'?'Centre opérationnel':'Compte en attente de vérification'}</span>
       <h1>{user?.operator_type==='independent'?'Votre activité indépendante':`Votre compagnie${user?.display_name?` — ${user.display_name}`:''}`}</h1>

@@ -15,6 +15,7 @@ const PENDING_REDIRECT = 'leroutier:auth-redirect';
 // route itself — falls back to the home page. This is the open-redirect guard.
 export function safeReturnPath(value) {
   if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return '/';
+  if (value.includes('\\') || [...value].some(c=>c.charCodeAt(0)<=32)) return '/';
   if (value.startsWith('/auth/callback')) return '/';
   return value;
 }
@@ -55,7 +56,8 @@ export async function firebaseAuth(config) {
   const instance = auth.getAuth(app);
   // Tokens live for the tab and no longer. A shared handset at a station
   // should not sign the next person in as the last one.
-  await auth.setPersistence(instance, auth.browserSessionPersistence).catch(() => {});
+  await auth.setPersistence(instance, auth.browserSessionPersistence)
+    .catch(() => auth.setPersistence(instance, auth.inMemoryPersistence));
   cached = { key, auth: instance, sdk: auth };
   return cached;
 }

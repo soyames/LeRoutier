@@ -188,6 +188,9 @@ importers:
       react-router:
         specifier: 'catalog:'
         version: 7.18.3(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      workbox-window:
+        specifier: ^7.4.1
+        version: 7.4.1
     devDependencies:
       '@vitejs/plugin-react':
         specifier: 'catalog:'
@@ -270,6 +273,9 @@ importers:
       '@leroutier/config':
         specifier: workspace:*
         version: link:../config
+      '@leroutier/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@leroutier/geo':
         specifier: workspace:*
         version: link:../geo

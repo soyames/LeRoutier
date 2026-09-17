@@ -15,6 +15,9 @@ export function createDatabase(config = serverConfig()) {
     // without weakening anything remote. The test is the host, not a flag, so
     // no environment variable can turn verification off for Neon.
     loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname);
+    if (/^(lr_test_)|_dev$/.test(config.schema) && !loopback) {
+      throw new Error('Disposable databases must use loopback PostgreSQL.');
+    }
   } catch { throw new Error('Invalid database configuration.'); }
   const pool = new pg.Pool({ connectionString, ssl: loopback ? false : { rejectUnauthorized: true }, max: 5,
     connectionTimeoutMillis: 15_000, idleTimeoutMillis: 10_000 });
@@ -22,6 +25,7 @@ export function createDatabase(config = serverConfig()) {
   pool.on('error', () => {});
   return {
     schema: config.schema,
+    poolStats: () => ({ total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount, max: 5 }),
     async transaction(fn) {
       let client;
       for (let attempt = 1; ; attempt++) {
@@ -30,6 +34,7 @@ export function createDatabase(config = serverConfig()) {
           await client.query('BEGIN');
           await client.query(`SET LOCAL search_path TO "${config.schema}", public`);
           await client.query("SET LOCAL lock_timeout = '10s'");
+          await client.query("SET LOCAL statement_timeout = '30s'");
           const result = await fn(client);
           await client.query('COMMIT');
           return result;

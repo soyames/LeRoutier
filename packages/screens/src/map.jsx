@@ -79,7 +79,7 @@ export default function TransportMap({
   return <div className="lr-map" style={{ height }} role="region" aria-label={ariaLabel}>
     <MapContainer center={/** @type {[number, number]} */ (centre ?? BENIN_CENTRE)} zoom={centre ? 12 : BENIN_DEFAULT_ZOOM}
       scrollWheelZoom={false} style={{ height: '100%', width: '100%' }}>
-      <TileLayer url={tiles.url} attribution={tiles.attribution} maxZoom={tiles.maxZoom}/>
+      {tiles.url && <TileLayer url={tiles.url} attribution={tiles.attribution} maxZoom={tiles.maxZoom}/>}
       <Frame bounds={bounds} centre={centre}/>
 
       {split

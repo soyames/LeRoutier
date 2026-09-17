@@ -45,6 +45,11 @@ const PUBLIC_SCREENS = [
   ['trip search', '/trips'],
   ['public parcel tracking', '/parcels/track'],
   ['operator onboarding', '/onboarding'],
+  ['privacy', '/privacy'],
+  ['terms', '/terms'],
+  ['legal notice', '/legal'],
+  ['cancellations', '/cancellations'],
+  ['cookies', '/cookies'],
 ];
 
 for (const [name, route] of PUBLIC_SCREENS) {

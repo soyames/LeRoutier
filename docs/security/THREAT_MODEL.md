@@ -15,7 +15,7 @@ because a control that has not been tested is a belief, not a control.
 
 Scope: the unified PWA, the three legacy apps still deployed, `/api/v1`, the
 domain services, the database, the agent/workflow layer, and the deployment
-pipeline. Out of scope: the OIDC provider's own security, FedaPay's internal
+pipeline. Out of scope: Firebase/Google's own security, FedaPay's internal
 systems, and Neon's infrastructure — each is a trusted third party whose
 compromise is modelled as an event, not prevented here.
 

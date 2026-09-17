@@ -65,12 +65,13 @@ test('payout privilege escalation is rejected for drivers and passengers',async(
 
 test('workflow approvals cannot be bypassed or decided by non-Ops actors',async()=>{
   const run=await engine.runAction(hardeningAgent,'payment.reconcile',{paymentId:randomUUID()});
-  const approval=(await engine.listApprovals(ops))[0];
+  const platformOps={...ops,operator_id:null};
+  const approval=(await engine.listApprovals(platformOps))[0];
   assert.ok(approval);
   await assert.rejects(engine.approve(driver,approval.id,'approved'),{code:'FORBIDDEN'});
   await assert.rejects(engine.approve(passenger,approval.id,'approved'),{code:'FORBIDDEN'});
   await assert.rejects(engine.retry(driver,run.workflowRunId),{code:'FORBIDDEN'});
-  const stillPending=(await engine.listApprovals(ops)).find(a=>a.id===approval.id);
+  const stillPending=(await engine.listApprovals(platformOps)).find(a=>a.id===approval.id);
   assert.equal(stillPending.status,'pending','approval remains untouched');
 });
 
@@ -138,4 +139,3 @@ test('delay detection notifies affected passengers through the outbox',async()=>
   const notified=await one("SELECT * FROM outbox WHERE event_type='notification.send' AND payload->>'template'='service_delayed'");
   assert.ok(notified,'passengers on the delayed service were notified');
 });
-

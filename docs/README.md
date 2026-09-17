@@ -54,6 +54,8 @@ removed rather than left to mislead.
 
 ## Security and privacy
 
+- [Operational load, query profiling and restore drills](operations/OPERATIONAL_DRILLS.md)
+
 - [`security/SECURITY_MODEL.md`](security/SECURITY_MODEL.md) — the controls committed to
 - [`security/THREAT_MODEL.md`](security/THREAT_MODEL.md) — actors, assets, STRIDE, residual risk
 - [`security/AUTHORIZATION_MATRIX.md`](security/AUTHORIZATION_MATRIX.md) — who may do what, and where it is enforced

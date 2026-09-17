@@ -6,6 +6,7 @@ import { payouts } from '@leroutier/database/payouts';
 import { recovery } from '@leroutier/database/recovery';
 import { parcels } from '@leroutier/database/parcels';
 import { notificationPolicies } from '@leroutier/database/notifications';
+import { notificationDelivery } from '@leroutier/database/notification-delivery';
 import { reminders } from '@leroutier/database/reminders';
 import { createActions, createWorkflowEngine } from '@leroutier/agents';
 import { paymentAdapter } from '../../../services/api/src/payment-adapter.js';
@@ -25,6 +26,7 @@ try {
   // they travel the same policy path as every other notification.
   const due = await reminders(db, config).tick();
   const result = await engine.processOutbox();
+  await notificationDelivery(db).tick();
   console.log(`Workflow tick processed ${result.processed} events and raised ${due.raised} reminders `
     + `(${due.journeyReminders} journey, ${due.parcelReminders} parcel).`);
 } catch {

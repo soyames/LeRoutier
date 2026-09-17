@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@leroutier/config": "workspace:*",
+    "@leroutier/domain": "workspace:*",
     "@leroutier/geo": "workspace:*",
     "@leroutier/ui": "workspace:*",
     "lucide-react": "catalog:",
