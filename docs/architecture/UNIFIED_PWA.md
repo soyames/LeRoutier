@@ -176,17 +176,19 @@ project. The legacy Vercel hostname keeps working during the transition.
 - `https://le-routier-api.vercel.app` — legacy API origin, kept during the
   transition.
 
-### OIDC redirect URIs
+### Firebase auth callback
 
-| Now | Future |
-| --- | --- |
-| `https://le-routier.vercel.app/auth/callback` | `https://leroutier.app/auth/callback` |
-| `https://le-routier-passenger.vercel.app/auth/callback` | retired with the old app |
-| `https://le-routier-driver.vercel.app/auth/callback` | retired with the old app |
-| `https://le-routier-ops.vercel.app/auth/callback` | retired with the old app |
+The Firebase auth domain is `leroutier.app` itself: Vercel reverse-proxies
+`/__/auth/*` to `leroutier-df848.firebaseapp.com/__/auth/*` (same pattern as
+the `/api/v1` rewrite, listed above the SPA fallback so it is never swallowed).
+Popup handler, redirect iframe and reset pages therefore live on the app's own
+origin — no Firebase Hosting, no billing. The Google OAuth redirect URI to
+register (owner, Google Cloud Console) is:
 
-No provider credentials are invented here; these are the URLs to register once
-a provider exists.
+`https://leroutier.app/__/auth/handler`
+
+Legacy origins keep `firebaseapp.com` as their auth helper through the same
+proxy-free direct URL; their CSP allows the `leroutier.app` auth iframe.
 
 ## Data integrity
 

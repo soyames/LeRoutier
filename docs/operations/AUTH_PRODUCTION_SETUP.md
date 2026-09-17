@@ -30,7 +30,7 @@ Four variables, all on **`le-routier-api`**. None on `le-routier`.
 | --- | --- |
 | `FIREBASE_PROJECT_ID` | the Firebase project |
 | `FIREBASE_API_KEY` | browser-facing Firebase key |
-| `FIREBASE_AUTH_DOMAIN` | `<project>.firebaseapp.com` |
+| `FIREBASE_AUTH_DOMAIN` | `leroutier.app` (the app domain, reverse-proxied to the Firebase auth helper) |
 | `FIREBASE_APP_ID` | the registered web app |
 
 ### Why all four live on the API
@@ -90,8 +90,28 @@ matters for this product.
 | Setting | Value |
 | --- | --- |
 | Sign-in provider | **Google**, enabled |
-| Authorized domains | must include `le-routier.vercel.app` |
+| Authorized domains | `leroutier.app` (canonical), `leroutier-df848.firebaseapp.com` / `.web.app` (helper), `localhost` (dev) |
 | Web app | registered; supplies the four values above |
+
+### Custom auth domain via reverse proxy (no Firebase Hosting)
+
+The auth domain is `leroutier.app` itself. Vercel rewrites `/__/auth/*` to
+`https://leroutier-df848.firebaseapp.com/__/auth/*`, so the popup handler, the
+redirect iframe and the password-reset pages are served from the app's own
+origin. This removes the cross-site storage/iframe problems mobile Safari and
+partitioned browsers hit with the redirect flow — without Firebase Hosting,
+without a second project and without enabling billing. The app's CSP allows
+`frame-src 'self'` plus the Google origins; it is not weakened.
+
+**Google Cloud Console action (owner)**: add
+`https://leroutier.app/__/auth/handler` to the Web OAuth client's authorized
+redirect URIs (the Firebase-managed Google client for project `leroutier-df848`).
+Until then the redirect flow works but Google refuses the callback with
+`redirect_uri_mismatch`; the popup flow needs it too, since the handler is the
+same URI.
+
+The same proxy pattern is how `/api/v1` reaches the API; both rewrites sit
+above the SPA fallback, so neither can be swallowed by the app shell.
 
 > The Google provider's **Web SDK configuration** is where an external OAuth
 > client id and secret go, if the project uses one. That secret stays in the

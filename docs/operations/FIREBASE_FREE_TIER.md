@@ -61,3 +61,10 @@ No billing mutation was performed. Repository dependency and configuration
 inspection proves the app does not require paid Firebase features; it does not
 prove an account's current billing state. Console/account verification is
 read-only. Never infer ?billing cannot be enabled? merely from application code.
+
+## Custom auth domain via reverse proxy
+
+`leroutier.app` is the Firebase authDomain, served by a Vercel rewrite of
+`/__/auth/*` to the project's `firebaseapp.com` helper. No Firebase Hosting
+site, no Blaze plan, no Identity Platform feature is involved — this is the
+documented free-tier reverse-proxy pattern for custom auth domains.
