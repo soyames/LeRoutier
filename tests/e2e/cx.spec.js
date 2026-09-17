@@ -163,7 +163,7 @@ test('empty production database shows honest product empty states',async({page})
   await mockApi(page);
   await page.route('**/api/v1/routes',r=>r.fulfill({json:{data:[]}}));
   await page.goto('http://127.0.0.1:4173/');
-  await expect(page.getByText('Aucune ligne publiée')).toBeVisible();
+  await expect(page.getByText('Aucune ligne publiée').first()).toBeVisible();
   await expect(page.getByText(/Entrez votre destination pour voir les départs disponibles/)).toBeVisible();
 });
 
@@ -171,7 +171,7 @@ test('quick search offers current location with a graceful manual fallback', asy
   await mockApi(page);
   await page.route('**/api/v1/journey-plan*', r => r.fulfill({ json: { data: { options: [], originResolved: null, generatedAt: '2026-09-17T00:00:00Z' } } }));
   await page.goto('http://127.0.0.1:4176/trips');
-  const origin = page.getByLabel('Départ');
+  const origin = page.getByLabel('Départ', { exact: true });
   await expect(origin.locator('option[value="my-location"]')).toHaveCount(1);
   // Permission denied → clear guidance and the manual path stays available.
   await page.context().grantPermissions([], { origin: 'http://127.0.0.1:4176' }).catch(() => {});
