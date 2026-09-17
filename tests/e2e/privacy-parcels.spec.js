@@ -45,7 +45,7 @@ test('the parcel city picker lists Benin communes even with no routes', async ({
   await page.route('**/api/v1/auth/demo', r => r.fulfill({ json: { data: { token: 'fixture-session', user: PASSENGER } } }));
   await page.goto(APP + '/parcels');
   await page.getByRole('button', { name: 'Connexion de développement' }).click();
-  const origin = page.getByLabel('Ville de départ');
+  const origin = page.getByLabel('Ville de départ', { exact: true });
   await expect(origin).toBeVisible();
   for (const city of communes) await expect(origin.locator('option', { hasText: city })).toHaveCount(1);
   // Selecting a city without a stop states the service availability honestly.
