@@ -57,10 +57,18 @@ test('live GPS shows the vehicle on the real road with progress and next stop', 
   await expect(page.getByText(/Arrivée estimée vers/)).toBeVisible();
 });
 
-test('OpenStreetMap attribution is carried on every map', async ({ page }) => {
+test('map tiles are provider-configured: no external tile claim without configuration', async ({ page }) => {
+  // The tile provider is build-time configuration (VITE_MAP_TILE_URL +
+  // attribution). With none configured — the production default — the map
+  // draws LeRoutier's own geometry without claiming or loading external
+  // tiles. No shared community tile infrastructure is silently used.
   await openTracking(page, trackingFixture());
   const map = page.getByRole('region', { name: 'Carte du véhicule sur son itinéraire' });
-  await expect(map.locator('.leaflet-control-attribution')).toContainText('OpenStreetMap');
+  await expect(map.locator('.leaflet-container')).toBeVisible();
+  // The road geometry is still drawn, so tracking works without a provider.
+  await expect(map.locator('path.leaflet-interactive').first()).toBeVisible();
+  const attribution = map.locator('.leaflet-control-attribution');
+  if (await attribution.count()) await expect(attribution).not.toContainText('OpenStreetMap');
 });
 
 test('a stale fix is never presented as live, and the ETA says it came from the timetable', async ({ page }) => {

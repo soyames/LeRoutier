@@ -22,6 +22,7 @@ import { notificationDelivery } from '@leroutier/database/notification-delivery'
 import { operationalHealth } from '@leroutier/database/operational-health';
 import { fareIntelligence } from '@leroutier/database/fare-intelligence';
 import { commercial } from '@leroutier/database/commercial';
+import { assistantService } from './assistant.js';
 import { mobility } from '@leroutier/database/mobility';
 import { journeys } from '@leroutier/database/journeys';
 import { tracking } from '@leroutier/database/tracking';
@@ -69,6 +70,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   // handed the very objects every other route uses, so a capacity check or a
   // fare it sees is the one the PWA sees.
   const ussd=createUssdEngine({db,domain,parcels:parcel,payments:pay,tracking:track,config:config.ussd ?? {}});
+  const assistant=assistantService({db,domain,parcels:parcel,fares,health,track});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
   async function limited(subject) {
     await db.transaction(async tx=>{
@@ -88,6 +90,28 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   }
   async function route(req,path,url,method,readBody){
     const body=readBody;
+    // A known path with an unsupported method is a method error before any
+    // other check: no accidental GET mutation, no silent typo confusion, and
+    // no auth-oracle ordering difference between public and private routes.
+    const METHOD_ALLOW = {
+      '/health': ['GET'], '/auth/config': ['GET'], '/payments/config': ['GET'],
+      '/stops': ['GET'], '/places': ['GET'], '/routes': ['GET'], '/services': ['GET'],
+      '/webhooks/fedapay': ['POST'], '/auth/demo': ['POST'], '/me': ['GET', 'PATCH'],
+      '/me/bookings': ['GET'], '/me/parcels': ['GET'], '/notifications': ['GET'],
+      '/notifications/preferences': ['GET', 'PUT'], '/parcels/quote': ['GET'], '/parcels': ['POST'],
+      '/bookings': ['POST'], '/operator/settlements': ['GET'], '/operator/payouts': ['GET', 'POST'],
+      '/driver/earnings': ['GET'], '/driver/parcels': ['GET'], '/driver/service': ['GET'],
+      '/driver/payouts': ['GET', 'POST'], '/driver/payout-destinations': ['GET', 'POST'],
+      '/driver/walk-up-bookings': ['POST'], '/driver/actions': ['POST'],
+      '/onboarding/me': ['GET'], '/onboarding/company': ['POST'], '/onboarding/independent': ['POST'],
+      '/onboarding/operator': ['PATCH'], '/operators': ['GET'], '/incidents': ['GET', 'POST'],
+      '/boarding-points': ['GET'], '/boarding-points/proposals': ['POST'], '/mobility/providers': ['GET'],
+      '/mobility/handoff': ['POST'], '/tickets/verify': ['POST'], '/workflows': ['GET'],
+      '/workflows/tick': ['POST'], '/assistant': ['POST'],
+    };
+    if (METHOD_ALLOW[path] && !METHOD_ALLOW[path].includes(method)) {
+      throw new DomainError('METHOD_NOT_ALLOWED', 'Method not allowed for this endpoint.', 405);
+    }
     if(method==='GET' && path==='/health') {await list('SELECT 1');return {status:'ok'};}
     if(method==='GET' && path==='/auth/config') return publicAuthConfig(config);
     if(method==='GET' && path==='/payments/config') return {available:pay.configured,payouts:{available:!!(adapter && adapter.payoutsAvailable)}};
@@ -185,6 +209,18 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       const serviceId=uuid(available[1]);
       await meterAnonymous();
       return domain.availability(serviceId,Number(url.searchParams.get('origin')),Number(url.searchParams.get('destination')));
+    }
+    // The Assistant is role-aware: anonymous callers get the public surface
+    // only, and every caller is rate-limited per identity or per client
+    // address. The identity comes from the server, never from the message.
+    if(method==='POST' && path==='/assistant') {
+      const assistantHuman=await auth.authenticate(req).catch(()=>null);
+      const ip=(req.headers.get('x-forwarded-for')||'').split(',')[0].trim()||'local';
+      await limited(assistantHuman?('assistant-user:'+assistantHuman.id):('assistant-anon:'+ip));
+      const assistantInput=await body();
+      invariant(assistantInput && Object.keys(assistantInput).every(k=>['sessionId','message'].includes(k)),
+        'INVALID_INPUT','Unexpected assistant fields.');
+      return assistant.handle({actor:assistantHuman,sessionId:assistantInput.sessionId,message:assistantInput.message,reasoning});
     }
     // Human users authenticate first; service/agent principals (distinct identity
     // namespace) only apply to the dedicated agent API below.

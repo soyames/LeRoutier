@@ -22,6 +22,7 @@ removed rather than left to mislead.
 - [`PARCEL_LOGISTICS.md`](architecture/PARCEL_LOGISTICS.md) — consignment, custody, pickup
 - [`MAPS_ROUTING_AND_TRACKING.md`](architecture/MAPS_ROUTING_AND_TRACKING.md) — **canonical** for maps, road routing, GPS, progress and ETA
 - [`NOTIFICATIONS.md`](architecture/NOTIFICATIONS.md) — the event-driven notification layer
+- [`ASSISTANT.md`](architecture/ASSISTANT.md) — the role-aware Assistant: deterministic tools, model phrasing, limits and audit
 - [`AGENTIC_WORKFLOWS.md`](architecture/AGENTIC_WORKFLOWS.md) — principals, scopes, typed actions, approvals, autonomy
 - [`MODEL_PROVIDERS.md`](architecture/MODEL_PROVIDERS.md) — what a model may see, suggest and never do
 - [`USSD.md`](architecture/USSD.md) — the feature-phone channel over the same domain
@@ -58,6 +59,7 @@ removed rather than left to mislead.
 - [Operational load, query profiling and restore drills](operations/OPERATIONAL_DRILLS.md)
 
 - [`security/SECURITY_MODEL.md`](security/SECURITY_MODEL.md) — the controls committed to
+- [`security/API_SURFACE.md`](security/API_SURFACE.md) — every `/api/v1` endpoint classified (public / authenticated / role / webhook / agent)
 - [`security/THREAT_MODEL.md`](security/THREAT_MODEL.md) — actors, assets, STRIDE, residual risk
 - [`security/AUTHORIZATION_MATRIX.md`](security/AUTHORIZATION_MATRIX.md) — who may do what, and where it is enforced
 - [`security/PRIVACY_AND_RETENTION.md`](security/PRIVACY_AND_RETENTION.md) — what is stored, why, and for how long
