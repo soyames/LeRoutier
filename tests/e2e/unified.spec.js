@@ -46,6 +46,10 @@ test('public home offers product tasks, never application names', async ({ page 
 test('anonymous trip search works and never offers cash', async ({ page }) => {
   await mockApi(page);
   await page.goto(APP + '/trips');
+  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByLabel('Ville de départ').click(); await page.getByLabel('Ville de départ').fill('Cotonou'); await page.getByLabel('Ville de départ').press('Enter');
+  await page.getByLabel('Destination').click(); await page.getByLabel('Destination').fill('Parakou'); await page.getByLabel('Destination').press('Enter');
+  await page.getByRole('button', { name: 'Rechercher un trajet' }).click();
   await expect(page.getByText('Opérateur démo')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Se connecter pour réserver' })).toBeEnabled();
   await expect(page.getByText(/espèces/i)).toHaveCount(0);
@@ -126,8 +130,9 @@ test('one identity opens both the passenger and the work workspace', async ({ pa
   // Switching workspace keeps the same identity and the same session.
   await page.getByRole('menuitem', { name: /Voyageur/ }).click();
   await expect(page).toHaveURL(/\/trips$/);
+  // The passenger workspace opens straight onto the geography search.
+  await expect(page.getByRole('button', { name: 'Rechercher un trajet' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Se connecter pour réserver' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Choisir ce trajet' })).toBeVisible();
 });
 
 test('independent owner-driver sees revenue, withdrawals and walk-up cash', async ({ page }) => {

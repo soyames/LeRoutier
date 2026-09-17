@@ -92,6 +92,10 @@ test('the browser is never given anything but the four public identifiers', asyn
 test('a passenger completes their profile and signs out leaving nothing behind', async ({ page }) => {
   await signedIn(page, 4173, { needsProfile: true });
   await expect(page.getByRole('heading', { name: 'Complétez votre profil' })).toBeVisible();
+  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByLabel('Ville de départ').fill('Cotonou'); await page.getByLabel('Ville de départ').press('Enter');
+  await page.getByLabel('Destination').fill('Parakou'); await page.getByLabel('Destination').press('Enter');
+  await page.getByRole('button', { name: 'Rechercher un trajet' }).click();
   await expect(page.getByRole('button', { name: 'Complétez votre profil' })).toBeDisabled();
   await page.getByLabel('Nom complet').fill('Voyageur Test');
   await page.getByLabel('Téléphone', { exact: true }).fill('');

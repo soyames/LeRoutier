@@ -119,3 +119,27 @@ test('a planned option books through the exact same domain flow',async()=>{
   assert.equal(booking.status,'held');
   assert.equal(booking.amount_minor,option.fare.amountMinor);
 });
+
+test('a destination place that is not a stop gets a last mile around the nearest drop-off', async()=>{
+  // A point beyond Parakou's stop: the plan must pick the nearest practical
+  // drop-off and add the last-mile leg.
+  const beyond={latitude:9.5,longitude:2.7};
+  const plan=await planner.plan({originStopId:demoId(200),destination:beyond});
+  const option=plan.options.find(o=>o.feasible);
+  assert.ok(option,'an option exists for a non-stop destination');
+  assert.ok(option.lastMile,'the last mile is calculated');
+  assert.equal(option.dropoffStop.id,demoId(203),'the nearest served stop is the drop-off');
+  assert.ok(option.lastMile.distanceM>0 && option.lastMile.durationS>0);
+});
+
+test('a place id origin plans through coordinates, like the API resolves it',async()=>{
+  // The API resolves a place id to the canonical commune's coordinates before
+  // planning; verify that path end to end with the seeded Benin geography.
+  const {rows:[place]}=await sql(`SELECT id,latitude,longitude FROM places
+    WHERE name='Cotonou' AND kind='city' AND latitude IS NOT NULL ORDER BY (source IS NULL) LIMIT 1`);
+  assert.ok(place,'the canonical Cotonou commune carries coordinates');
+  const plan=await planner.plan({origin:{latitude:Number(place.latitude),longitude:Number(place.longitude)},destinationStopId:demoId(203)});
+  const first=plan.options.find(o=>o.feasible);
+  assert.ok(first,'a place-resolved origin still plans');
+  assert.ok(first.firstMile,'coordinates resolved from the place produce a first mile');
+});

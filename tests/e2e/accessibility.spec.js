@@ -83,8 +83,16 @@ for (const [name, route, identity] of SIGNED_IN_SCREENS) {
 
 test('a keyboard alone reaches the primary action on the landing screen', async ({ page }) => {
   await open(page, '/');
-  const search = page.getByRole('button', { name: 'Rechercher' });
+  const search = page.getByRole('button', { name: 'Rechercher un trajet' });
   await expect(search).toBeVisible();
+
+  // The submit stays disabled until the search is complete, so choose a
+  // destination with the keyboard first — the whole flow, no pointer.
+  await page.getByLabel('Destination').focus();
+  await page.keyboard.type('Cotonou');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('button', { name: 'Destination : Cotonou. Effacer' })).toBeVisible();
+  await expect(search).toBeEnabled();
 
   // Tab until the primary action holds focus. Bounded, so a focus trap fails
   // this test rather than hanging it.
@@ -131,11 +139,11 @@ test('every screen has one main landmark and a page heading', async ({ page }) =
 
 test('loading and error states are announced, not just drawn', async ({ page }) => {
   await mockApi(page);
-  // A failing search must reach a screen reader, not only the eye.
-  await page.route('**/api/v1/services?*', r => r.fulfill({ status: 503, json: { error: { code: 'X', message: 'indisponible' } } }));
+  // A failing geography load must reach a screen reader, not only the eye.
+  await page.route('**/api/v1/places*', r => r.fulfill({ status: 503, json: { error: { code: 'X', message: 'indisponible' } } }));
   await page.goto(APP + '/trips');
   const announced = page.locator('[role="status"], [role="alert"], [aria-live]');
-  await expect(announced.first()).toBeVisible();
+  await expect(announced.first()).toContainText('Impossible de charger les villes');
 });
 
 test('touch targets on the primary navigation are large enough to hit', async ({ page }) => {
