@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { signInWithGoogle, completeRedirectSignIn, signOutFirebase, idToken, onAuthChange, takeReturnPath } from './firebase.js';
+import { signInWithGoogle, completeRedirectSignIn, signOutFirebase, idToken, onAuthChange, takeReturnPath,
+  createAccountWithEmail, signInWithEmail, sendPasswordReset } from './firebase.js';
 
 const Context=createContext(null);
 const subscribe=callback=>{window.addEventListener('online',callback);window.addEventListener('offline',callback);return()=>{window.removeEventListener('online',callback);window.removeEventListener('offline',callback);};};
@@ -127,6 +128,34 @@ export function ApiProvider({baseUrl='',role,children}) {
   const updateProfile=useCallback(async body=>{
     const user=await request('/me',{method:'PATCH',body});setSession(s=>s?{...s,user}:s);
   },[request]);
+  // Email/password registration and sign-in: Firebase holds the credentials,
+  // LeRoutier only ever sees the resulting Firebase ID token. After creating
+  // the account, the auth listener provisions/loads the identity as usual.
+  const createAccount=useCallback(async({email,password,displayName,phone})=>{
+    if(!auth.firebase)throw new Error('La connexion sécurisée n’est pas encore configurée.');
+    const result=await createAccountWithEmail(auth.firebase,{email,password});
+    if(!result?.user)throw new Error('La création du compte a échoué. Réessayez.');
+    // The Firebase account exists; the LeRoutier identity is provisioned by
+    // the auth listener's /me call. Set the profile fields right away so the
+    // user is never stuck on a blank profile.
+    try{ await updateProfile({displayName:String(displayName||'').trim()||email.split('@')[0],phone:String(phone||'').trim()||null}); }catch{ /* profile completion remains available */ }
+    return result.user;
+  },[auth.firebase,updateProfile]);
+  const loginEmail=useCallback(async({email,password})=>{
+    if(!auth.firebase)throw new Error('La connexion sécurisée n’est pas encore configurée.');
+    try{ await signInWithEmail(auth.firebase,{email,password}); }
+    catch(error){
+      if(error?.code==='auth/invalid-credential'||error?.code==='auth/wrong-password'||error?.code==='auth/user-not-found')
+        throw new Error('Adresse e-mail ou mot de passe incorrect.',{cause:error});
+      if(error?.code==='auth/too-many-requests')throw new Error('Trop de tentatives. Patientez un instant.',{cause:error});
+      throw new Error('Impossible de vous connecter. Réessayez.',{cause:error});
+    }
+  },[auth.firebase]);
+  const resetPassword=useCallback(async email=>{
+    if(!auth.firebase)throw new Error('La connexion sécurisée n’est pas encore configurée.');
+    try{ await sendPasswordReset(auth.firebase,email); return 'Si cette adresse possède un compte, un e-mail de réinitialisation a été envoyé.'; }
+    catch{ throw new Error('Impossible d’envoyer le lien de réinitialisation. Réessayez.'); }
+  },[auth.firebase]);
   // Re-fetch the identity after onboarding/role changes.
   const refresh=useCallback(async()=>{
     const user=await request('/me');setSession(s=>s?{...s,user}:s);
@@ -134,8 +163,9 @@ export function ApiProvider({baseUrl='',role,children}) {
 
   const roles=useMemo(()=>Array.isArray(role)?role:[role],[role]);
   const value=useMemo(()=>({request,identity:session?.user,user:session?.user && roles.includes(session.user.role)?session.user:null,role,online,configured:!!base,
-    demoLogin:auth.demoLogin,authLoading:auth.loading,authError:auth.error,canSignin:!!auth.firebase,login,loginDemo:demoLogin,logout,updateProfile,refresh}),
-  [request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles]);
+    demoLogin:auth.demoLogin,authLoading:auth.loading,authError:auth.error,canSignin:!!auth.firebase,login,loginDemo:demoLogin,logout,updateProfile,refresh,
+    createAccount,loginEmail,resetPassword}),
+  [request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles,createAccount,loginEmail,resetPassword]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

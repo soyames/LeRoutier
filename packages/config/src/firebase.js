@@ -88,6 +88,14 @@ export async function signInWithGoogle(config, returnTo = '/') {
     return result.user;
   } catch (error) {
     const code = error?.code ?? '';
+    if (code === 'auth/popup-blocked') {
+      // Mobile browsers sometimes block a first popup spuriously; one retry
+      // avoids a full redirect round-trip before falling back to it.
+      try {
+        const retried = await sdk.signInWithPopup(auth, provider);
+        return retried.user;
+      } catch { /* the redirect fallback below still applies */ }
+    }
     if (['auth/popup-blocked', 'auth/popup-closed-by-user', 'auth/cancelled-popup-request', 'auth/operation-not-supported-in-this-environment'].includes(code)) {
       if (code === 'auth/popup-closed-by-user') throw error;
       try { window.sessionStorage.setItem(PENDING_REDIRECT, '1'); } catch { /* private mode */ }
@@ -134,6 +142,31 @@ export async function onAuthChange(config, callback) {
   const ready = await firebaseAuth(config);
   if (!ready) return () => {};
   return ready.sdk.onAuthStateChanged(ready.auth, callback);
+}
+
+/**
+ * Standard registration: one Firebase Email/Password account, which becomes
+ * the SAME LeRoutier identity as any Google account — the API only ever sees
+ * the Firebase ID token. Passwords never touch LeRoutier's API or database.
+ */
+export async function createAccountWithEmail(config, { email, password }) {
+  const ready = await firebaseAuth(config);
+  if (!ready) throw new Error('auth-unavailable');
+  return ready.sdk.createUserWithEmailAndPassword(ready.auth, String(email).trim(), String(password));
+}
+
+/** Email/password sign-in; the same single-identity model as Google. */
+export async function signInWithEmail(config, { email, password }) {
+  const ready = await firebaseAuth(config);
+  if (!ready) throw new Error('auth-unavailable');
+  return ready.sdk.signInWithEmailAndPassword(ready.auth, String(email).trim(), String(password));
+}
+
+/** Firebase sends the reset email; nothing is stored or emailed by LeRoutier. */
+export async function sendPasswordReset(config, email) {
+  const ready = await firebaseAuth(config);
+  if (!ready) throw new Error('auth-unavailable');
+  await ready.sdk.sendPasswordResetEmail(ready.auth, String(email).trim());
 }
 
 export async function signOutFirebase(config) {
