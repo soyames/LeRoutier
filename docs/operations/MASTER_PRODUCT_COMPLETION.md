@@ -82,3 +82,15 @@ platform-ops privacy register. Retention runs DRY by default; destructive
 execution requires `RETENTION_EXECUTE=true` (owner decision). Durations are
 operational defaults pending legal validation; raw GPS stays at the 30-day
 project decision.
+
+## Passenger quick search & journey planner (2026-09)
+
+Quick search with « Ma position actuelle » origin: the passenger's
+coordinates resolve a first-mile walking estimate to practical pickup stops
+(bounded, feasibility-checked against departure minus a boarding buffer),
+the intercity leg stays the existing service/fare/availability/ETA data,
+and coordinate destinations add a last mile. The passenger's exact position
+is never stored and never exposed to operators. No Google Maps, no Waze
+dependency, no model in the loop. `/api/v1/journey-plan` + 10 DB tests +
+browser coverage; the passive "Revenez bientôt" copy is replaced by
+functional no-result states.
