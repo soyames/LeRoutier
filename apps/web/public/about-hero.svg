@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" role="img" aria-labelledby="title desc">
+  <title id="title">LeRoutier</title>
+  <desc id="desc">Un bus interurbain sur une route reliant des villes béninoises, avec un colis et un repère de position.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff7ed"/>
+      <stop offset="1" stop-color="#ffe4c4"/>
+    </linearGradient>
+    <linearGradient id="road" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#334155"/>
+      <stop offset="1" stop-color="#1e293b"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="360" fill="url(#sky)"/>
+  <circle cx="140" cy="70" r="46" fill="#fdba74" opacity="0.9"/>
+  <path d="M0 250 Q 240 210 480 250 T 960 240" stroke="#64748b" stroke-width="2" fill="none" opacity="0.5"/>
+  <path d="M0 262 Q 240 222 480 262 T 960 252" stroke="url(#road)" stroke-width="20" fill="none"/>
+  <path d="M0 268 Q 240 228 480 268 T 960 258" stroke="#fbbf24" stroke-width="3" stroke-dasharray="26 22" fill="none"/>
+  <g transform="translate(380 150)">
+    <rect x="0" y="0" width="230" height="120" rx="16" fill="#ea580c"/>
+    <rect x="0" y="0" width="230" height="42" rx="16" fill="#c2410c"/>
+    <rect x="20" y="52" width="52" height="40" rx="6" fill="#bfdbfe"/>
+    <rect x="84" y="52" width="52" height="40" rx="6" fill="#bfdbfe"/>
+    <rect x="148" y="52" width="52" height="40" rx="6" fill="#bfdbfe"/>
+    <rect x="20" y="100" width="190" height="10" rx="5" fill="#9a3412"/>
+    <circle cx="56" cy="128" r="16" fill="#0f172a"/>
+    <circle cx="184" cy="128" r="16" fill="#0f172a"/>
+    <circle cx="56" cy="128" r="7" fill="#e2e8f0"/>
+    <circle cx="184" cy="128" r="7" fill="#e2e8f0"/>
+    <text x="115" y="36" text-anchor="middle" font-family="system-ui, sans-serif" font-size="22" font-weight="700" fill="#fff">LeRoutier</text>
+  </g>
+  <g transform="translate(700 190)">
+    <rect x="0" y="0" width="86" height="62" rx="10" fill="#d97706"/>
+    <rect x="10" y="8" width="66" height="8" rx="4" fill="#fef3c7"/>
+    <text x="43" y="44" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="#fff">Colis</text>
+  </g>
+  <g transform="translate(120 200)">
+    <circle r="22" fill="#2563eb"/>
+    <circle r="9" fill="#fff"/>
+    <path d="M0 22 L0 52 M22 0 L52 0 M0 -22 L0 -52 M-22 0 L-52 0" stroke="#2563eb" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="52" cy="-52" r="6" fill="#2563eb"/>
+  </g>
+  <g font-family="system-ui, sans-serif" fill="#334155">
+    <text x="90" y="320" font-size="18">Cotonou</text>
+    <text x="420" y="320" font-size="18">Dassa-Zoumè</text>
+    <text x="790" y="320" font-size="18">Parakou</text>
+  </g>
+</svg>

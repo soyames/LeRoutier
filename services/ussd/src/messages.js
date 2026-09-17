@@ -74,9 +74,9 @@ const fr = {
   'book.created': 'Réservation enregistrée.',
   'book.reference': 'Référence:',
   'book.signInRequired': 'Ce numéro n’a pas encore de compte LeRoutier.',
-  'book.signInHint': 'Créez votre compte sur le-routier.vercel.app puis revenez ici.',
+  'book.signInHint': 'Créez votre compte sur leroutier.app puis revenez ici.',
   'book.unverified': 'Réservation indisponible sur ce canal pour le moment.',
-  'book.unverifiedHint': 'Utilisez le-routier.vercel.app pour réserver.',
+  'book.unverifiedHint': 'Utilisez leroutier.app pour réserver.',
 
   'pay.title': 'Paiement',
   'pay.amount': 'Montant:',
@@ -117,7 +117,7 @@ const fr = {
   'help.booking': 'Choisissez Trouver un trajet, puis le départ, l’arrivée et la date. Confirmez pour réserver.',
   'help.payment': 'Le paiement se fait par mobile money. Votre place est confirmée après validation du paiement.',
   'help.parcel': 'Choisissez Suivre un colis et saisissez la référence reçue à l’expédition.',
-  'help.contact': 'Assistance: le-routier.vercel.app',
+  'help.contact': 'Assistance: leroutier.app',
 
   'locale.title': 'Langue / Language',
   'locale.fr': '1. Français',
