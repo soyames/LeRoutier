@@ -44,6 +44,9 @@ export async function mockApi(page) {
     return r.fulfill({json:{data:{id:id(2),role,display_name:'Compte Démo',operator_id:role==='passenger'?null:id(1)}}});});
   await page.route('**/api/v1/routes',r=>r.fulfill({json:{data:[{id:id(10),stops}]}}));
   await page.route('**/api/v1/stops',r=>r.fulfill({json:{data:stops}}));
+  // Benin geography: the parcel city picker reads communes, independent of routes.
+  await page.route('**/api/v1/places?type=commune',r=>r.fulfill({json:{data:stops.map((s,i)=>({id:id(300+i),name:s.city,kind:'city',parent_id:null,latitude:6.4,longitude:2.4}))}}));
+  await page.route('**/api/v1/places?type=department',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/api/v1/services?*',r=>r.fulfill({json:{data:[service]}}));
   await page.route('**/api/v1/me/bookings',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/api/v1/driver/service',r=>r.fulfill({json:{data:service}}));
