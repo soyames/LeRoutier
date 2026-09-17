@@ -179,6 +179,23 @@ test('quick search offers current location with a graceful manual fallback', asy
   await expect(page.getByRole('button', { name: 'Utiliser ma position actuelle' })).toBeVisible();
   await page.getByRole('button', { name: 'Utiliser ma position actuelle' }).click();
   await expect(page.getByText(/Position non autorisée|pas disponible/i)).toBeVisible();
-  // The no-result planner state names the itinerary, never a dead end.
-  await expect(page.getByText(/Aucun départ disponible pour cet itinéraire|Choisissez une destination/)).toBeVisible();
+  // The manual search path is never blocked by a missing GPS permission.
+  await expect(origin).toBeVisible();
+});
+
+test('a granted position plans a door-to-destination itinerary with an honest no-result state', async ({ page }) => {
+  await mockApi(page);
+  const plans = [];
+  await page.route('**/api/v1/journey-plan*', r => {
+    plans.push(r.request().url());
+    return r.fulfill({ json: { data: { options: [], originResolved: null, generatedAt: '2026-09-17T00:00:00Z' } } });
+  });
+  await page.addInitScript(() => {
+    navigator.geolocation.getCurrentPosition = cb => cb({ coords: { latitude: 6.355, longitude: 2.435 } });
+  });
+  await page.goto('http://127.0.0.1:4176/trips');
+  await page.getByLabel('Départ', { exact: true }).selectOption('my-location');
+  await page.getByRole('button', { name: 'Utiliser ma position actuelle' }).click();
+  await expect(page.getByText('Aucun départ disponible pour cet itinéraire pour le moment.')).toBeVisible();
+  expect(plans.some(u => u.includes('lat=6.355')), 'the plan request carries the transient position').toBeTruthy();
 });
