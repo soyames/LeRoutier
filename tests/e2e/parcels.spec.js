@@ -9,10 +9,10 @@ test('passenger sends a parcel through a stepped flow and tracks it publicly',as
   await page.getByRole('button',{name:'Connexion de développement'}).click();
 
   // Step 1 — where is it going. Only route fields are asked for here.
-  await expect(page.getByLabel('Ville de départ')).toBeVisible();
+  await expect(page.getByLabel('Ville de départ', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Nom du destinataire')).toHaveCount(0);
-  await page.getByLabel('Ville de départ').selectOption({label:'Cotonou'});
-  await page.getByLabel('Ville d’arrivée').selectOption({label:'Parakou'});
+  await page.getByLabel('Ville de départ', { exact: true }).selectOption({label:'Cotonou'});
+  await page.getByLabel('Ville d’arrivée', { exact: true }).selectOption({label:'Parakou'});
   await page.getByRole('button',{name:'Continuer'}).click();
 
   // Step 2 — who is sending and receiving.
