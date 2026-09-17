@@ -17,57 +17,133 @@ const rememberIntent = intent => { try { window.sessionStorage.setItem(INTENT, J
 const readIntent = () => { try { return JSON.parse(window.sessionStorage.getItem(INTENT) || 'null'); } catch { return null; } };
 const clearIntent = () => { try { window.sessionStorage.removeItem(INTENT); } catch { /* private mode */ } };
 
+// Accent-insensitive folding, shared by every geography lookup in this file.
+const foldText = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
 /**
- * The search fields, shared by the public home and the results screen so the
- * hero task looks and behaves identically wherever it appears.
+ * Accessible place autocomplete over the canonical Benin geography (77
+ * communes). Completely independent of routes and services: geography is
+ * where the passenger wants to go, transport inventory is what exists.
  */
-export function TripSearchFields({ stops, from, to, day, setFrom, setTo, setDay, onSwap, allowCurrentLocation = false }) {
-  // Resolved once per mount: the earliest selectable day.
-  const [minDay] = useState(() => isoDay(Date.now()));
-  return <div className="trip-search">
-    <div className="trip-endpoints">
-      <label className="field">Départ
-        <select className="control" aria-label="Départ" value={from} onChange={e => setFrom(e.target.value)}>
-          {allowCurrentLocation && <option value="my-location">Ma position actuelle</option>}
-          {stops.map(s => <option key={s.stopId} value={s.stopId}>{s.city}</option>)}
-        </select>
-      </label>
-      <button type="button" className="swap-btn" aria-label="Inverser départ et arrivée" onClick={onSwap}><ArrowLeftRight size={17}/></button>
-      <label className="field">Arrivée
-        <select className="control" aria-label="Arrivée" value={to} onChange={e => setTo(e.target.value)}>
-          {stops.map(s => <option key={s.stopId} value={s.stopId}>{s.city}</option>)}
-        </select>
-      </label>
+export function PlaceCombobox({ label, placeholder, value, onSelect, onClear, inputId }) {
+  const places = useApi('/places?type=commune');
+  const [query, setQuery] = useState(''), [open, setOpen] = useState(false), [highlight, setHighlight] = useState(0);
+  const inputRef = useRef(null), listRef = useRef(null), hadValue = useRef(false);
+  const slug = (label || 'field').replace(/\s+/g, '-').toLowerCase();
+  const listboxId = `listbox-${slug}`;
+  const communes = (places.data || []).filter(p => !query.trim() ||
+    foldText(`${p.name} ${p.normalized_name ?? ''} ${(p.aliases ?? []).join(' ')}`).includes(foldText(query)));
+  const selected = communes.find(p => p.id === value) ?? null;
+  // Clearing a selection remounts the input and returns focus to it.
+  useEffect(() => {
+    if (value) { hadValue.current = true; return; }
+    if (hadValue.current) { hadValue.current = false; inputRef.current?.focus(); }
+  }, [value]);
+  // The keyboard highlight always stays inside the scrollable list.
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector(`#${listboxId}-opt-${highlight}`)?.scrollIntoView({ block: 'nearest' });
+  }, [open, highlight, listboxId]);
+  function choose(p) { onSelect(p.id); setQuery(''); setOpen(false); inputRef.current?.blur(); }
+  function onKey(e) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!open) { setOpen(true); setHighlight(0); }
+      else setHighlight(h => Math.min(h + 1, communes.length - 1));
+    } else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(h => Math.max(h - 1, 0)); }
+    else if (e.key === 'Enter' && open && communes[highlight]) { e.preventDefault(); choose(communes[highlight]); }
+    else if (e.key === 'Escape') { setOpen(false); inputRef.current?.blur(); }
+    else setOpen(true);
+  }
+  return <div className="place-combobox">
+    <label className="field" htmlFor={inputId}>{label}</label>
+    <div className="combobox-control">
+      {value && selected ? <button type="button" className="combobox-chip" aria-label={`${label} : ${selected.name}. Effacer`}
+        onClick={onClear}>{selected.name}<span aria-hidden="true">×</span></button>
+        : <input ref={inputRef} id={inputId} className="control" role="combobox" aria-expanded={open}
+          aria-controls={open ? listboxId : undefined} aria-activedescendant={open ? `${listboxId}-opt-${highlight}` : undefined}
+          aria-label={label} aria-autocomplete="list" placeholder={placeholder} value={query}
+          onChange={e => { setQuery(e.target.value); setHighlight(0); setOpen(true); }}
+          onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} onKeyDown={onKey}/>}
+      <span className="small muted" role="status" aria-live="polite">
+        {places.loading ? 'Chargement des villes…'
+          : places.error ? 'Impossible de charger les villes pour le moment.'
+            : value && selected ? `${label} sélectionné : ${selected.name}.`
+              : !places.data?.length ? 'Aucune ville disponible pour le moment.'
+                : open && query && communes.length === 0 ? 'Aucune ville trouvée.' : ''}
+      </span>
     </div>
-    <label className="field">Date
-      <input className="control" type="date" aria-label="Date" value={day} min={minDay} onChange={e => setDay(e.target.value)}/>
-    </label>
+    {open && !value && <ul className="combobox-list" role="listbox" id={listboxId} ref={listRef}>
+      {communes.slice(0, 50).map((p, i) => <li key={p.id} id={`${listboxId}-opt-${i}`} role="option" aria-selected={i === highlight}
+        className={i === highlight ? 'highlight' : ''} onMouseDown={e => { e.preventDefault(); choose(p); }}>{p.name}</li>)}
+    </ul>}
   </div>;
+}
+
+/**
+ * The journey search fields, shared by the public home and the results
+ * screen. Origin defaults to "Ma position actuelle"; both origin and
+ * destination are canonical Benin geography — never the route inventory.
+ */
+export function JourneySearchFields({ originMode, setOriginMode, originPlace, setOriginPlace, destinationPlace, setDestinationPlace, day, setDay, onSearch, onSwap, submitLabel = 'Rechercher un trajet' }) {
+  const [minDay] = useState(() => isoDay(Date.now()));
+  const same = originMode === 'place' && originPlace && originPlace === destinationPlace;
+  const swappable = destinationPlace && (originMode === 'current' || originPlace);
+  return <form className="trip-search stack" onSubmit={onSearch}>
+    <div className="trip-endpoints">
+      <div className="endpoint-cell">
+        <label className="field" htmlFor="trip-origin">Départ
+          <select id="trip-origin" className="control" aria-label="Départ" value={originMode} onChange={e => setOriginMode(e.target.value)}>
+            <option value="current">Ma position actuelle</option>
+            <option value="place">Choisir une ville…</option>
+          </select>
+        </label>
+        {originMode === 'place' && <PlaceCombobox label="Ville de départ" placeholder="Rechercher une ville…" inputId="trip-origin-place"
+          value={originPlace} onSelect={setOriginPlace} onClear={() => setOriginPlace(null)}/>}
+      </div>
+      <button type="button" className="swap-btn" aria-label="Inverser départ et arrivée" disabled={!swappable} onClick={onSwap}><ArrowLeftRight size={17}/></button>
+      <div className="endpoint-cell">
+        <PlaceCombobox label="Destination" placeholder="Rechercher une ville ou une localité" inputId="trip-destination"
+          value={destinationPlace} onSelect={setDestinationPlace} onClear={() => setDestinationPlace(null)}/>
+      </div>
+    </div>
+    <label className="field" htmlFor="trip-date">Date
+      <input id="trip-date" className="control" type="date" aria-label="Date" value={day} min={minDay} onChange={e => setDay(e.target.value)}/>
+    </label>
+    {same && <p className="small muted" role="status">Choisissez deux villes différentes.</p>}
+    <button className="btn btn-primary" type="submit" disabled={!destinationPlace || (originMode === 'place' && !originPlace) || same}><Search size={16}/>{submitLabel}</button>
+  </form>;
 }
 
 /** Public home hero: the single most important action in the product. */
 export function TripSearchHero() {
-  const routes = useApi('/routes');
   const navigate = useNavigate();
-  const stops = routes.data?.[0]?.stops || [];
-  const [from, setFrom] = useState(''), [to, setTo] = useState(''), [day, setDay] = useState(() => isoDay(Date.now()));
-  const origin = from || stops[0]?.stopId || '', destination = to || stops.at(-1)?.stopId || '';
+  const [originMode, setOriginMode] = useState('current');
+  const [originPlace, setOriginPlace] = useState(null);
+  const [destinationPlace, setDestinationPlace] = useState(null);
+  const [day, setDay] = useState(() => isoDay(Date.now()));
+  function swap() {
+    if (originMode === 'place' && originPlace) { setOriginPlace(destinationPlace); setDestinationPlace(originPlace); }
+    else { setOriginMode('place'); setOriginPlace(destinationPlace); setDestinationPlace(null); }
+  }
   function search(e) {
     e.preventDefault();
-    navigate(`/trips?from=${encodeURIComponent(origin)}&to=${encodeURIComponent(destination)}&date=${day}`);
+    // `place:` namespaces geography ids: stop ids from legacy deep links live
+    // in the same parameter space and must never be confused with places.
+    const params = new URLSearchParams({ date: day });
+    params.set('from', originMode === 'current' ? 'my-location' : `place:${originPlace}`);
+    params.set('to', `place:${destinationPlace}`);
+    navigate(`/trips?${params}`);
   }
   return <Card className="hero stack">
     <span className="eyebrow">Voyager</span>
     <h1>Où allez-vous ?</h1>
-    {routes.loading ? <SkeletonCards count={1} lines={3}/>
-      : !stops.length
-        ? <p>Entrez votre destination pour voir les départs disponibles.</p>
-        : <form className="stack" onSubmit={search}>
-          <TripSearchFields stops={stops} from={origin} to={destination} day={day}
-            setFrom={setFrom} setTo={setTo} setDay={setDay} onSwap={() => { setFrom(destination); setTo(origin); }}/>
-          <button className="btn btn-primary" disabled={origin === destination}><Search size={16}/>Rechercher</button>
-          <span className="small muted">Aucun compte nécessaire pour rechercher.</span>
-        </form>}
+    <p>Recherchez un trajet partout au Bénin.</p>
+    <JourneySearchFields originMode={originMode} setOriginMode={setOriginMode}
+      originPlace={originPlace} setOriginPlace={setOriginPlace}
+      destinationPlace={destinationPlace} setDestinationPlace={setDestinationPlace}
+      day={day} setDay={setDay} onSearch={search} onSwap={swap}/>
+    <span className="small muted">Aucun compte nécessaire pour rechercher.</span>
   </Card>;
 }
 
@@ -82,34 +158,50 @@ function Leg({ city, point, landmark, end = false }) {
   </div>;
 }
 
-// Door-to-destination planning from the passenger's current position. The
-// coordinates stay on the device except for this one transient request: the
-// API resolves the first mile and never stores or shares the position with
-// operators. Intercity facts come from the existing service domain — no
-// model, no Google, no second journey engine.
-function JourneyPlanner({ destination, choose }) {
+// Door-to-destination planning over canonical geography. The passenger's
+// coordinates stay on the device except for one transient request: the API
+// resolves the first mile and never stores or shares the position with
+// operators. A requested destination that is not a LeRoutier stop gets a
+// last mile around the nearest practical drop-off. No model, no Google,
+// no second journey engine.
+function JourneyPlanner({ originMode, originPlace, destinationPlace, destinationStopId = null, day, choose, onEditDate, onEditOrigin, onEditDestination, user, online }) {
   const [position, setPosition] = useState(null), [geoState, setGeoState] = useState('idle'), [geoError, setGeoError] = useState('');
-  const plan = useApi(position && destination ? `/journey-plan?lat=${position.latitude}&lon=${position.longitude}&destinationStopId=${destination}` : null);
   function locate() {
     setGeoState('asking'); setGeoError('');
-    if (!navigator.geolocation) { setGeoState('denied'); setGeoError('La géolocalisation n’est pas disponible sur cet appareil. Choisissez un départ manuellement.'); return; }
+    if (!navigator.geolocation) { setGeoState('denied'); setGeoError('La géolocalisation n’est pas disponible sur cet appareil. Choisissez votre ville de départ.'); return; }
     navigator.geolocation.getCurrentPosition(
       pos => { setPosition({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }); setGeoState('granted'); },
-      () => { setGeoState('denied'); setGeoError('Position non autorisée. Choisissez un départ manuellement.'); },
+      () => { setGeoState('denied'); setGeoError('Position non disponible. Choisissez votre ville de départ.'); },
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
   }
-  if (!destination) return <p className="small muted" role="status">Choisissez une destination pour voir les départs accessibles depuis votre position.</p>;
+  // `destinationStopId` only serves legacy stop-id deep links; new searches
+  // carry geography place ids.
+  const destinationKey = destinationStopId ? `destinationStopId=${destinationStopId}` : `destinationPlaceId=${destinationPlace}`;
+  const planUrl = position
+    ? `/journey-plan?lat=${position.latitude}&lon=${position.longitude}&${destinationKey}`
+    : originMode === 'place' && originPlace
+      ? `/journey-plan?originPlaceId=${originPlace}&${destinationKey}`
+      : null;
+  const plan = useApi(planUrl);
+  const options = (plan.data?.options || []).filter(o => !day || sameDay(o.departureAt, day));
+  const feasible = options.filter(o => o.feasible);
   return <div className="stack">
-    {position === null && <div className="controls">
+    {originMode === 'current' && position === null && <div className="controls">
       <button className="btn btn-primary" disabled={geoState === 'asking'} onClick={locate}>
         {geoState === 'asking' ? 'Localisation en cours…' : 'Utiliser ma position actuelle'}</button>
-      {geoError && <span className="small muted">{geoError}</span>}
+      {geoError && <p className="small muted" role="status">{geoError}</p>}
     </div>}
-    {position && (plan.loading ? <p role="status">Recherche des départs accessibles…</p>
+    {planUrl && (plan.loading ? <p role="status">Recherche des départs accessibles…</p>
       : plan.error ? <ErrorState text="Impossible de calculer votre trajet pour le moment." onRetry={plan.reload}/>
-        : !plan.data?.options?.length ? <Card className="stack"><strong>Aucun départ disponible pour cet itinéraire pour le moment.</strong>
-          <p className="small muted">Essayez une autre destination, une autre date, ou choisissez un départ manuel.</p></Card>
-          : plan.data.options.filter(o => o.feasible).map(o => <Card key={o.serviceId + o.originSequence} className="trip-card">
+        : !feasible.length ? <Card className="stack"><strong>Aucun départ disponible pour cet itinéraire pour le moment.</strong>
+          <p className="small muted">Ce trajet n’est pas encore desservi. Vous pouvez modifier la date, le départ ou la destination — votre recherche reste affichée.</p>
+          <div className="controls">
+            <button className="btn btn-soft" onClick={onEditDate}>Modifier la date</button>
+            <button className="btn btn-soft" onClick={onEditOrigin}>Modifier le départ</button>
+            <button className="btn btn-soft" onClick={onEditDestination}>Modifier la destination</button>
+          </div>
+        </Card>
+          : feasible.map(o => <Card key={o.serviceId + o.originSequence} className="trip-card">
             <div className="between wrap"><div><strong>{o.operatorName}</strong><span className="small muted"> · {o.routeName}</span></div>
               <Badge tone={o.available > 2 ? 'success' : o.available ? 'warning' : 'danger'}>
                 <Armchair size={13}/>{o.available ? `${o.available} place${o.available > 1 ? 's' : ''}` : 'Complet'}</Badge></div>
@@ -119,59 +211,83 @@ function JourneyPlanner({ destination, choose }) {
               {o.lastMile && <Leg city={o.dropoffStop.city} point={`${Math.round(o.lastMile.distanceM / 1000 * 10) / 10} km à pied`} landmark="Dernier kilomètre — transport local non inclus" end/>}
             </div>
             <div className="trip-foot"><div><span className="trip-price">{fcfa(o.fare.amountMinor)}</span><span className="small muted"> · prix final, transport local non inclus</span></div>
-              <button className="btn btn-primary" disabled={!o.available} onClick={() => choose(o)}>Choisir ce trajet</button></div>
+              <button className="btn btn-primary" disabled={!o.available || user?.needs_profile || !online} onClick={() => choose(o)}>
+                {!user ? 'Se connecter pour réserver' : user.needs_profile ? 'Complétez votre profil' : 'Choisir ce trajet'}</button></div>
           </Card>))}
   </div>;
 }
 
+const IS_UUID = v => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v ?? '');
+
 export function Trips() {
-  const routes = useApi('/routes');
   const { user, request, online, login, canSignin } = useSession();
   const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const stops = routes.data?.[0]?.stops || [];
-  // A search started on the home page continues here unchanged.
-  const [origin, setOrigin] = useState(() => params.get('from') || '');
-  const [destination, setDestination] = useState(() => params.get('to') || '');
-  const [day, setDay] = useState(() => params.get('date') || isoDay(Date.now()));
-  const [anyDay, setAnyDay] = useState(false);
-  const [error, setError] = useState(''), [busy, setBusy] = useState('');
+  const [params, setParams] = useSearchParams();
+  // A search started on the home page continues here unchanged. New links
+  // namespace geography ids as `place:<uuid>`; stop ids from legacy deep
+  // links live in the same parameter space and stay on the old service list.
+  const fromParam = params.get('from') || '', toParam = params.get('to') || '';
+  const [originMode, setOriginMode] = useState(() => fromParam === 'my-location' ? 'current' : fromParam ? 'place' : 'current');
+  const [originPlace, setOriginPlace] = useState(() => fromParam.startsWith('place:') ? fromParam.slice(6) : null);
+  const [destinationPlace, setDestinationPlace] = useState(() => toParam.startsWith('place:') ? toParam.slice(6) : null);
+  const [day, setDay] = useState(() => { const p = params.get('date') || ''; return p >= isoDay(Date.now()) ? p : isoDay(Date.now()); });
+  const [searched, setSearched] = useState(() => Boolean(toParam));
+  const [error, setError] = useState('');
   const keys = useRef(new Map());
+  const legacyStops = IS_UUID(fromParam) && IS_UUID(toParam);
+  const legacyStopDest = IS_UUID(toParam);
 
-  const from = origin || stops[0]?.stopId, to = destination || stops.at(-1)?.stopId;
-  const services = useApi(from && to && from !== to ? `/services?originStopId=${from}&destinationStopId=${to}` : null);
-  const all = services.data || [];
-  const onDay = all.filter(s => sameDay(s.departure_at, day));
-  // Nothing on the chosen day but departures exist later: show those rather
-  // than an empty screen, and say plainly that the date moved.
-  const showingNext = !anyDay && onDay.length === 0 && all.length > 0;
-  const shown = anyDay || showingNext ? all : onDay;
+  function swap() {
+    if (originMode === 'place' && originPlace) { setOriginPlace(destinationPlace); setDestinationPlace(originPlace); }
+    else { setOriginMode('place'); setOriginPlace(destinationPlace); setDestinationPlace(null); }
+  }
+  function search(e) {
+    e.preventDefault();
+    const next = new URLSearchParams({ date: day });
+    next.set('from', originMode === 'current' ? 'my-location' : `place:${originPlace}`);
+    next.set('to', `place:${destinationPlace}`);
+    setParams(next);
+    setSearched(true);
+  }
+  // The empty-result actions lead back to the exact control, not away from
+  // the screen: the search form stays visible above the results.
+  const focusField = id => {
+    document.getElementById('trip-search')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.getElementById(id)?.focus();
+  };
+  const editDate = () => focusField('trip-date');
+  const editOrigin = () => {
+    if (originMode === 'place' && originPlace) setOriginPlace(null);
+    focusField('trip-origin');
+  };
+  const editDestination = () => {
+    setDestinationPlace(null);
+    requestAnimationFrame(() => focusField('trip-destination'));
+  };
 
-  function swap() { setOrigin(to); setDestination(from); }
-
-  async function choose(service) {
-    const quote = service.availability;
-    // Sign-in appears exactly when the action needs an account, and the chosen
-    // trip is preserved across it.
+  // Sign-in appears exactly when the action needs an account, and the chosen
+  // trip is preserved across it.
+  async function chooseOption(option) {
     if (!user) {
-      rememberIntent({ serviceId: service.id, origin: quote.origin, destination: quote.destination });
+      rememberIntent({ serviceId: option.serviceId, origin: option.originSequence, destination: option.destinationSequence });
       if (!canSignin) { setError('La connexion sécurisée n’est pas encore configurée. Réessayez plus tard.'); return; }
       setError('');
       try { await login(); } catch (e) { setError(e.message); }
       return;
     }
-    await hold(service.id, quote.origin, quote.destination);
+    if (user.needs_profile) { setError('Complétez votre profil avant de réserver.'); return; }
+    await hold(option.serviceId, option.originSequence, option.destinationSequence);
   }
 
   async function hold(serviceId, from_, to_) {
     const identity = [serviceId, from_, to_].join(':');
     if (!keys.current.has(identity)) keys.current.set(identity, crypto.randomUUID());
-    setBusy(serviceId); setError('');
+    setError('');
     try {
       const booking = await request('/bookings', { method: 'POST', key: keys.current.get(identity), body: { serviceId, origin: from_, destination: to_ } });
       keys.current.delete(identity); clearIntent();
       navigate(`/tickets/${booking.id}`);
-    } catch (e) { setError(e.message); } finally { setBusy(''); services.reload(); }
+    } catch (e) { setError(e.message); }
   }
 
   // Resume the trip the passenger picked before signing in.
@@ -194,37 +310,49 @@ export function Trips() {
       <p>Recherchez librement. Le compte n’est demandé qu’au moment de réserver.</p>
     </Card>
 
-    {routes.loading ? <SkeletonCards count={1} lines={4}/>
-      : routes.error ? <ErrorState text="Impossible de charger le réseau pour le moment." onRetry={routes.reload}/>
-        : !stops.length ? <ApiState resource={routes} emptyTitle="Aucune ligne publiée"
-          empty="Aucune ligne publiée pour le moment. Entrez votre destination pour voir les départs disponibles."/>
-          : <Card className="stack">
-            <TripSearchFields stops={stops} from={from} to={to} day={day} allowCurrentLocation
-              setFrom={setOrigin} setTo={setDestination} setDay={value => { setDay(value); setAnyDay(false); }}
-              onSwap={() => { if (from !== 'my-location') swap(); }}/>
-            {from === to && <p className="small muted" role="status">Choisissez deux villes différentes.</p>}
-            <span className="small muted">1 place par réservation · paiement en ligne sécurisé</span>
-          </Card>}
+    <div id="trip-search">
+      <Card className="stack">
+        <JourneySearchFields originMode={originMode} setOriginMode={setOriginMode}
+          originPlace={originPlace} setOriginPlace={setOriginPlace}
+          destinationPlace={destinationPlace} setDestinationPlace={setDestinationPlace}
+          day={day} setDay={setDay} onSearch={search} onSwap={swap} submitLabel="Rechercher un trajet"/>
+        <span className="small muted">1 place par réservation · paiement en ligne sécurisé</span>
+      </Card>
+    </div>
 
-    {from === 'my-location' && to && from !== to && <JourneyPlanner destination={to}
-      choose={o => hold(o.serviceId, o.originSequence, o.destinationSequence)}/>}
+    {searched && (destinationPlace || legacyStopDest) && (legacyStops
+      ? <LegacyServiceList originStopId={fromParam} destinationStopId={toParam} day={day}
+          choose={s => chooseOption({ serviceId: s.id, originSequence: s.availability.origin, destinationSequence: s.availability.destination })}/>
+      : <JourneyPlanner originMode={originMode} originPlace={originPlace}
+          destinationPlace={destinationPlace} destinationStopId={legacyStopDest ? toParam : null}
+          day={day} choose={o => chooseOption(o)} user={user} online={online}
+          onEditDate={editDate} onEditOrigin={editOrigin} onEditDestination={editDestination}/>)}
 
-    <SectionTitle title={anyDay || showingNext ? 'Prochains départs' : `Départs du ${dayLong(day)}`}/>
-    {showingNext && <p className="small muted" role="status">Aucun départ le {dayLong(day)} — voici les prochains départs sur ce trajet.</p>}
     {pending && <Card className="stack"><strong>Connectez-vous pour continuer votre réservation</strong>
       <p className="small muted">Votre trajet est conservé — vous reviendrez directement ici.</p></Card>}
     {error && <ErrorState title="Réservation impossible" text={error}/>}
+  </>;
+}
 
+// Legacy renderer for stop-id deep links: the service list of the previous
+// search model, kept for links already in circulation.
+function LegacyServiceList({ originStopId, destinationStopId, day, choose }) {
+  const { user, online } = useSession();
+  const [busy, setBusy] = useState('');
+  const [anyDay, setAnyDay] = useState(false);
+  const services = useApi(`/services?originStopId=${originStopId}&destinationStopId=${destinationStopId}`);
+  const all = services.data || [];
+  const onDay = all.filter(s => sameDay(s.departure_at, day));
+  const showingNext = !anyDay && onDay.length === 0 && all.length > 0;
+  const shown = anyDay || showingNext ? all : onDay;
+  return <><SectionTitle title={anyDay || showingNext ? 'Prochains départs' : `Départs du ${dayLong(day)}`}/>
+    {showingNext && <p className="small muted" role="status">Aucun départ le {dayLong(day)} — voici les prochains départs sur ce trajet.</p>}
     {services.loading ? <SkeletonCards count={2} lines={4}/>
       : services.error ? <ErrorState text="Impossible de charger les départs." onRetry={services.reload}/>
         : !shown.length ? <Card className="stack">
-          <strong>Aucun départ trouvé pour ce trajet.</strong>
-          <p className="small muted">Ce trajet n’est pas encore desservi. Essayez une autre date ou inversez les villes.</p>
-          {/* Never a dead end: every empty result offers a way forward. */}
-          <div className="controls">
-            <button className="btn btn-primary" onClick={swap}>Inverser les villes</button>
-            <button className="btn btn-soft" onClick={() => setDay(isoDay(Date.now() + 86400_000))}>Essayer demain</button>
-          </div>
+          <strong>Aucun départ disponible pour cet itinéraire pour le moment.</strong>
+          <p className="small muted">Ce trajet n’est pas encore desservi. Essayez une autre date.</p>
+          <div className="controls"><button className="btn btn-soft" onClick={() => setAnyDay(true)}>Voir les prochains départs</button></div>
         </Card>
           : shown.map(service => {
             const a = service.availability, seats = a.available;
@@ -250,7 +378,7 @@ export function Trips() {
                 </div>
                 <div className="end">
                   <span className="trip-price">{fcfa(a.fare.amountMinor)}</span>
-                  <button className="btn btn-primary" disabled={user?.needs_profile || !online || !!busy || !seats} onClick={() => choose(service)}>
+                  <button className="btn btn-primary" disabled={user?.needs_profile || !online || !!busy || !seats} onClick={async () => { setBusy(service.id); await choose(service); setBusy(''); }}>
                     {busy === service.id ? 'Réservation…' : !user ? 'Se connecter pour réserver' : user.needs_profile ? 'Complétez votre profil' : 'Choisir ce trajet'}
                   </button>
                 </div>

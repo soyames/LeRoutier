@@ -4,17 +4,23 @@ test('Passenger, Ops and Driver complete a real database-backed journey with rea
   const errors=[];
   for(const page of [passenger,ops,driver]) page.on('pageerror',()=>errors.push('browser error'));
 
-  // 1. Anonymous search renders real Neon data before any authentication.
+  // 1. Anonymous search over the real geography renders real Neon data
+  //    before any authentication.
   await passenger.goto('http://127.0.0.1:4173/');
   await expect(passenger.getByText('Trouvez votre départ.')).toBeVisible();
-  await expect(passenger.getByText('DEMO - Corridor Benin')).toBeVisible();
+  await passenger.getByLabel('Départ',{exact:true}).selectOption('place');
+  await passenger.getByLabel('Ville de départ').fill('Cotonou');await passenger.getByLabel('Ville de départ').press('Enter');
+  await passenger.getByLabel('Destination').fill('Parakou');await passenger.getByLabel('Destination').press('Enter');
+  await passenger.getByRole('button',{name:'Rechercher un trajet'}).click();
   await expect(passenger.getByText('DEMO - Corridor Benin').first()).toBeVisible();
   await expect(passenger.getByRole('button',{name:'Se connecter pour réserver'}).first()).toBeEnabled();
   await expect(passenger.getByText(/espèces|comptant/i)).toHaveCount(0);
 
   // 2. Booking requires login; payment is online-only for passengers.
   await passenger.getByRole('button',{name:'Connexion de développement'}).click();
-  await passenger.getByLabel('Arrivée',{exact:true}).selectOption({label:'Bohicon'});
+  await passenger.getByRole('button',{name:/Destination : .*\. Effacer/}).click();
+  await passenger.getByLabel('Destination').fill('Bohicon');await passenger.getByLabel('Destination').press('Enter');
+  await passenger.getByRole('button',{name:'Rechercher un trajet'}).click();
   await passenger.getByRole('button',{name:'Choisir ce trajet'}).click();
   await expect(passenger).toHaveURL(/\/tickets\//);
   await expect(passenger.getByText('À payer')).toBeVisible();

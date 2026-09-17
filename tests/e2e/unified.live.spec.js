@@ -11,12 +11,20 @@ test('the unified PWA carries a real database-backed journey across workspaces',
   const errors = [];
   for (const page of [passenger, ops, crew]) page.on('pageerror', () => errors.push('browser error'));
 
-  // 1. One public entry point, anonymous, backed by real data.
+  // 1. One public entry point, anonymous, backed by real data. The search
+  //    runs over the live Benin geography, not the route inventory.
   await passenger.goto(APP + '/');
-  await expect(passenger.getByRole('button', { name: 'Rechercher' })).toBeVisible();
-  await passenger.getByRole('button', { name: 'Rechercher' }).click();
+  await expect(passenger.getByRole('button', { name: 'Rechercher un trajet' })).toBeVisible();
+  await passenger.getByLabel('Départ', { exact: true }).selectOption('place');
+  await passenger.getByLabel('Ville de départ').click();
+  await passenger.getByLabel('Ville de départ').fill('Cotonou');
+  await passenger.getByLabel('Ville de départ').press('Enter');
+  await passenger.getByLabel('Destination').click();
+  await passenger.getByLabel('Destination').fill('Parakou');
+  await passenger.getByLabel('Destination').press('Enter');
+  await passenger.getByRole('button', { name: 'Rechercher un trajet' }).click();
   // The home search carries its criteria into the results URL.
-  await expect(passenger).toHaveURL(/\/trips\?from=/);
+  await expect(passenger).toHaveURL(/\/trips\?from=place:/);
   // First real round trip to Neon after mount: allow for the query, not for a
   // flaky retry loop.
   await expect(passenger.getByText('DEMO - Corridor Benin')).toBeVisible({ timeout: 20000 });
@@ -27,7 +35,12 @@ test('the unified PWA carries a real database-backed journey across workspaces',
 
   // 2. Login happens at the action, and books against the real domain.
   await signIn(passenger, 'passenger');
-  await passenger.getByLabel('Arrivée',{exact:true}).selectOption({ label: 'Bohicon' });
+  // Refine the destination through the same geography search, then book.
+  await passenger.getByRole('button', { name: /Destination : .*\. Effacer/ }).click();
+  await passenger.getByLabel('Destination').click();
+  await passenger.getByLabel('Destination').fill('Bohicon');
+  await passenger.getByLabel('Destination').press('Enter');
+  await passenger.getByRole('button', { name: 'Rechercher un trajet' }).click();
   await passenger.getByRole('button', { name: 'Choisir ce trajet' }).click();
   // Booking lands on that booking, not on a generic list.
   await expect(passenger).toHaveURL(/\/tickets\//);
@@ -65,7 +78,7 @@ test('the unified PWA carries a real database-backed journey across workspaces',
   await crew.getByRole('button', { name: /Changer d’espace/ }).click();
   await crew.getByRole('menuitem', { name: /Voyageur/ }).click();
   await expect(crew).toHaveURL(/\/trips$/);
-  await expect(crew.getByText('DEMO - Corridor Benin')).toBeVisible();
+  await expect(crew.getByRole('button', { name: 'Rechercher un trajet' })).toBeVisible();
 
   // 7. Notifications are real rows produced by the domain events above.
   await ops.getByRole('navigation').getByRole('button', { name: 'Alertes' }).click();

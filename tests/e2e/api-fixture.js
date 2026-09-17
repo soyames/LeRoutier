@@ -4,6 +4,16 @@ const stops=['Cotonou','Bohicon','Dassa-Zoumè','Parakou'].map((city,sequence)=>
 // arrival time / trip duration are exercised like a real service.
 const tomorrow=new Date(Date.now()+86400_000).toISOString().slice(0,10);
 export const DEPARTURE_AT=`${tomorrow}T07:30:00.000Z`, ARRIVAL_AT=`${tomorrow}T13:40:00.000Z`;
+// A planned option for /journey-plan. It departs soon (today) because the
+// planner's results screen filters to the selected day, and it mirrors the
+// API's option shape exactly: service facts, fare, availability, miles.
+const soon=new Date(Date.now()+3600_000);
+export const JOURNEY_OPTION={serviceId:id(30),operatorName:'Opérateur démo',operatorType:'company',routeName:'DEMO Cotonou → Parakou',
+  departureAt:soon.toISOString(),serviceStatus:'scheduled',originSequence:0,destinationSequence:3,
+  pickupStop:{id:id(200),name:'Gare démo',city:'Cotonou'},dropoffStop:{id:id(203),name:'Gare démo',city:'Parakou'},
+  fare:{amountMinor:7500,currency:'XOF'},available:12,feasible:true,firstMile:null,
+  intercity:{durationS:22200,etaAt:new Date(soon.getTime()+22200_000).toISOString()},
+  lastMile:null,totalDurationS:22200,etaAt:new Date(soon.getTime()+22200_000).toISOString()};
 const service={id:id(30),route_name:'DEMO Cotonou → Parakou',operator_name:'Opérateur démo',registration:'DEMO-BUS-01',driver_name:'Conducteur Démo',status:'active',capacity:12,current_sequence:0,departure_at:DEPARTURE_AT,arrival_at:ARRIVAL_AT,departure_point_name:'Godomey – Carrefour',departure_point_landmark:'Au carrefour principal',departure_point_latitude:6.37,departure_point_longitude:2.39,arrival_point_name:'Parakou – Gare centrale',arrival_point_landmark:null,arrival_point_latitude:null,arrival_point_longitude:null,is_demo:true,stops,
   availability:{origin:0,destination:3,available:12,capacity:12,stops,fare:{amountMinor:7500,currency:'XOF'},segments:[0,1,2].map(sequence=>({sequence,available:12,occupied:0}))}};
 // A stretch of RNIE 2 — Cotonou → Abomey-Calavi → Allada → Bohicon →
@@ -48,6 +58,12 @@ export async function mockApi(page) {
   await page.route('**/api/v1/places?type=commune',r=>r.fulfill({json:{data:stops.map((s,i)=>({id:id(300+i),name:s.city,kind:'city',parent_id:null,latitude:6.4,longitude:2.4}))}}));
   await page.route('**/api/v1/places?type=department',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/api/v1/services?*',r=>r.fulfill({json:{data:[service]}}));
+  // The geography-backed journey planner answers with one feasible option;
+  // specs that need the empty-catalogue state override this route.
+  await page.route('**/api/v1/journey-plan*',r=>r.fulfill({json:{data:{
+    options:[JOURNEY_OPTION],
+    originResolved:{id:id(200),name:'Gare démo',city:'Cotonou',distanceM:600},
+    destinationResolved:null,generatedAt:'2026-09-17T00:00:00Z'}}}));
   await page.route('**/api/v1/me/bookings',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/api/v1/driver/service',r=>r.fulfill({json:{data:service}}));
   await page.route('**/api/v1/services/*/manifest',r=>r.fulfill({json:{data:[]}}));
