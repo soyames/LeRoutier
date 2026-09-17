@@ -47,7 +47,7 @@ export function LegalNotice() {
     <Section title="Éditeur de la plateforme">
       <P><strong>DIGITAL CONDORDIA</strong></P>
       <P>Entreprise immatriculée au Registre du Commerce et du Crédit Mobilier d’Abomey-Calavi sous le numéro <strong>RB/ABC/21 A 28773</strong>, immatriculation du 25 mars 2021.</P>
-      <P>Adresse déclarée : Carré sans bornes, Maison Amevi Sossou, Ahouato, Ouèdo, Abomey-Calavi, Atlantique, Bénin.</P>
+      <P>Adresse déclarée : Ouèdo, Abomey-Calavi, Atlantique, Bénin.</P>
       <P>Contact LeRoutier : <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.</P>
     </Section>
     <Section title="Objet de LeRoutier">
@@ -99,16 +99,17 @@ export function PrivacyPolicy() {
     </Section>
     <Section title="5. Prestataires et destinataires">
       <P>Nous partageons uniquement les données nécessaires avec les personnes et prestataires qui doivent intervenir pour fournir le service. Il peut s’agir du transporteur chargé du trajet, du prestataire de paiement, de l’hébergeur, du service de base de données, du fournisseur d’identité, de services de cartes et d’itinéraires, de fournisseurs de notification et, lorsque cela est activé, d’un opérateur ou agrégateur USSD.</P>
-      <P>Pour les fonctions d’assistance agentique, les modèles externes reçoivent des données opérationnelles minimisées. LeRoutier est conçu pour ne pas leur transmettre directement le nom, le téléphone, l’email, les coordonnées privées, les secrets de paiement ou d’autres identifiants personnels non nécessaires.</P>
+      <P>FedaPay traite les paiements en ligne. Firebase Authentication et Google assurent la connexion. Pour l’assistance opérationnelle, Gemini peut recevoir des faits minimisés ; OpenRouter peut intervenir en secours pour des tâches à faible risque. Les projections transmises excluent les noms, téléphones, emails, coordonnées privées, codes de retrait et secrets de paiement. Ces modèles ne décident ni d’un paiement, ni d’un droit d’accès, ni de la disponibilité d’une place.</P>
     </Section>
     <Section title="6. Localisation et suivi des véhicules">
       <P>La localisation d’un véhicule peut être traitée pendant un service actif pour afficher sa progression, estimer l’arrivée, améliorer la coordination et gérer un incident. Les accès sont limités selon les rôles et l’opérateur concerné. Les données de localisation ne doivent pas être utilisées pour surveiller une personne en dehors des finalités opérationnelles autorisées.</P>
     </Section>
     <Section title="7. Conservation">
+      <P>La politique technique prévoit 30 jours pour les positions GPS brutes des services terminés, hors incident non résolu ou conservation spécifique pour un audit. La purge est contrôlée ; les preuves financières et les dossiers de litige ne sont pas effacés automatiquement par une demande de suppression de compte.</P>
       <P>Nous conservons les données pendant la durée nécessaire à la finalité pour laquelle elles ont été collectées, à la sécurité du service, au traitement des litiges et aux obligations légales ou comptables applicables. Les durées peuvent différer selon la catégorie de données. Lorsque la conservation n’est plus nécessaire, les données sont supprimées, anonymisées ou rendues inaccessibles conformément aux procédures applicables.</P>
     </Section>
     <Section title="8. Transferts et hébergement hors du Bénin">
-      <P>Certains prestataires cloud peuvent traiter ou héberger des données en dehors du Bénin. Dans ce cas, LeRoutier limite les données partagées et met en place les mesures contractuelles, organisationnelles et techniques requises par le droit applicable.</P>
+      <P>Certains prestataires cloud peuvent traiter ou héberger des données en dehors du Bénin. LeRoutier limite les données partagées. Les conditions juridiques et contractuelles de ces transferts doivent faire l’objet d’une revue qualifiée avant un déploiement à grande échelle.</P>
     </Section>
     <Section title="9. Vos droits">
       <P>Selon la législation applicable, vous pouvez notamment demander l’accès à vos données, leur rectification, leur mise à jour, leur suppression lorsque la loi le permet, vous opposer à certains traitements, retirer un consentement lorsque le traitement repose sur celui-ci, ou demander des informations sur l’utilisation de vos données.</P>
@@ -147,8 +148,9 @@ export function TermsOfUse() {
     <Section title="7. Retards, changements et suivi">
       <P>Les heures d’arrivée et estimations sont indicatives lorsqu’elles dépendent du trafic, de la météo, des contrôles, de l’état des routes, d’un incident ou de la disponibilité du signal GPS. LeRoutier affiche les informations disponibles et peut envoyer des notifications lorsqu’un changement est enregistré. Une estimation ne constitue pas une garantie d’heure d’arrivée.</P>
     </Section>
-    <Section title="8. Colis">
+    <Section title="8. Colis et objets interdits">
       <P>Un colis doit être décrit de manière sincère et emballé de façon adaptée. Sont interdits les objets dont le transport est illégal ainsi que les biens dangereux ou incompatibles avec le transport proposé. L’opérateur peut refuser un colis qui présente un risque pour les personnes, le véhicule, les autres biens ou le respect de la réglementation. Les règles particulières, limites et preuves de remise applicables au service de colis sont affichées lorsque disponibles.</P>
+      <P>Ne remettez pas de produits explosifs, inflammables ou toxiques, d’armes, de produits illicites, d’animaux vivants, ni de biens nécessitant une chaîne du froid que le service ne fournit pas. Consultez les <Link to="/terms">conditions de transport des colis</Link> et contactez le support en cas de doute.</P>
     </Section>
     <Section title="9. Annulation et remboursement">
       <P>Les conditions d’annulation ou de remboursement dépendent du statut de la réservation, du service et des règles applicables affichées au moment de l’achat. Un remboursement n’est jamais déclenché uniquement par une instruction libre ou par un modèle d’intelligence artificielle. Toute opération financière doit être validée par le système et, lorsque nécessaire, par une personne autorisée.</P>

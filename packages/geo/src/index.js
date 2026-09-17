@@ -62,4 +62,4 @@ export function localTravelEstimateMinutes(from, to, { detourFactor = 1.35, kmPe
 // Route geometry, vehicle progress, freshness and arrival estimation.
 export { haversineMetres, isValidLine, cumulativeDistances, lineLengthMetres, nearestOnRoute,
   routeProgress, projectStops, nextStopFrom, stopStates, offRouteState, derivedSpeedMps } from './route.js';
-export { FRESHNESS, DEFAULT_ROUTE_SPEED_MPS, freshness, estimateArrival, shouldPublishPosition } from './tracking.js';
+export { FRESHNESS, freshness, estimateArrival, shouldPublishPosition } from './tracking.js';

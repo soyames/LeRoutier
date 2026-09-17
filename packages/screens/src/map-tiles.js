@@ -11,11 +11,17 @@
 // self-run tile service is a change to TILE_STYLES alone.
 
 const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-const CARTO_ATTRIBUTION = `${OSM_ATTRIBUTION} &copy; <a href="https://carto.com/attributions">CARTO</a>`;
+// No shared community infrastructure is silently selected in production.
+// Provider attribution is plain text configuration, never arbitrary HTML.
+const configuredUrl = import.meta.env.VITE_MAP_TILE_URL;
+const configuredAttribution = String(import.meta.env.VITE_MAP_TILE_ATTRIBUTION ?? '').replace(/[<>"&]/g, '');
+const enabled = typeof configuredUrl === 'string' && configuredUrl.startsWith('https://') &&
+  ['{z}','{x}','{y}'].every(part=>configuredUrl.includes(part)) && configuredAttribution.length>0;
+const url = enabled ? configuredUrl : import.meta.env.DEV ? 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png' : null;
 
 export const TILE_STYLES = {
-  light: { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: OSM_ATTRIBUTION, maxZoom: 19 },
-  dark: { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', attribution: CARTO_ATTRIBUTION, maxZoom: 20 },
+  light: { url, attribution: `${OSM_ATTRIBUTION} ${configuredAttribution}`, maxZoom: 19 },
+  dark: { url, attribution: `${OSM_ATTRIBUTION} ${configuredAttribution}`, maxZoom: 19 },
 };
 
 export const tileLayer = (dark = false) => (dark ? TILE_STYLES.dark : TILE_STYLES.light);

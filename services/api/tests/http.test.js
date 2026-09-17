@@ -10,6 +10,14 @@ const api=createApi(db,config);
 test('health responds without exposing configuration',async()=>{
   const r=await api(new Request('http://localhost/api/v1/health'));assert.equal(r.status,200);assert.deepEqual(await r.json(),{data:{status:'ok'}});
 });
+test('request identifiers correlate responses without accepting arbitrary header content',async()=>{
+  const id=nodeCrypto.randomUUID();
+  const response=await api(new Request('http://localhost/api/v1/health',{headers:{'x-request-id':id}}));
+  assert.equal(response.headers.get('x-request-id'),id);
+  const failure=await api(new Request('http://localhost/api/v1/missing',{headers:{'x-request-id':'private-token'}}));
+  assert.notEqual(failure.headers.get('x-request-id'),'private-token');
+  assert.equal((await failure.json()).error.requestId,failure.headers.get('x-request-id'));
+});
 test('database failure returns only a safe error',async()=>{
   const failed=createApi({transaction:async()=>{throw new Error('Private internal diagnostic');}},config);
   const r=await failed(new Request('http://localhost/api/v1/health'));assert.equal(r.status,503);assert.ok(!(await r.text()).includes('Private'));

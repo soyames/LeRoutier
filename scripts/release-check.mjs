@@ -52,6 +52,8 @@ gate('Browser tests', 'test:frontend');
 gate('Migration from empty', 'test:migrate:fresh', { needs: databaseReady });
 gate('Database tests', 'test:database:local', { needs: databaseReady });
 gate('Live journeys', 'test:live:local', { needs: databaseReady });
+gate('Load, profile and restore drill', 'test:operations', { needs: databaseReady });
+gate('Dependency audit', 'security:audit');
 gate('Secret scan', 'secrets:check');
 gate('Documentation consistency', 'docs:check');
 

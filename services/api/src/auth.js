@@ -14,7 +14,8 @@ export function jwtVerifier(config, keyResolver = undefined) {
     invariant(jwks && config.issuer && config.audience,'AUTH_UNAVAILABLE','Sign-in is not configured.',503);
     try {
       const {payload}=await jwtVerify(token,jwks,{issuer:config.issuer,audience:config.audience,
-        algorithms:['RS256','ES256'],requiredClaims:['sub','iss','aud','exp','iat'],clockTolerance:5});
+        algorithms:config.firebaseProjectId?['RS256']:['RS256','ES256'],requiredClaims:['sub','iss','aud','exp','iat'],clockTolerance:5});
+      invariant(Number.isFinite(payload.iat) && payload.iat<=Date.now()/1000+5,'UNAUTHORIZED','Invalid identity.',401);
       invariant(typeof payload.sub==='string' && payload.sub.length>0 && payload.sub.length<=255,'UNAUTHORIZED','Invalid identity.',401);
       // Custom role/operator/name claims are deliberately not used for authorization or provisioning.
       return {subject:payload.sub,issuer:payload.iss};

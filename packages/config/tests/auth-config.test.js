@@ -107,6 +107,8 @@ test('the return path cannot be turned into an open redirect', () => {
   for (const hostile of [
     'https://evil.example/steal',      // absolute URL
     '//evil.example/steal',            // protocol-relative
+    '/\\evil.example/steal',
+    '/\t/evil.example',
     'javascript:alert(1)',             // scheme
     'tickets/abc',                     // relative, would resolve off-route
     '',

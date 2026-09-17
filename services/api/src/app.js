@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DomainError, invariant, uuid } from '@leroutier/domain';
 import { transport } from '@leroutier/database/transport';
-import { validateVehiclePosition } from '@leroutier/geo';
+import { validateVehiclePosition, distanceMetres } from '@leroutier/geo';
 import { enqueue } from '@leroutier/notifications';
 import { authentication } from './auth.js';
 import { publicAuthConfig } from '@leroutier/config';
@@ -18,6 +18,8 @@ import { locations } from '@leroutier/database/locations';
 import { operatorSettlements } from '@leroutier/database/operator-settlements';
 import { walkUpBookings } from '@leroutier/database/walkup';
 import { notificationPolicies } from '@leroutier/database/notifications';
+import { notificationDelivery } from '@leroutier/database/notification-delivery';
+import { operationalHealth } from '@leroutier/database/operational-health';
 import { mobility } from '@leroutier/database/mobility';
 import { journeys } from '@leroutier/database/journeys';
 import { tracking } from '@leroutier/database/tracking';
@@ -35,6 +37,7 @@ class RawResponse {
 }
 
 export function createApi(db, config, keyResolver=undefined, adapter=paymentAdapter(config)) {
+  const health=operationalHealth(db);
   const domain=transport(db), auth=authentication(db,config,keyResolver),provision=provisioning(db,config);
   const pay=payments(db,adapter),ticket=tickets(db);
   const earn=earnings(db),payout=payouts(db,adapter,config),recover=recovery(db),parcel=parcels(db);
@@ -224,7 +227,9 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     }
     if(method==='POST' && path==='/workflows/tick') {
       invariant(actor.agent && actor.agent.scopes.includes('workflow.run'),'FORBIDDEN','Agent scope workflow.run is required.',403);
-      return workflows.processOutbox();
+      const result=await workflows.processOutbox();
+      await notificationDelivery(db).tick();
+      return result;
     }
     if(method==='POST' && path==='/tickets/verify')return ticket.verify(actor,await body());
     if(method==='POST' && path==='/driver/actions')return driverAction(db,actor,await body(),req.headers.get('idempotency-key'));
@@ -416,8 +421,19 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
           // A vehicle only reports while it is actually running a service.
           invariant(['scheduled','active','disrupted'].includes(service.status),
             'SERVICE_CLOSED','This service is no longer tracking its vehicle.',409);
-          const previous=(await tx.query('SELECT observed_at FROM vehicle_positions WHERE service_id=$1 ORDER BY observed_at DESC LIMIT 1',[id])).rows[0];
+          await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['gps:'+id]);
+          invariant(Date.now()-Date.parse(input.observedAt)<=300_000 && Date.parse(input.observedAt)<=Date.now()+10_000,
+            'INVALID_POSITION_TIME','Position time is outside the accepted window.');
+          invariant(input.accuracyM===null || input.accuracyM<=200,'GPS_ACCURACY','Position is too imprecise.',422);
+          const previous=(await tx.query('SELECT observed_at,latitude,longitude,accuracy_m FROM vehicle_positions WHERE service_id=$1 ORDER BY observed_at DESC LIMIT 1',[id])).rows[0];
           invariant(!previous || new Date(input.observedAt)>new Date(previous.observed_at),'STALE_POSITION','A newer position is already stored.',409);
+          if(previous) {
+            const elapsed=(Date.parse(input.observedAt)-new Date(previous.observed_at).getTime())/1000;
+            invariant(elapsed>=5,'GPS_RATE_LIMITED','Wait before sending another position.',429);
+            const distance=distanceMetres(input,{latitude:Number(previous.latitude),longitude:Number(previous.longitude)});
+            const uncertainty=(input.accuracyM??0)+Number(previous.accuracy_m??0);
+            invariant(distance-uncertainty<=elapsed*55,'GPS_JUMP','Position movement is implausible.',422);
+          }
           const assignment=(await tx.query('SELECT vehicle_id FROM service_assignments WHERE service_id=$1 AND ended_at IS NULL',[id])).rows[0];
           // Without an active assignment there is no vehicle to attribute the
           // position to; this previously threw and returned a 500.
@@ -469,9 +485,10 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     // Model provider status. Two endpoints on purpose: usage is free to poll,
     // health costs a real (tiny) call and is therefore explicit.
     if(method==='GET' && path==='/ops/model-usage') {
-      invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
+      invariant(actor.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
       return reasoning.usage();
     }
+    if(method==='GET' && path==='/ops/health') return health.read(actor);
     if(method==='POST' && path==='/ops/model-health') {
       // Platform Ops only: it spends quota, so an operator admin cannot drain
       // the shared budget by refreshing a dashboard.
@@ -496,9 +513,9 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
           (SELECT count(*) FROM services s JOIN service_assignments a ON a.service_id=s.id AND a.ended_at IS NULL
             WHERE s.status IN ('active','disrupted') AND ($1::uuid IS NULL OR s.operator_id=$1)
             AND NOT EXISTS(SELECT 1 FROM vehicle_positions vp WHERE vp.service_id=s.id AND vp.observed_at>now()-interval '30 minutes'))::integer AS stale_tracking,
-          (SELECT count(*) FROM outbox WHERE event_type IN ('payment.anomaly','payout.anomaly') AND created_at>now()-interval '7 days')::integer AS payment_anomalies,
-          (SELECT count(*) FROM workflow_runs WHERE status='failed')::integer AS failed_workflows,
-          (SELECT count(*) FROM workflow_runs WHERE status='awaiting_approval')::integer AS awaiting_approvals,
+          (SELECT count(*) FROM outbox WHERE $1::uuid IS NULL AND event_type IN ('payment.anomaly','payout.anomaly') AND created_at>now()-interval '7 days')::integer AS payment_anomalies,
+          (SELECT count(*) FROM workflow_runs WHERE status='failed' AND ($1::uuid IS NULL OR operator_id=$1))::integer AS failed_workflows,
+          (SELECT count(*) FROM workflow_runs WHERE status='awaiting_approval' AND ($1::uuid IS NULL OR operator_id=$1))::integer AS awaiting_approvals,
           (SELECT count(*) FROM parcel_exceptions e JOIN parcels p ON p.id=e.parcel_id
             WHERE e.status='open' AND ($1::uuid IS NULL OR p.operator_id=$1))::integer AS open_parcel_exceptions,
           (SELECT count(*) FROM parcels p WHERE p.status='ready_for_pickup' AND p.updated_at<now()-interval '24 hours'
@@ -506,7 +523,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
           (SELECT count(*) FROM parcels p WHERE p.status='ready_for_pickup' AND ($1::uuid IS NULL OR p.operator_id=$1))::integer AS ready_parcels`,[scope])).rows;
         const d=rows[0];
         const failedRuns=(await tx.query(`SELECT id,workflow,step,attempts,created_at,context->'failure'->>'code' AS failure_code
-          FROM workflow_runs WHERE status='failed' ORDER BY updated_at DESC LIMIT 10`)).rows;
+          FROM workflow_runs WHERE status='failed' AND ($1::uuid IS NULL OR operator_id=$1) ORDER BY updated_at DESC LIMIT 10`,[scope])).rows;
         return {
           generatedAt:new Date().toISOString(),database:'ok',
           fedapay:{collections:pay.configured,payouts:!!(adapter && adapter.payoutsAvailable),environment:adapter?.environment ?? null},
@@ -558,12 +575,14 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     throw new DomainError('NOT_FOUND','Endpoint not found.',404);
   }
   return async req=>{
+    const incomingId=req.headers.get('x-request-id');
+    const requestId=/^[a-f0-9-]{36}$/i.test(incomingId??'') ? incomingId : randomUUID();
     const origin=req.headers.get('origin');
     const allowed=!origin || config.corsOrigins.includes(origin);
     // A JSON API is never a document: it is never framed, never referred from,
     // and never sniffed into another content type. Transport security (HSTS) is
     // added by the platform edge, so it is not duplicated here.
-    const headers={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','vary':'Origin',
+    const headers={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','vary':'Origin','x-request-id':requestId,
       'x-frame-options':'DENY','referrer-policy':'no-referrer','content-security-policy':"default-src 'none'; frame-ancestors 'none'"};
     if(origin && allowed) headers['access-control-allow-origin']=origin;
     const url=new URL(req.url);
@@ -575,7 +594,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     const path=(legacy?API_PREFIX+rawPath:rawPath).replace(API_PREFIX,'')||'/';
     try {
       invariant(allowed,'FORBIDDEN','Origin is not allowed.',403);
-      if(req.method==='OPTIONS') return new Response(null,{status:204,headers:{...headers,'access-control-allow-methods':'GET,POST,PATCH,OPTIONS','access-control-allow-headers':'Authorization,Content-Type,Idempotency-Key'}});
+      if(req.method==='OPTIONS') return new Response(null,{status:204,headers:{...headers,'access-control-allow-methods':'GET,POST,PUT,PATCH,OPTIONS','access-control-allow-headers':'Authorization,Content-Type,Idempotency-Key,X-Request-ID'}});
       const data=await route(req,path,url,req.method,body(req));
       if(legacy){headers.deprecation='true';headers.sunset='2026-12-31T23:59:59Z';}
       // One route answers a telecom gateway in plain text; everything else
@@ -589,8 +608,12 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       if(legacy && status!==404){headers.deprecation='true';headers.sunset='2026-12-31T23:59:59Z';}
       // Operational visibility: unexpected errors are logged with code and
       // message only (no connection strings, no credentials, no payloads).
-      if(!known && !conflict) console.error(`LR_API_ERROR ${req.method} ${path}`, error?.code ?? 'UNKNOWN', error?.message ?? '');
-      return new Response(JSON.stringify({error:{code:known?error.code:conflict?'CONFLICT':'INTERNAL_ERROR',message:known?error.message:conflict?'The operation conflicts with current data.':'The service is temporarily unavailable.',requestId:randomUUID()}}),{status,headers});
+      if(!known && !conflict) console.error(JSON.stringify({event:'api.error',requestId,status,
+        code:/^[0-9A-Z]{5}$/.test(error?.code??'')?error.code:'INTERNAL_ERROR'}));
+      if(status>=500) await health.record('api_error');
+      else if(path==='/webhooks/fedapay') await health.record('webhook_rejected');
+      else if(['GPS_JUMP','GPS_ACCURACY','INVALID_POSITION_TIME'].includes(error.code)) await health.record('gps_anomaly');
+      return new Response(JSON.stringify({error:{code:known?error.code:conflict?'CONFLICT':'INTERNAL_ERROR',message:known?error.message:conflict?'The operation conflicts with current data.':'The service is temporarily unavailable.',requestId}}),{status,headers});
     }
   };
 }

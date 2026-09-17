@@ -28,7 +28,7 @@ const LINE=[[2.43,6.36],[2.30,6.70],[2.20,7.18],[2.18,7.75],[2.63,9.34]];
 // without any public provider being online.
 const fakeRouter=(coordinates=LINE)=>({provider:'test',configured:true,
   async route(stops){ if(stops.length<2) throw new RoutingUnavailable(ROUTING_REASONS.MISSING_COORDINATES,'too few');
-    return {coordinates,distanceM:480_000,provider:'test'}; }});
+    return {coordinates,distanceM:480_000,durationS:28000,provider:'test'}; }});
 
 before(async()=>{ await migrate(db); await seed(db); });
 beforeEach(async()=>{

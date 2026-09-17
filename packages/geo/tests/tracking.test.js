@@ -52,19 +52,19 @@ test('a stale signal downgrades a live estimate rather than keeping it',()=>{
   ];
   const eta=estimateArrival({remainingM:20_000,observations,observedAt:ago(840),now:NOW});
   assert.notEqual(eta.confidence,'live');
-  assert.equal(eta.confidence,'estimated');
+  assert.equal(eta.confidence,'unavailable');
   assert.equal(eta.signal,'stale');
 });
 
 test('a known position without usable movement is an estimate, not a live figure',()=>{
-  const eta=estimateArrival({remainingM:30_000,observations:[],observedAt:ago(20),now:NOW});
+  const eta=estimateArrival({remainingM:30_000,observations:[],observedAt:ago(20),now:NOW,routeDistanceM:60000,routeDurationS:3600});
   assert.equal(eta.confidence,'estimated');
-  assert.equal(eta.source,'route_default_speed');
+  assert.equal(eta.source,'road_routing');
   assert.equal(eta.speedMps,null,'no speed is claimed when none was measured');
 });
 
 test('a longer remaining distance always arrives later',()=>{
-  const common={observations:[],observedAt:ago(20),now:NOW};
+  const common={observations:[],observedAt:ago(20),now:NOW,routeDistanceM:100000,routeDurationS:7200};
   const near=estimateArrival({...common,remainingM:10_000});
   const far=estimateArrival({...common,remainingM:80_000});
   assert.ok(Date.parse(far.at)>Date.parse(near.at));

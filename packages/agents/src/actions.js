@@ -92,6 +92,9 @@ export function createActions(ctx) {
           for (const recipient of recipients) {
             uuid(recipient);
             invariant((await tx.query('SELECT id FROM users WHERE id=$1 AND active=true', [recipient])).rowCount, 'INVALID_RECIPIENT', 'Recipient is not an active user.', 409);
+            if(executor.agent?.operatorId) invariant((await tx.query(`SELECT id FROM users u WHERE u.id=$1 AND
+              (u.operator_id=$2 OR EXISTS(SELECT 1 FROM bookings b JOIN services s ON s.id=b.service_id WHERE b.passenger_id=u.id AND s.operator_id=$2))`,
+            [recipient,executor.agent.operatorId])).rowCount,'FORBIDDEN','Recipient belongs to another operator.',403);
           }
           const row = (await tx.query(`INSERT INTO outbox(event_type,aggregate_id,payload) VALUES('notification.send',$1,$2) RETURNING id`, [executor.id ?? executor.workflowRunId, JSON.stringify({ recipients, template, data })])).rows[0];
           await tx.query('INSERT INTO audit_events(principal_id,action,entity_id,details) VALUES($1,$2,$3,$4)', [executor?.agent?.id ?? null, 'notification.send', row.id, JSON.stringify({ template, recipientCount: recipients.length })]);

@@ -18,6 +18,8 @@ console.log(`Production smoke against ${api}`);
 {
   const { response, body } = await get('/api/v1/health');
   response.status === 200 && body?.data?.status === 'ok' ? ok('API health') : fail('API health', `status ${response.status}`);
+  response.headers.get('x-content-type-options')==='nosniff' && response.headers.get('x-frame-options')==='DENY'
+    ? ok('API security headers') : fail('API security headers','missing protections');
 }
 {
   const { response } = await get('/api/v1/health', { headers: { origin: 'https://untrusted.example.invalid' } });
@@ -27,7 +29,17 @@ console.log(`Production smoke against ${api}`);
   const { response, body } = await get('/api/v1/auth/config');
   if (response.status === 200 && body?.data && typeof body.data.demoLogin === 'boolean') {
     body.data.demoLogin === false ? ok('Auth config public; demo login disabled') : fail('Auth config', 'demo login enabled in production');
+    body.data.firebase?.projectId && body.data.firebase?.apiKey && body.data.firebase?.authDomain && body.data.firebase?.appId
+      ? ok('Firebase public configuration populated') : fail('Firebase public configuration','missing identifiers');
   } else fail('Auth config', `status ${response.status}`);
+}
+for (const path of ['/privacy','/terms','/legal','/cancellations','/cookies']) {
+  const response=await fetch(unified+path);
+  response.status===200 ? ok(`Legal route ${path}`) : fail(`Legal route ${path}`,`status ${response.status}`);
+}
+{
+  const {response,body}=await get('/api/v1/services');
+  response.status===200 && Array.isArray(body?.data) ? ok('Public trip search') : fail('Public trip search',`status ${response.status}`);
 }
 {
   const { response, body } = await get('/api/v1/payments/config');

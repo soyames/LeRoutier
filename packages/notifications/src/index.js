@@ -2,6 +2,7 @@
 // served from our own database; every outbound channel needs a real provider
 // and stays unavailable until one is configured. No credentials are invented
 // and no channel ever reports success it did not achieve.
+import {randomUUID} from 'node:crypto';
 export const CHANNELS = ['in_app', 'web_push', 'sms', 'whatsapp', 'email'];
 export const CATEGORIES = ['critical', 'operational', 'marketing'];
 export const SEVERITIES = ['info', 'warning', 'urgent'];
@@ -12,10 +13,10 @@ export function channelAvailability(config = {}) {
   const providers = config.notificationProviders ?? {};
   return {
     in_app: true,
-    web_push: Boolean(providers.webPushPublicKey && providers.webPushPrivateKey),
-    sms: Boolean(providers.sms),
-    whatsapp: Boolean(providers.whatsapp),
-    email: Boolean(providers.email),
+    web_push: providers.web_push?.idempotent === true && typeof providers.web_push?.send === 'function',
+    sms: providers.sms?.idempotent === true && typeof providers.sms?.send === 'function',
+    whatsapp: providers.whatsapp?.idempotent === true && typeof providers.whatsapp?.send === 'function',
+    email: providers.email?.idempotent === true && typeof providers.email?.send === 'function',
   };
 }
 
@@ -48,5 +49,5 @@ export async function notify(tx, { channel, to, template, data = {} }) {
   if (typeof to !== 'string' || to.length === 0 || to.length > 255) throw new Error('Invalid notification recipient.');
   if (typeof template !== 'string' || template.length === 0 || template.length > 100) throw new Error('Invalid notification template.');
   await tx.query('INSERT INTO outbox (event_type, aggregate_id, payload) VALUES ($1,$2,$3)',
-    ['notification.send', to, JSON.stringify({ kind: 'channel', channel, to, template, data })]);
+    ['notification.send', randomUUID(), JSON.stringify({ kind: 'channel', channel, to, template, data })]);
 }

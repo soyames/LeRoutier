@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import '@leroutier/ui/styles.css';
 import App from './App.jsx';
+import {PwaUpdate} from './pwa-update.jsx';
 import { LegalNotice, PrivacyPolicy, TermsOfUse, CancellationPolicy, CookiePolicy } from './legal.jsx';
 
 // VITE_API_URL may be an absolute API origin, or the literal "same-origin" to
@@ -20,6 +21,7 @@ const apiUrl = import.meta.env.VITE_API_URL === 'same-origin'
 createRoot(document.getElementById('root')).render(
   <React.StrictMode><BrowserRouter>
     <ApiProvider baseUrl={apiUrl} role={['passenger', 'driver', 'convoyeur', 'ops']}>
+      <PwaUpdate/>
       <Routes>
         <Route path="/legal" element={<LegalNotice/>}/>
         <Route path="/privacy" element={<PrivacyPolicy/>}/>

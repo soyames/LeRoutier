@@ -8,6 +8,22 @@ import { DomainError, invariant, uuid } from '@leroutier/domain';
 // domain services as the human-facing API.
 const digest = x => createHash('sha256').update(JSON.stringify(x)).digest('hex');
 
+// Resolve tenant ownership from authoritative rows, never an event/model claim.
+async function operatorFor(tx, aggregateId, input = {}) {
+  const ids=[aggregateId,input.serviceId,input.incidentId,input.parcelId,input.bookingId,input.paymentId,input.payoutId,input.driverId]
+    .filter(id=>typeof id==='string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
+  const result=await tx.query(`SELECT operator_id FROM (
+    SELECT operator_id FROM services WHERE id=ANY($1::uuid[])
+    UNION SELECT s.operator_id FROM incidents i JOIN services s ON s.id=i.service_id WHERE i.id=ANY($1::uuid[])
+    UNION SELECT operator_id FROM parcels WHERE id=ANY($1::uuid[])
+    UNION SELECT s.operator_id FROM bookings b JOIN services s ON s.id=b.service_id WHERE b.id=ANY($1::uuid[])
+    UNION SELECT s.operator_id FROM payments p JOIN bookings b ON b.id=p.booking_id JOIN services s ON s.id=b.service_id WHERE p.id=ANY($1::uuid[])
+    UNION SELECT operator_id FROM driver_profiles WHERE user_id=ANY($1::uuid[])
+    UNION SELECT d.operator_id FROM payout_requests p JOIN driver_profiles d ON d.user_id=p.driver_id WHERE p.id=ANY($1::uuid[])
+  ) tenants WHERE operator_id IS NOT NULL`,[ids]);
+  return result.rows.length===1?result.rows[0].operator_id:null;
+}
+
 // Built-in workflow definitions. Step shapes:
 //   { action:'catalog.name', approval?:boolean, input:(ctx)=>input }  — typed catalog action
 //   { name:'step', run:(ctx,executor)=>result }                        — engine-local step
@@ -454,7 +470,9 @@ export function createWorkflowEngine({ db, actions, onEvent = null, autonomy = n
     // Consume undelivered outbox events and run matching workflows. Safe to
     // run concurrently: run creation is conflict-guarded and steps are idempotent.
     async processOutbox() {
-      const events = await db.transaction(async tx => (await tx.query('SELECT * FROM outbox WHERE delivered_at IS NULL ORDER BY created_at LIMIT 50 FOR UPDATE SKIP LOCKED')).rows);
+      const events = await db.transaction(async tx => (await tx.query(`SELECT * FROM outbox WHERE delivered_at IS NULL
+        AND dispatch_dead_at IS NULL AND (dispatch_retry_at IS NULL OR dispatch_retry_at<=now())
+        ORDER BY created_at LIMIT 50 FOR UPDATE SKIP LOCKED`)).rows);
       let processed = 0;
       for (const event of events) {
         // One domain event may trigger several workflows; each run is guarded
@@ -465,11 +483,12 @@ export function createWorkflowEngine({ db, actions, onEvent = null, autonomy = n
           let payload = {};
           try { payload = typeof event.payload === 'string' ? JSON.parse(event.payload) : (event.payload && typeof event.payload === 'object' ? event.payload : {}); } catch { /* malformed payloads never crash the loop */ }
           const firstStep = definitions[name].steps[0] ? (definitions[name].steps[0].action ?? definitions[name].steps[0].name) : 'start';
+          const eventFingerprint=digest([event.event_type,event.aggregate_id,payload]);
           const run = await db.transaction(async tx => {
-            const inserted = await tx.query('INSERT INTO workflow_runs(workflow,trigger_event,aggregate_id,context,step) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING *',
-              [name, event.event_type, event.aggregate_id, JSON.stringify(payload), firstStep]);
+            const inserted = await tx.query('INSERT INTO workflow_runs(workflow,trigger_event,aggregate_id,context,step,operator_id,event_fingerprint) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING RETURNING *',
+              [name, event.event_type, event.aggregate_id, JSON.stringify(payload), firstStep, await operatorFor(tx,event.aggregate_id,payload),eventFingerprint]);
             if (inserted.rows[0]) return inserted.rows[0];
-            return one(tx, "SELECT * FROM workflow_runs WHERE workflow=$1 AND aggregate_id=$2 AND trigger_event=$3 AND status IN ('running','awaiting_approval')", [name, event.aggregate_id, event.event_type]);
+            return one(tx, "SELECT * FROM workflow_runs WHERE workflow=$1 AND event_fingerprint=$2 AND status IN ('running','awaiting_approval')", [name,eventFingerprint]);
           });
           if (run) await executeRun(run.id);
         }
@@ -477,7 +496,12 @@ export function createWorkflowEngine({ db, actions, onEvent = null, autonomy = n
         // malformed policy must not stop the drain or lose the event.
         if (onEvent) {
           try { await db.transaction(tx => onEvent(tx, event)); }
-          catch { /* delivery problems are recorded per channel, never fatal */ }
+          catch {
+            await db.transaction(tx=>tx.query(`UPDATE outbox SET dispatch_attempts=dispatch_attempts+1,
+              dispatch_retry_at=now()+make_interval(secs=>LEAST(3600,30*power(2,dispatch_attempts))::integer),
+              dispatch_dead_at=CASE WHEN dispatch_attempts>=4 THEN now() ELSE NULL END WHERE id=$1`,[event.id]));
+            continue;
+          }
         }
         await db.transaction(async tx => one(tx, 'UPDATE outbox SET delivered_at=now() WHERE id=$1 AND delivered_at IS NULL', [event.id]));
         processed++;
@@ -497,8 +521,9 @@ export function createWorkflowEngine({ db, actions, onEvent = null, autonomy = n
       }
       const context = { action: actionName, input, idempotencyKey: idempotencyKey ?? null, fingerprint };
       const run = await db.transaction(async tx => {
-        const row = (await tx.query(`INSERT INTO workflow_runs(workflow,trigger_event,aggregate_id,principal_id,context,step)
-          VALUES('agent-action','agent.action',$1,$2,$3,$4) RETURNING *`, [randomUUID(), agent.id, JSON.stringify(context), actionName])).rows[0];
+        const row = (await tx.query(`INSERT INTO workflow_runs(workflow,trigger_event,aggregate_id,principal_id,context,step,operator_id)
+          VALUES('agent-action','agent.action',$1,$2,$3,$4,$5) RETURNING *`, [randomUUID(), agent.id, JSON.stringify(context), actionName,
+          agent.operatorId ?? await operatorFor(tx,null,input)])).rows[0];
         await audit(tx, agent.id, 'agent.action.requested', row.id, { action: actionName, approval: action.approval });
         return row;
       });
@@ -524,6 +549,8 @@ export function createWorkflowEngine({ db, actions, onEvent = null, autonomy = n
       const approval = await db.transaction(async tx => {
         const row = await one(tx, 'SELECT * FROM workflow_approvals WHERE id=$1 FOR UPDATE', [uuid(approvalId)]);
         invariant(row, 'NOT_FOUND', 'Approval not found.', 404);
+        const run=await one(tx,'SELECT operator_id FROM workflow_runs WHERE id=$1',[row.workflow_run_id]);
+        invariant(!actor.operator_id || actor.operator_id===run?.operator_id,'FORBIDDEN','Workflow belongs to another operator.',403);
         invariant(row.status === 'pending', 'APPROVAL_DECIDED', 'This approval was already decided.', 409);
         const proposed = input === undefined ? row.proposed : { ...row.proposed, ...input };
         return one(tx, 'UPDATE workflow_approvals SET status=$2,decided_by=$3,decided_at=now(),proposed=$4 WHERE id=$1 RETURNING *', [row.id, decision, actor.id, JSON.stringify(proposed)]);
@@ -547,6 +574,7 @@ export function createWorkflowEngine({ db, actions, onEvent = null, autonomy = n
       const run = await db.transaction(async tx => {
         const row = await one(tx, 'SELECT * FROM workflow_runs WHERE id=$1 FOR UPDATE', [uuid(runId)]);
         invariant(row, 'NOT_FOUND', 'Workflow run not found.', 404);
+        invariant(!actor.operator_id || actor.operator_id===row.operator_id,'FORBIDDEN','Workflow belongs to another operator.',403);
         invariant(row.status === 'failed' && row.attempts < 3, 'WORKFLOW_RETRY', 'This workflow run cannot be retried.', 409);
         return one(tx, "UPDATE workflow_runs SET status='running',updated_at=now() WHERE id=$1 RETURNING *", [runId]);
       });
@@ -555,12 +583,12 @@ export function createWorkflowEngine({ db, actions, onEvent = null, autonomy = n
     },
     async listRuns(actor) {
       invariant(actor?.role === 'ops', 'FORBIDDEN', 'Operations access required.', 403);
-      return db.transaction(async tx => (await tx.query('SELECT * FROM workflow_runs ORDER BY created_at DESC LIMIT 50')).rows);
+      return db.transaction(async tx => (await tx.query('SELECT * FROM workflow_runs WHERE ($1::uuid IS NULL OR operator_id=$1) ORDER BY created_at DESC LIMIT 50',[actor.operator_id??null])).rows);
     },
     async listApprovals(actor) {
       invariant(actor?.role === 'ops', 'FORBIDDEN', 'Operations access required.', 403);
       return db.transaction(async tx => (await tx.query(`SELECT a.*,r.workflow,r.trigger_event,r.context FROM workflow_approvals a
-        JOIN workflow_runs r ON r.id=a.workflow_run_id WHERE a.status='pending' ORDER BY a.created_at LIMIT 50`)).rows);
+        JOIN workflow_runs r ON r.id=a.workflow_run_id WHERE a.status='pending' AND ($1::uuid IS NULL OR r.operator_id=$1) ORDER BY a.created_at LIMIT 50`,[actor.operator_id??null])).rows);
     },
   };
 }
