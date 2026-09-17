@@ -168,10 +168,14 @@ export function TermsOfUse() {
       <P>Nous faisons des efforts raisonnables pour maintenir LeRoutier disponible et exact, mais des opérations de maintenance, pannes de réseau, défaillances d’un prestataire, coupures télécom ou événements de force majeure peuvent interrompre temporairement certaines fonctions. Rien dans ces conditions ne limite un droit ou une responsabilité qui ne peut légalement être limité.</P>
       <P>Les droits et recours du voyageur contre le transporteur pour l’exécution du transport restent ceux prévus par la législation applicable et, le cas échéant, par les conditions du transporteur.</P>
     </Section>
-    <Section title="12. Droit applicable et réclamations">
+    <Section title="12. Conditions commerciales des transporteurs">
+      <P>Pour les billets de transport de voyageurs et les services de livraison de colis vendus via LeRoutier, LeRoutier perçoit une commission égale à 5&nbsp;% du prix final facturé au client. Le prix publié par la compagnie de transport ou le chauffeur indépendant est le prix total payable par le voyageur ou l’expéditeur du colis et doit déjà inclure la commission LeRoutier. LeRoutier n’ajoute pas la commission de 5&nbsp;% au-dessus du prix client publié.</P>
+      <P>Les compagnies de transport peuvent également être tenues de payer un abonnement SaaS mensuel fixe pour la gestion opérationnelle de leur activité. Les chauffeurs indépendants ne paient actuellement aucun abonnement. Toute évolution future de la politique tarifaire sera précédée d’une mise à jour des présentes conditions commerciales.</P>
+    </Section>
+    <Section title="13. Droit applicable et réclamations">
       <P>Les présentes conditions sont régies par le droit applicable en République du Bénin, sous réserve des règles impératives qui pourraient s’appliquer. Pour une question ou une réclamation concernant LeRoutier, contactez <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>. Nous privilégions d’abord une résolution amiable lorsqu’elle est possible, sans priver l’utilisateur des recours prévus par la loi.</P>
     </Section>
-    <Section title="13. Modifications">
+    <Section title="14. Modifications">
       <P>Nous pouvons mettre à jour ces conditions pour tenir compte des évolutions de la plateforme, des prestataires ou de la réglementation. La version applicable à une réservation reste appréciée en fonction des conditions portées à votre connaissance au moment de l’opération concernée et des règles impératives applicables.</P>
     </Section>
   </LegalLayout>;
