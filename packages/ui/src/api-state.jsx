@@ -4,45 +4,83 @@ import { Card } from './shell.jsx';
 import { SkeletonCards, ErrorState } from './states.jsx';
 
 function isDriverApp(role){return Array.isArray(role)?role.includes('driver')||role.includes('convoyeur'):role==='driver';}
+
+// One authentication entry for every workspace: Google or email/password,
+// both converging on the same LeRoutier identity. Passwords live in Firebase
+// only — the LeRoutier API never sees them.
 export function SessionPanel() {
-  const {user,identity,role,login,loginDemo,logout,demoLogin,configured,online,authLoading,authError,canSignin}=useSession();
-  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
-  async function connect(action) {
-    setBusy(true);setError('');
-    try {await action();} catch(e){setError(e.message);} finally {setBusy(false);}
-  }
+  const {user,identity,role,login,loginDemo,logout,demoLogin,configured,online,authLoading,authError,canSignin,
+    createAccount,loginEmail,resetPassword}=useSession();
+  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
+  const [mode,setMode]=useState('signin'); // signin | register | reset
+  const [email,setEmail]=useState(''),[password,setPassword]=useState('');
+  const [regName,setRegName]=useState(''),[regPhone,setRegPhone]=useState('');
+  async function run(action){setBusy(true);setError('');setNotice('');
+    try{await action();}catch(e){setError(e.message);}finally{setBusy(false);}}
+  async function submitSignin(e){e.preventDefault();setBusy(true);setError('');
+    try{await loginEmail({email,password});}catch(e){setError(e.message);}finally{setBusy(false);}}
+  async function submitRegister(e){e.preventDefault();setBusy(true);setError('');setNotice('');
+    try{await createAccount({email,password,displayName:regName,phone:regPhone});}
+    catch(e){setError(e.message);}finally{setBusy(false);}}
+  async function submitReset(e){e.preventDefault();setBusy(true);setError('');setNotice('');
+    try{setNotice(await resetPassword(email));}catch(e){setError(e.message);}finally{setBusy(false);}}
   if(!configured) return <Card><p role="status">Connexion au service indisponible. Réessayez ultérieurement.</p></Card>;
   return <Card className="stack">
     {!online && <p role="status">Hors ligne — les actions nécessitent une connexion.</p>}
-    {identity ? <><div className="between"><span>{identity.display_name || 'Compte connecté'}</span><button className="btn btn-soft" disabled={busy} onClick={()=>connect(logout)}>Déconnexion</button></div>
+    {identity ? <><div className="between"><span>{identity.display_name || 'Compte connecté'}</span><button className="btn btn-soft" disabled={busy} onClick={()=>run(logout)}>Déconnexion</button></div>
       {!user && <p role="status">
         {isDriverApp(role) && identity.role==='convoyeur' && 'Votre compte convoyeur est actif — utilisez la console Conducteur en mode convoyeur.'}
         {isDriverApp(role) && identity.role==='ops' && 'Votre compte administrateur s’utilise dans le centre opérationnel (app Ops), pas dans la console conducteur.'}
         {isDriverApp(role) && identity.role==='passenger' && 'Votre compte passager n’est pas encore provisionné comme équipage. Créez un compte opérateur ou demandez votre provisionnement.'}
-        {role==='ops' && identity.role==='passenger' && 'Votre compte passager n’a pas accès au centre opérationnel. Créez un compte opérateur (compagnie) pour administrer.'}
+        {role==='ops' && identity.role==='passenger' && 'Cet espace est réservé aux opérateurs de transport.'}
         {role==='ops' && identity.role==='driver' && 'Votre compte chauffeur s’utilise dans la console Conducteur, pas dans le centre opérationnel.'}
       </p>}
       {user?.needs_profile && <ProfileForm/>}</> : <>
-      <h3>Connexion</h3>
-      {authLoading?<p role="status">Chargement de la connexion…</p>:<>
-        {/* The provider is named, because a person about to hand over an
-            identity deserves to know to whom. */}
-        <button className="btn btn-primary" disabled={busy || !online || !canSignin} onClick={()=>connect(login)}>
-          {canSignin?'Se connecter avec Google':'Se connecter'}</button>
+      <h3>Bienvenue sur LeRoutier</h3>
+      {authLoading ? <p role="status">Connexion en cours…</p> : <>
+        <button className="btn btn-primary" disabled={busy || !online || !canSignin} onClick={()=>run(login)}>
+          {canSignin?'Continuer avec Google':'Connexion indisponible'}</button>
         {!canSignin && !demoLogin && <p role="status">La connexion sécurisée n’est pas encore configurée.</p>}
-        {demoLogin && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>connect(loginDemo)}>Connexion de développement</button>}
-        {/* The unified app serves every role from one identity: in development
-            only, offer each role so a workspace can be opened directly. */}
+        {demoLogin && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>run(loginDemo)}>Connexion de développement</button>}
         {demoLogin && Array.isArray(role) && role.length>1 && <div className="controls">
           {role.filter(r=>r!=='convoyeur').map(r=><button key={r} className="control" disabled={busy || !online}
-            onClick={()=>connect(()=>loginDemo(r))}>Développement : {r}</button>)}
+            onClick={()=>run(()=>loginDemo(r))}>Développement : {r}</button>)}
         </div>}
+        {canSignin && mode==='signin' && <form className="stack" onSubmit={submitSignin}>
+          <p className="small muted">ou</p>
+          <label>Adresse e-mail<input className="control" type="email" autoComplete="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>
+          <label>Mot de passe<input className="control" type="password" autoComplete="current-password" required minLength={6} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)}/></label>
+          <button className="btn btn-soft" disabled={busy || !online}>Se connecter avec mon adresse e-mail</button>
+          <div className="between wrap">
+            <button type="button" className="footer-link" onClick={()=>{setMode('reset');setNotice('');setError('');}}>Mot de passe oublié ?</button>
+            <button type="button" className="footer-link" onClick={()=>{setMode('register');setNotice('');setError('');}}>Pas encore de compte ? Créer un compte</button>
+          </div>
+        </form>}
+        {canSignin && mode==='register' && <form className="stack" onSubmit={submitRegister}>
+          <h3>Créer un compte</h3>
+          <label>Nom complet<input className="control" autoComplete="name" required minLength={2} maxLength={100} value={regName} onChange={e=>setRegName(e.target.value)}/></label>
+          <label>Téléphone<input className="control" type="tel" autoComplete="tel" maxLength={30} value={regPhone} onChange={e=>setRegPhone(e.target.value)}/></label>
+          <label>Adresse e-mail<input className="control" type="email" autoComplete="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>
+          <label>Mot de passe<input className="control" type="password" autoComplete="new-password" required minLength={6} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)}/></label>
+          <button className="btn btn-primary" disabled={busy || !online}>Créer mon compte</button>
+          <button type="button" className="footer-link" onClick={()=>{setMode('signin');setNotice('');setError('');}}>J’ai déjà un compte</button>
+          <p className="small muted">En créant un compte, vous acceptez nos <a href="/terms">conditions d’utilisation</a> et notre <a href="/privacy">politique de confidentialité</a>.</p>
+        </form>}
+        {canSignin && mode==='reset' && <form className="stack" onSubmit={submitReset}>
+          <h3>Mot de passe oublié ?</h3>
+          <p className="small muted">Nous vous enverrons un lien de réinitialisation à cette adresse.</p>
+          <label>Adresse e-mail<input className="control" type="email" autoComplete="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>
+          <button className="btn btn-soft" disabled={busy || !online}>Envoyer le lien</button>
+          <button type="button" className="footer-link" onClick={()=>{setMode('signin');setNotice('');setError('');}}>Retour à la connexion</button>
+        </form>}
       </>}
-      <p className="small muted">Un compte autorisé est nécessaire pour réserver ou effectuer une action.</p>
+      {notice && <p role="status">{notice}</p>}
+      {!authLoading && !canSignin && !demoLogin && mode==='signin' && <p className="small muted">Connectez-vous pour réserver un trajet, suivre vos billets et envoyer des colis.</p>}
     </>}
     {(error || authError) && <p role="alert">{error || authError}</p>}
   </Card>;
 }
+
 export function ProfileForm(){
   const {user,updateProfile,online}=useSession();
   const [name,setName]=useState(user?.display_name || ''),[phone,setPhone]=useState(user?.phone || ''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false);
@@ -54,6 +92,7 @@ export function ProfileForm(){
     {error && <p role="alert">{error}</p>}{saved && <p role="status">Profil enregistré.</p>}
   </form>;
 }
+
 /**
  * Loading / error / empty for one API resource.
  * `skeleton` shapes the placeholder; `title` and `action` turn an empty result
