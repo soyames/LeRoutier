@@ -1,9 +1,9 @@
 // Production smoke validation: strictly non-financial, non-destructive checks.
 // Never charges money, never sends payouts, never mutates production data,
 // never prints secrets. Usage: PROD_API_URL=... node scripts/prod-smoke.mjs
-const api = (process.env.PROD_API_URL || 'https://le-routier-api.vercel.app').replace(/\/$/, '');
+const api = (process.env.PROD_API_URL || 'https://api.leroutier.app').replace(/\/$/, '');
 // The unified PWA is canonical; the three originals stay until retired.
-const unified = (process.env.PROD_APP_URL || 'https://le-routier.vercel.app').replace(/\/$/, '');
+const unified = (process.env.PROD_APP_URL || 'https://leroutier.app').replace(/\/$/, '');
 const apps = { leroutier: unified, passenger: 'https://le-routier-passenger.vercel.app', driver: 'https://le-routier-driver.vercel.app', ops: 'https://le-routier-ops.vercel.app' };
 let checks = 0, failures = 0;
 function ok(name, detail = '') { checks++; console.log(`  PASS  ${name}${detail ? ` (${detail})` : ''}`); }

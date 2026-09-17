@@ -3,8 +3,8 @@
 Interurban mobility for Bénin: intercity trips, parcels and the operators who
 run them — one platform, one shared transport domain.
 
-**Product:** <https://le-routier.vercel.app> · **API:**
-<https://le-routier-api.vercel.app/api/v1>
+**Product:** <https://leroutier.app> · **API:**
+<https://api.leroutier.app/api/v1>
 
 ## One product, several workspaces
 

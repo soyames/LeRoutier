@@ -84,6 +84,16 @@ test('verified collection events map to payment events with strict correlation',
   const payoutEvent=await adapter.verifyEvent(payoutRaw,new Headers({'x-fedapay-signature':sign(payoutRaw)}));
   assert.equal(payoutEvent.kind,'payout');
   assert.equal(payoutEvent.status,'paid');
+  // Refunded collections map so webhooks cancel bookings and release capacity.
+  const refunded=JSON.stringify(event('transaction.refunded',{status:'refunded',amount:2500,currency:{iso:'XOF'},reference:'T-REF-42',id:42,custom_metadata:{app:'leroutier',payment_id:'00000000-0000-4000-8000-000000000001'}}));
+  const refundEvent=await adapter.verifyEvent(refunded,new Headers({'x-fedapay-signature':sign(refunded)}));
+  assert.equal(refundEvent.kind,'payment');
+  assert.equal(refundEvent.status,'refunded');
+  // Declined and canceled map too; expired is not an action (holds self-expire).
+  const declined=JSON.stringify(event('transaction.declined',{status:'declined',amount:2500,currency:{iso:'XOF'},reference:'T-REF-42',id:42,custom_metadata:{app:'leroutier',payment_id:'00000000-0000-4000-8000-000000000001'}}));
+  assert.equal((await adapter.verifyEvent(declined,new Headers({'x-fedapay-signature':sign(declined)}))).status,'failed');
+  const expired=JSON.stringify(event('transaction.expired',{status:'expired',amount:2500,currency:{iso:'XOF'},reference:'T-REF-42',id:42,custom_metadata:{app:'leroutier',payment_id:'00000000-0000-4000-8000-000000000001'}}));
+  assert.equal(await adapter.verifyEvent(expired,new Headers({'x-fedapay-signature':sign(expired)})),null);
 });
 
 test('reconciliation fetches the trusted provider state',async()=>{

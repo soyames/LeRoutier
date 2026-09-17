@@ -38,6 +38,7 @@ export function LegalFooter() {
       <Link to="/terms">Conditions d’utilisation</Link>
       <Link to="/cancellations">Annulations et remboursements</Link>
       <Link to="/cookies">Cookies et technologies</Link>
+      <button className="footer-link" onClick={() => window.dispatchEvent(new Event('leroutier:assistant-open'))}>Assistant</button>
     </div>
     <p style={{ margin: '10px 0 0' }}>LeRoutier est exploité par DIGITAL CONDORDIA, Bénin.</p>
   </footer>;

@@ -254,7 +254,7 @@ export function modelConfig(env = process.env) {
       baseUrl: env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
       model: env.OPENROUTER_MODEL || 'openrouter/free',
       appName: env.OPENROUTER_APP_NAME || 'LeRoutier',
-      appUrl: env.OPENROUTER_APP_URL || 'https://le-routier.vercel.app',
+      appUrl: env.OPENROUTER_APP_URL || 'https://leroutier.app',
       timeoutMs,
     },
     local: {

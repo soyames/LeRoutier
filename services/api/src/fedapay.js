@@ -15,8 +15,10 @@ const TOLERANCE=300;
 // Explicit allowlist of FedaPay event names LeRoutier reacts to. The account
 // webhook also delivers customer/account/payment_request events: those are
 // safely ignored unless they correlate to a known LeRoutier record.
+// transaction.refunded matters here: refunds must cancel the booking and
+// release capacity from the webhook path, not only via reconciliation.
 const COLLECTION_EVENTS=new Set(['transaction.created','transaction.approved','transaction.declined',
-  'transaction.canceled','transaction.transferred','transaction.updated']);
+  'transaction.canceled','transaction.refunded','transaction.transferred','transaction.updated']);
 const COLLECTION_STATUS={pending:'pending',approved:'succeeded',transferred:'succeeded',
   declined:'failed',canceled:'cancelled',refunded:'refunded'};
 const PAYOUT_STATUS={pending:'processing',scheduled:'processing',started:'processing',
