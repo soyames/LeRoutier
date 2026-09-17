@@ -230,6 +230,7 @@ export function parcels(db) {
           declaredValue, notes, responsibility, rate.amountMinor, serviceLevel, key, fingerprint, actor.id, input.consignmentPointId ?? null, input.pickupPointId ?? null]);
         await tx.query('INSERT INTO parcel_parties(parcel_id,role,name,phone) VALUES($1,$2,$3,$4),($1,$5,$6,$7)',
           [row.id, 'sender', sender.name, sender.phone, 'receiver', receiver.name, receiver.phone]);
+        await tx.query('UPDATE users SET last_meaningful_activity_at=now() WHERE id=$1', [actor.id]);
         await addEvent(tx, { parcelId: row.id, kind: 'created', actor, stopId: input.originStopId });
         await emit(tx, 'parcel.created', row.id, { trackingNumber: number, operatorId: row.operator_id });
         await audit(tx, actor.id, 'parcel.created', row.id, row.operator_id, { trackingNumber: number, priceMinor: rate.amountMinor });

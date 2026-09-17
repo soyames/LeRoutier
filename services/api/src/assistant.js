@@ -37,6 +37,9 @@ const RULES = [
   ['service_status', /(service|manifeste|équipage|véhicule|flotte)/i, { roles: ['ops', 'driver', 'convoyeur'] }],
   ['incident', /(incident|panne|accident)/i, { roles: ['ops', 'driver', 'convoyeur'] }],
   ['operator_health', /(santé (technique|de la plateforme)|plateforme (va|marche)|état technique)/i, { roles: null }],
+  ['privacy_summary', /(quelles (données|informations)|données (sur moi|avez-vous)|mes données personnelles|politique de conservation)/i, { roles: null }],
+  ['account_deletion', /(supprim(er|e) mon compte|suppression de mon compte|effacer mon compte|désinscrire)/i, { roles: null }],
+  ['data_export', /(télécharger mes données|exporter mes données|export de (mes )?données)/i, { roles: null }],
   ['cancellation_policy', /(annul)/i, { roles: null }],
   ['refund_policy', /(rembours)/i, { roles: null }],
   ['support', /(aide|support|assistance|contact|réclamation)/i, { roles: null }],
@@ -50,7 +53,7 @@ const POLICIES = {
   support: 'Pour une aide humaine, écrivez à ' + SUPPORT_EMAIL + ' avec votre référence de réservation, de colis ou de paiement. Les réponses peuvent prendre du temps selon la demande ; ne transmettez jamais de mot de passe, de code OTP ou de secret de portefeuille.',
 };
 
-export function assistantService({ db, domain, parcels, fares, health, track = null }) {
+export function assistantService({ db, domain, parcels, fares, health, track = null, privacy = null }) {
   /** Every turn is audited; messages are stored only as a hash. */
   async function audit({ sessionId, actor, intent, tools, status, providerUsed = null, fallbackUsed = false, input }) {
     await db.transaction(async tx => {
@@ -205,6 +208,33 @@ export function assistantService({ db, domain, parcels, fares, health, track = n
     return { reply: `État technique : base de données disponible, migrations ${h.migrations.matched ? 'à jour' : 'à vérifier'}. Notifications en échec : ${h.counts.notification_failed}. Événements à reprendre : ${h.counts.dispatch_dead}. Signaux opérationnels récents : ${alerts}.`, data: null };
   }
 
+  // Privacy tools read the caller's own data through the same privacy domain
+  // the privacy center uses. The assistant NEVER executes a deletion, export
+  // or consent change — high-impact actions stay typed, confirmed UI flows.
+  async function toolPrivacySummary(actor) {
+    if (!privacy || !actor?.id) return { reply: 'Connectez-vous puis ouvrez « Confidentialité et données » dans votre compte : vous y verrez vos données et leur conservation. Je peux aussi vous répondre une fois connecté.', data: null };
+    const summary = await privacy.summary(actor);
+    const lines = summary.categories.filter(c => c.count > 0).map(c => `• ${c.category} : ${c.count}`).join('\n');
+    const gps = summary.retention.find(r => r.data_category === 'raw_gps');
+    const deletion = summary.deletion ? `Votre demande de suppression est « ${summary.deletion.status} ».` : 'Aucune demande de suppression en cours.';
+    return { reply: `Voici les catégories de vos données dans LeRoutier :\n${lines}\n${deletion}${gps ? ` Les positions GPS brutes des services terminés sont conservées ${gps.retention_days} jours.` : ''}\nPour le détail complet, ouvrez « Confidentialité et données » dans Compte.`, data: null };
+  }
+
+  async function toolDeletionGuide(actor) {
+    if (!privacy || !actor?.id) return { reply: 'Connectez-vous, puis ouvrez Compte → « Confidentialité et données » → « Supprimer mon compte ». La suppression suit un parcours sécurisé et vous explique ce qui est supprimé ou anonymisé, et ce qui doit être conservé pour des raisons légales ou comptables.', data: null };
+    const status = await privacy.deletionStatus(actor);
+    if (!status) return { reply: 'Vous pouvez demander la suppression depuis Compte → « Confidentialité et données » → « Supprimer mon compte ». Si vous avez un voyage actif, un colis en cours ou un paiement en attente, la suppression sera planifiée après leur clôture, sans casser vos réservations.', data: null };
+    const states = { requested: 'reçue et en attente de traitement', scheduled: 'planifiée : elle attendra la clôture de vos voyages, colis ou paiements en cours', processing: 'en cours de traitement', completed: 'traitée', rejected_or_blocked: 'en attente d’examen' };
+    const blockers = Array.isArray(status.blockers) && status.blockers.length ? ` Éléments en attente : ${status.blockers.map(b => ({ active_booking: 'réservation active', pending_payment: 'paiement en attente', active_parcel: 'colis en cours' })[b.kind] ?? b.kind).join(', ')}.` : '';
+    return { reply: `Votre demande de suppression est ${states[status.status] ?? status.status}.${blockers}`, data: null };
+  }
+
+  async function toolExportGuide(actor) {
+    if (!privacy || !actor?.id) return { reply: 'Connectez-vous, puis ouvrez Compte → « Confidentialité et données » → « Télécharger mes données ». L’export contient uniquement vos propres données et reste disponible 24 heures.', data: null };
+    const summary = await privacy.summary(actor);
+    return { reply: `Pour télécharger vos données, ouvrez Compte → « Confidentialité et données » → « Télécharger mes données ». Le fichier contient vos ${summary.categories.reduce((s, c) => s + c.count, 0)} enregistrements répartis entre ${summary.categories.filter(c => c.count > 0).length} catégories, jamais les données d’un autre utilisateur.`, data: null };
+  }
+
   // ---- intent resolution ----------------------------------------------------
   function resolveIntent(message, actor) {
     const role = actorRole(actor);
@@ -316,6 +346,21 @@ export function assistantService({ db, domain, parcels, fares, health, track = n
         case 'operator_health': {
           toolsUsed.push('get_operator_health_summary');
           const r = await toolHealth(actor);
+          return answer(intent, r.reply);
+        }
+        case 'privacy_summary': {
+          toolsUsed.push('get_privacy_summary');
+          const r = await toolPrivacySummary(actor);
+          return answer(intent, r.reply);
+        }
+        case 'account_deletion': {
+          toolsUsed.push('get_deletion_request_status');
+          const r = await toolDeletionGuide(actor);
+          return answer(intent, r.reply);
+        }
+        case 'data_export': {
+          toolsUsed.push('request_data_export_guide');
+          const r = await toolExportGuide(actor);
           return answer(intent, r.reply);
         }
         default: {

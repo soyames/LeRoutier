@@ -4,7 +4,7 @@ import { useApi, useSession } from '@leroutier/config/client';
 import { Card, Badge, SectionTitle, ApiState, ProfileForm, ErrorState, SkeletonCards } from '@leroutier/ui';
 import { status, fcfa, time, dayShort, dayLong, dateTime, duration, reference, mapLink, placeLabel } from '@leroutier/ui';
 import { QRCodeSVG } from 'qrcode.react';
-import { Armchair, Ticket, Building2, Navigation, UserRound, ArrowLeftRight, CreditCard, Package, Store, MapPin, QrCode, Search } from 'lucide-react';
+import { Armchair, Ticket, Building2, Navigation, UserRound, ArrowLeftRight, CreditCard, Package, Store, MapPin, QrCode, Search, Lock } from 'lucide-react';
 
 const isoDay = value => new Date(value).toISOString().slice(0, 10);
 const sameDay = (value, day) => isoDay(value) === day;
@@ -400,6 +400,91 @@ export function Tracking() {
   </>;
 }
 
+// ── Privacy center ──────────────────────────────────────────────────────────
+// "Confidentialité et données": the user's own data, one coherent place for
+// exports, consents, correction requests, account deletion and retention.
+// French-first, simple actions; the API enforces ownership on every call.
+function PrivacyCenter() {
+  const { user, request, online } = useSession();
+  const summary = useApi(user ? '/me/privacy' : null);
+  const consents = useApi(user ? '/me/consents' : null);
+  const [busy, setBusy] = useState(false), [notice, setNotice] = useState(''), [error, setError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [correction, setCorrection] = useState({ subject: '', description: '' });
+  const act = async (path, body, method = 'POST') => {
+    setBusy(true); setError(''); setNotice('');
+    try { const r = await request(path, { method, body }); setNotice('Action enregistrée.'); summary.reload(); consents.reload(); return r; }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  const marketing = (consents.data || []).find(c => c.consent_type === 'marketing' && c.status === 'accepted');
+  async function download() {
+    setError(''); setNotice('Préparation de votre export…');
+    try {
+      const created = await request('/me/data-export', { method: 'POST', body: {} });
+      const payload = await request(`/me/data-export/${created.token}`);
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'leroutier-mes-donnees.json'; a.click();
+      URL.revokeObjectURL(url);
+      setNotice('Export téléchargé. Le fichier contient uniquement vos données.');
+    } catch (e) { setError(e.message); setNotice(''); }
+  }
+  const deletionStatus = summary.data?.deletion;
+  const blockers = Array.isArray(deletionStatus?.blockers) ? deletionStatus.blockers : [];
+  return <Card className="stack">
+    <SectionTitle icon={Lock} title="Confidentialité et données"/>
+    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    {summary.loading || !summary.data ? <p role="status">Chargement de vos données…</p> : <>
+      <details className="stack"><summary>Mes données</summary>
+        <ul className="stack">
+          {summary.data.categories.map(c => <li key={c.category} className="between"><span>{c.category}</span><span className="small muted">{c.count}</span></li>)}
+        </ul>
+        <p className="small muted">Les positions GPS brutes des services terminés sont conservées 30 jours, sauf incident, litige ou obligation légale.</p>
+      </details>
+      <details className="stack"><summary>Politique de conservation des données</summary>
+        <ul className="stack">{summary.data.retention.map(r => <li key={r.data_category} className="between"><span>{r.data_category}</span><span className="small muted">{r.retention_days} jours · {r.action}</span></li>)}</ul>
+        <p className="small muted">Durées opérationnelles par défaut, susceptibles d’être ajustées après validation juridique.</p>
+      </details>
+      <div className="between wrap">
+        <span><strong>Télécharger mes données</strong><br/><span className="small muted">Un fichier avec vos informations, valable 24 h.</span></span>
+        <button className="btn btn-soft" disabled={busy || !online} onClick={download}>Télécharger</button>
+      </div>
+      <div className="stack">
+        <strong>Corriger mes informations</strong>
+        <input className="control" placeholder="Sujet (ex. nom, téléphone)" value={correction.subject} onChange={e => setCorrection(s => ({ ...s, subject: e.target.value }))} aria-label="Sujet de la correction"/>
+        <textarea className="control" placeholder="Décrivez la correction demandée" rows={2} value={correction.description} onChange={e => setCorrection(s => ({ ...s, description: e.target.value }))} aria-label="Description de la correction"/>
+        <button className="btn btn-soft" disabled={busy || !online || correction.subject.trim().length < 2 || correction.description.trim().length < 2}
+          onClick={() => act('/me/privacy/corrections', correction).then(() => setCorrection({ subject: '', description: '' }))}>Envoyer la demande</button>
+      </div>
+      <div className="between wrap">
+        <span><strong>Mes consentements</strong><br/><span className="small muted">Communications commerciales facultatives. Les notifications de service restent toujours actives.</span></span>
+        <button className="btn btn-soft" disabled={busy || !online}
+          onClick={() => marketing ? act('/me/consents/marketing', undefined, 'DELETE') : act('/me/consents', { consentType: 'marketing', policyVersion: 'v1' })}>
+          {marketing ? 'Désactiver les communications commerciales' : 'Activer les communications commerciales'}
+        </button>
+      </div>
+      {summary.data.account.retentionDueAt && <div className="between wrap">
+        <span><strong>Conserver mon compte</strong><br/><span className="small muted">Votre compte est inactif depuis un certain temps.</span></span>
+        <button className="btn btn-primary" disabled={busy || !online} onClick={() => act('/me/retention-confirmation', undefined, 'POST')}>Conserver mon compte</button>
+      </div>}
+      <div className="stack">
+        <strong>Supprimer mon compte</strong>
+        {deletionStatus ? <p role="status">Votre demande est « {deletionStatus.status} »{blockers.length ? ` — en attente : ${blockers.map(b => ({ active_booking: 'réservation active', pending_payment: 'paiement en attente', active_parcel: 'colis en cours' })[b.kind] ?? b.kind).join(', ')}` : ''}. Nous vous informerons du résultat.</p>
+          : confirmDelete ? <div className="stack">
+            <p className="small muted">Votre identité de connexion et vos données seront supprimées ou anonymisées. Certaines données (paiements, réservations, colis, preuves de sécurité) peuvent être conservées pour des raisons légales, comptables ou de litiges. Les voyages, colis ou paiements en cours seront d’abord clôturés.</p>
+            <div className="controls">
+              <button className="btn btn-danger" disabled={busy || !online} onClick={() => act('/me/deletion-request', undefined, 'POST')}>Confirmer la suppression</button>
+              <button className="btn btn-soft" onClick={() => setConfirmDelete(false)}>Annuler</button>
+            </div>
+          </div>
+          : <button className="btn btn-soft" disabled={busy || !online} onClick={() => setConfirmDelete(true)}>Demander la suppression de mon compte</button>}
+      </div>
+    </>}
+  </Card>;
+}
+
 export function Account() {
   const { user } = useSession();
   const navigate = useNavigate();
@@ -435,6 +520,7 @@ export function Account() {
         <h3>{user.display_name || 'Mon profil'}</h3>
         {!user.needs_profile && <ProfileForm/>}
       </Card>
+      {!user.needs_profile && <PrivacyCenter/>}
     </>}
     {(!user || (user.role === 'passenger' && !user.needs_profile)) && <Card className="stack">
       <SectionTitle icon={Store} title="Conduire ou gérer une compagnie ?"/>

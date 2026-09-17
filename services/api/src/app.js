@@ -23,6 +23,7 @@ import { operationalHealth } from '@leroutier/database/operational-health';
 import { fareIntelligence } from '@leroutier/database/fare-intelligence';
 import { commercial } from '@leroutier/database/commercial';
 import { assistantService } from './assistant.js';
+import { privacyCenter, retentionEngine } from '@leroutier/database/privacy';
 import { mobility } from '@leroutier/database/mobility';
 import { journeys } from '@leroutier/database/journeys';
 import { tracking } from '@leroutier/database/tracking';
@@ -70,7 +71,9 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   // handed the very objects every other route uses, so a capacity check or a
   // fare it sees is the one the PWA sees.
   const ussd=createUssdEngine({db,domain,parcels:parcel,payments:pay,tracking:track,config:config.ussd ?? {}});
-  const assistant=assistantService({db,domain,parcels:parcel,fares,health,track});
+  const privacy=privacyCenter(db);
+  const retention=retentionEngine(db);
+  const assistant=assistantService({db,domain,parcels:parcel,fares,health,track,privacy});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
   async function limited(subject) {
     await db.transaction(async tx=>{
@@ -404,6 +407,36 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     const reconcile=path.match(/^\/payments\/([^/]+)\/reconcile$/);
     if(method==='POST' && reconcile)return pay.reconcile(actor,uuid(reconcile[1]));
     if(method==='PATCH' && path==='/me') return updateProfile(db,actor,await body());
+    // ---- privacy, consent, data rights --------------------------------------
+    if(method==='GET' && path==='/me/privacy') return privacy.summary(actor);
+    if(method==='GET' && path==='/me/consents') return privacy.consents(actor);
+    if(method==='POST' && path==='/me/consents') { await limited('privacy-consent:'+actor.id); return privacy.acceptConsent(actor,await body()); }
+    const consentPath=path.match(/^\/me\/consents\/([a-z_]+)$/);
+    if(method==='DELETE' && consentPath) { await limited('privacy-consent:'+actor.id); return privacy.withdrawConsent(actor,consentPath[1]); }
+    if(method==='POST' && path==='/me/policy-acknowledgements') return privacy.acknowledge(actor,await body());
+    if(method==='POST' && path==='/me/data-export') { await limited('privacy-export:'+actor.id); return privacy.requestExport(actor); }
+    const exportPath=path.match(/^\/me\/data-export\/([A-Za-z0-9_-]{20,100})$/);
+    if(method==='GET' && exportPath) return privacy.downloadExport(actor,exportPath[1]);
+    if(method==='GET' && path==='/me/deletion-request') return privacy.deletionStatus(actor);
+    if(method==='POST' && path==='/me/deletion-request') { await limited('privacy-deletion:'+actor.id); return privacy.requestDeletion(actor); }
+    if(method==='POST' && path==='/me/retention-confirmation') { await limited('privacy-keep:'+actor.id); return privacy.keepAccount(actor); }
+    if(method==='POST' && path==='/me/privacy/corrections') return privacy.requestCorrection(actor,await body());
+    // Platform Ops only: holds and the privacy request register. Company Ops
+    // never see user privacy data outside their own operator scope.
+    if(method==='POST' && path==='/ops/privacy/holds') return privacy.createHold(actor,await body());
+    const holdPath=path.match(/^\/ops\/privacy\/holds\/([^/]+)\/release$/);
+    if(method==='POST' && holdPath) return privacy.releaseHold(actor,holdPath[1]);
+    if(method==='GET' && path==='/ops/privacy/requests') {
+      invariant(actor?.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
+      return db.transaction(async tx=>({
+        deletionRequests: await (await tx.query(`SELECT d.status,d.requested_at,d.processed_at,count(*) OVER() AS total
+          FROM deletion_requests d ORDER BY d.requested_at DESC LIMIT 50`)).rows,
+        holds: (await tx.query(`SELECT subject_kind,subject_id,reason,created_at,expires_at,released_at FROM legal_holds
+          WHERE released_at IS NULL ORDER BY created_at DESC LIMIT 50`)).rows,
+        exports: (await tx.query(`SELECT count(*)::integer AS ready FROM data_exports WHERE status='ready' AND expires_at>now()`)).rows[0],
+        retention: await retention.run({execute:false}),
+      }));
+    }
     if(method==='GET' && path==='/ops/provisioning') return provision.catalog(actor);
     const provisionPath=path.match(/^\/ops\/(operators|drivers|convoyeurs|ops-users|places|stops|vehicles|routes|services)$/);
     if(method==='POST' && provisionPath) {

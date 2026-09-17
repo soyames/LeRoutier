@@ -67,3 +67,18 @@ USSD_MTN_ADAPTER=CONTRACT_PENDING
 USSD_ARCEP_CODE=EXTERNAL
 USSD_OPERATOR_ROUTING=EXTERNAL
 USSD_REAL_HANDSET_TEST=EXTERNAL
+
+## Privacy & data governance (2026-09)
+
+Privacy center (`/me/privacy*`), versioned consents and policy
+acknowledgements, 24-hour personal-data exports (own data only, never
+secrets), correction requests through the support pipeline, account deletion
+lifecycle (requested → scheduled with blockers → anonymized tombstone,
+never cascades financial/booking/parcel truth; Firebase identity deletion
+stays an external owner action), keep-account confirmations, configurable
+retention policies with legal/audit holds, inactive-account lifecycle with
+one mandatory pre-expiration notification, assistant privacy tools, and
+platform-ops privacy register. Retention runs DRY by default; destructive
+execution requires `RETENTION_EXECUTE=true` (owner decision). Durations are
+operational defaults pending legal validation; raw GPS stays at the 30-day
+project decision.
