@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router';
 import { AppShell, Card, Badge, SectionTitle, SessionPanel, EmptyState } from '@leroutier/ui';
 import { useSession } from '@leroutier/config/client';
-import { Trips, Tickets, Stations, Tracking, Account, Parcels as PassengerParcels, ParcelTracking, OnboardingPage } from '@leroutier/screens/passenger';
+import { Trips, Tickets, Stations, Tracking, Account, Parcels as PassengerParcels, ParcelTracking, OnboardingPage, PrivacyCenter } from '@leroutier/screens/passenger';
 import { Today as CrewToday, Manifest, Scanner, WalkUp, Parcels as CrewParcels, Vehicle, Points, Earnings, Profile } from '@leroutier/screens/crew';
 import { Today as OpsToday, Services, Fleet, Crew, Stations as OpsStations, Parcels as OpsParcels, Payments, Settlements, Incidents, Alerts, Settings } from '@leroutier/screens/ops';
 import { JourneyTimeline } from '@leroutier/screens/journey';
@@ -72,7 +72,7 @@ function AccountMenu() {
     </button>
     {open && user && <div className="account-menu" role="menu" aria-label="Menu du compte">
       <button role="menuitem" onClick={() => { setOpen(false); navigate('/account'); }}><UserRound size={15}/>Mon profil</button>
-      <button role="menuitem" onClick={() => { setOpen(false); navigate('/account'); }}><ShieldCheck size={15}/>Confidentialité et données</button>
+      <button role="menuitem" onClick={() => { setOpen(false); navigate('/account/privacy'); }}><ShieldCheck size={15}/>Confidentialité et données</button>
       <button role="menuitem" onClick={async () => { setOpen(false); await logout(); }}><LogOut size={15}/>Déconnexion</button>
     </div>}
   </div>;
@@ -173,6 +173,8 @@ export default function App() {
     : workspace === WORK ? { nav: workNav, screens: workScreens, titles: workTitles, prefix: '/work', role: can.convoyeur ? 'Convoyeur' : can.independent ? 'Chauffeur propriétaire' : 'Chauffeur' }
       : { nav: opsNav, screens: opsScreens, titles: opsTitles, prefix: '/ops', role: 'Exploitation' };
   const page = (workspace === PASSENGER ? segments[0] : segments[1]) ?? (workspace === PASSENGER ? '' : 'today');
+  // The privacy center is a stable account sub-route: deep-linkable, back-safe.
+  const privacySub = workspace === PASSENGER && page === 'account' && segments[1] === 'privacy';
   const known = Object.hasOwn(scoped.screens, page);
 
   const shell = content => <AppShell
@@ -201,5 +203,5 @@ export default function App() {
   // sign-in card. Authentication is offered at the action that requires it,
   // and from Compte.
   const fullyPublic = workspace === PASSENGER && (page === '' || (page === 'parcels' && segments[1] === 'track'));
-  return shell(<>{!fullyPublic && <SessionPanel/>}{scoped.screens[page]}</>);
+  return shell(<>{!fullyPublic && <SessionPanel/>}{privacySub ? <PrivacyCenter/> : scoped.screens[page]}</>);
 }

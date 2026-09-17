@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { DomainError, invariant, uuid } from '@leroutier/domain';
 import { transport } from '@leroutier/database/transport';
 import { validateVehiclePosition, distanceMetres } from '@leroutier/geo';
-import { enqueue } from '@leroutier/notifications';
+import { enqueue, channelAvailability } from '@leroutier/notifications';
 import { authentication } from './auth.js';
 import { publicAuthConfig } from '@leroutier/config';
 import { updateProfile, audit } from '@leroutier/database/identities';
@@ -212,7 +212,22 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       return list(`SELECT s.*,p.name AS city FROM stops s JOIN places p ON p.id=s.place_id
         WHERE s.name ILIKE $1 OR p.name ILIKE $1 ORDER BY p.name,s.name LIMIT 100`,['%'+search+'%']);
     }
-    if(method==='GET' && path==='/places') return list('SELECT * FROM places WHERE name ILIKE $1 ORDER BY name LIMIT 100',['%'+(url.searchParams.get('q')||'').slice(0,100)+'%']);
+    // Canonical Benin geography: search across names, normalized names and
+    // common spelling aliases; `type` filters (department, commune rows —
+    // communes are cities under a department).
+    if(method==='GET' && path==='/places') {
+      const q=(url.searchParams.get('q')||'').slice(0,100);
+      const type=url.searchParams.get('type');
+      invariant(type===null || ['department','city','commune'].includes(type),'INVALID_INPUT','Invalid place type.');
+      const kindFilter=type==='commune'
+        ? `kind='city' AND parent_id IN (SELECT id FROM places WHERE kind='department')`
+        : type ? `kind='${type}'` : 'TRUE';
+      if(q) return list(`SELECT id,name,kind,parent_id,latitude,longitude FROM places
+        WHERE (name ILIKE $1 OR normalized_name ILIKE $2 OR aliases::text ILIKE $2) AND ${kindFilter}
+        ORDER BY (kind='city') DESC, name LIMIT 100`,[`%${q}%`,`%${q.toLowerCase()}%`]);
+      return list(`SELECT id,name,kind,parent_id,latitude,longitude FROM places
+        WHERE ${kindFilter} ORDER BY name LIMIT 200`);
+    }
     if(method==='GET' && path==='/routes') return list(`SELECT r.*,coalesce((SELECT json_agg(json_build_object('sequence',rs.sequence,'stopId',s.id,'name',s.name,'city',p.name) ORDER BY rs.sequence)
       FROM route_stops rs JOIN stops s ON s.id=rs.stop_id JOIN places p ON p.id=s.place_id WHERE rs.route_id=r.id),'[]') AS stops FROM routes r WHERE active=true ORDER BY name`);
     // The same search the USSD channel runs. One query, one answer to
@@ -596,7 +611,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       invariant(actor.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
       return reasoning.usage();
     }
-    if(method==='GET' && path==='/ops/health') return health.read(actor);
+    if(method==='GET' && path==='/ops/health') { const h=await health.read(actor); return { ...h, channels: channelAvailability(config) }; }
     if(method==='POST' && path==='/ops/model-health') {
       // Platform Ops only: it spends quota, so an operator admin cannot drain
       // the shared budget by refreshing a dashboard.
