@@ -10,7 +10,7 @@ import { audit } from './identities.js';
 const one = async (tx, sql, args = []) => (await tx.query(sql, args)).rows[0];
 
 /** Deterministic fingerprint of the ordered stop coordinates. */
-const fingerprint = stops => createHash('sha256')
+export const fingerprint = stops => createHash('sha256')
   .update(JSON.stringify(stops.map(s => [s.sequence, s.longitude, s.latitude])))
   .digest('hex').slice(0, 32);
 
@@ -53,6 +53,8 @@ export function routeGeometry(db, router) {
           available: true,
           coordinates: row.coordinates,
           distanceM: row.distance_m,
+          durationS: row.duration_s,
+          legs: row.legs,
           provider: row.provider,
           generatedAt: row.generated_at,
           stale: row.input_hash !== fingerprint(stops) || row.stop_count !== stops.length,
@@ -89,16 +91,19 @@ export function routeGeometry(db, router) {
 
       try {
         invariant(stops.length >= 2, 'INVALID_ROUTE', 'A route needs at least two stops.', 409);
-        const { coordinates, distanceM, provider } = await router.route(stops);
+        const { coordinates, distanceM, durationS = null, legs = null, provider } = await router.route(stops);
         invariant(isValidLine(coordinates), 'INVALID_GEOMETRY', 'Routing geometry was malformed.', 502);
         // Trust the engine's distance, but fall back to measuring the line.
         const measured = distanceM > 0 ? distanceM : Math.round(lineLengthMetres(coordinates));
         await db.transaction(async tx => {
-          await tx.query(`INSERT INTO route_geometries(route_id,coordinates,distance_m,provider,input_hash,stop_count)
-            VALUES($1,$2,$3,$4,$5,$6)
+          const current = await stopsOf(tx, routeId);
+          invariant(fingerprint(current) === hash, 'ROUTE_CHANGED', 'Route stops changed during generation.', 409);
+          await tx.query(`INSERT INTO route_geometries(route_id,coordinates,distance_m,provider,input_hash,stop_count,duration_s,legs)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8)
             ON CONFLICT(route_id) DO UPDATE SET coordinates=EXCLUDED.coordinates,distance_m=EXCLUDED.distance_m,
-              provider=EXCLUDED.provider,input_hash=EXCLUDED.input_hash,stop_count=EXCLUDED.stop_count,generated_at=now()`,
-          [routeId, JSON.stringify(coordinates), measured, provider, hash, stops.length]);
+              provider=EXCLUDED.provider,input_hash=EXCLUDED.input_hash,stop_count=EXCLUDED.stop_count,generated_at=now(),
+              duration_s=EXCLUDED.duration_s,legs=EXCLUDED.legs`,
+          [routeId, JSON.stringify(coordinates), measured, provider, hash, stops.length, durationS, legs ? JSON.stringify(legs) : null]);
           await tx.query('DELETE FROM route_geometry_failures WHERE route_id=$1', [routeId]);
           await audit(tx, actor.id, 'route.geometry_generated', routeId, route.operator_id,
             { provider, distanceM: measured, stopCount: stops.length });

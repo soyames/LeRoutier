@@ -27,11 +27,6 @@ export function freshness(observedAt, now = Date.now(), thresholds = FRESHNESS) 
   return { state: 'unavailable', ageSeconds: age };
 }
 
-// A pilot-safe default when movement data is not yet usable: the average speed
-// an intercity service actually achieves on these corridors, including stops.
-// Configurable rather than scattered through the code.
-export const DEFAULT_ROUTE_SPEED_MPS = 13.9; // ~50 km/h
-
 /**
  * Arrival estimate for a distance remaining along the road.
  *
@@ -48,17 +43,21 @@ export const DEFAULT_ROUTE_SPEED_MPS = 13.9; // ~50 km/h
 /**
  * @param {{ remainingM?: number|null, observations?: any[], observedAt?: string|null,
  *   scheduledAt?: string|null, now?: number, speedMps?: number|null,
+ *   routeDurationS?: number|null, routeDistanceM?: number|null, disrupted?: boolean,
  *   thresholds?: { liveSeconds: number, delayedSeconds: number, staleSeconds: number } }} [input]
  */
 export function estimateArrival({
   remainingM = null, observations = [], observedAt = null, scheduledAt = null,
   now = Date.now(), speedMps = null, thresholds = FRESHNESS,
+  routeDurationS = null, routeDistanceM = null, disrupted = false,
 } = {}) {
   const signal = freshness(observedAt, now, thresholds);
-  const scheduled = scheduledAt ? new Date(scheduledAt).toISOString() : null;
+  const scheduleTime = Date.parse(scheduledAt);
+  const scheduled = Number.isFinite(scheduleTime) && scheduleTime >= now ? new Date(scheduleTime).toISOString() : null;
+  if (disrupted) return {at:null,confidence:'unavailable',source:null,signal:signal.state,reason:'service_disrupted'};
 
   // Without a usable position, the timetable is the only honest answer.
-  if (!Number.isFinite(remainingM) || signal.state === 'unavailable') {
+  if (!Number.isFinite(remainingM) || ['stale','unavailable'].includes(signal.state)) {
     return scheduled
       ? { at: scheduled, confidence: 'scheduled', source: 'schedule', signal: signal.state }
       : { at: null, confidence: 'unavailable', source: null, signal: signal.state };
@@ -69,7 +68,11 @@ export function estimateArrival({
   // Measured movement only counts while the signal is genuinely recent; a
   // stale fix cannot support a "live" estimate.
   const live = usableMeasured && signal.state === 'live';
-  const effective = usableMeasured ? measured : DEFAULT_ROUTE_SPEED_MPS;
+  const routedSpeed = routeDurationS > 0 && routeDistanceM > 0 ? routeDistanceM / routeDurationS : null;
+  const effective = usableMeasured ? measured : routedSpeed;
+  if (!(effective > 0)) return scheduled
+    ? {at:scheduled,confidence:'scheduled',source:'schedule',signal:signal.state}
+    : {at:null,confidence:'unavailable',source:null,signal:signal.state};
   const seconds = remainingM / effective;
   if (!Number.isFinite(seconds) || seconds < 0) {
     return scheduled ? { at: scheduled, confidence: 'scheduled', source: 'schedule', signal: signal.state }
@@ -79,11 +82,11 @@ export function estimateArrival({
   // Rounded to five minutes: the inputs do not support minute precision, and
   // showing "14:24:37" would imply an accuracy this system does not have.
   const raw = now + seconds * 1000;
-  const at = new Date(Math.round(raw / 300_000) * 300_000).toISOString();
+  const at = new Date(Math.ceil(raw / 300_000) * 300_000).toISOString();
   return {
     at,
     confidence: live ? 'live' : 'estimated',
-    source: usableMeasured ? 'gps_movement' : 'route_default_speed',
+    source: usableMeasured ? 'gps_movement' : 'road_routing',
     signal: signal.state,
     speedMps: usableMeasured ? Math.round(measured * 10) / 10 : null,
     scheduledAt: scheduled,

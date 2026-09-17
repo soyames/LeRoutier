@@ -1,4 +1,5 @@
 import { invariant, uuid } from '@leroutier/domain';
+import { fingerprint } from './route-geometry.js';
 import { isValidLine, routeProgress, projectStops, stopStates, nextStopFrom, offRouteState,
   freshness, estimateArrival, FRESHNESS } from '@leroutier/geo';
 
@@ -33,9 +34,8 @@ export function tracking(db, config = {}) {
       FROM services s WHERE s.id=$1`, [serviceId]);
     invariant(service, 'NOT_FOUND', 'Service not found.', 404);
 
-    const stored = await one(tx, 'SELECT coordinates,distance_m,provider,generated_at FROM route_geometries WHERE route_id=$1', [service.route_id]);
+    const stored = await one(tx, 'SELECT coordinates,distance_m,duration_s,provider,generated_at,input_hash,stop_count FROM route_geometries WHERE route_id=$1', [service.route_id]);
     const coordinates = stored?.coordinates ?? null;
-    const hasRoad = isValidLine(coordinates);
 
     const serviceStops = (await rows(tx, `SELECT ss.sequence, st.name, p.name AS city, st.longitude, st.latitude
       FROM service_stops ss JOIN stops st ON st.id=ss.stop_id JOIN places p ON p.id=st.place_id
@@ -43,6 +43,7 @@ export function tracking(db, config = {}) {
       .map(r => ({ sequence: r.sequence, name: r.name, city: r.city,
         longitude: r.longitude === null ? null : Number(r.longitude),
         latitude: r.latitude === null ? null : Number(r.latitude) }));
+    const hasRoad = isValidLine(coordinates) && stored.input_hash===fingerprint(serviceStops) && stored.stop_count===serviceStops.length;
 
     const observations = (await rows(tx, `SELECT latitude,longitude,observed_at,accuracy_m,speed_mps
       FROM vehicle_positions WHERE service_id=$1 ORDER BY observed_at DESC LIMIT $2`, [serviceId, OBSERVATION_WINDOW]))
@@ -97,6 +98,8 @@ export function tracking(db, config = {}) {
       // has none, so no schedule fallback is offered for it.
       scheduledAt: destinationSequence === null || destinationSequence === serviceStops.at(-1)?.sequence ? service.arrival_at : null,
       now, speedMps: latest?.speedMps ?? null, thresholds,
+      routeDistanceM:stored?.distance_m, routeDurationS:stored?.duration_s,
+      disrupted:service.status==='disrupted' || offRoute.offRoute,
     });
 
     return {
@@ -116,6 +119,7 @@ export function tracking(db, config = {}) {
       stops: states.map(s => ({ sequence: s.sequence, name: s.name, city: s.city, state: s.state,
         latitude: s.latitude ?? null, longitude: s.longitude ?? null })),
       nextStop: next ? { sequence: next.sequence, name: next.name, city: next.city } : null,
+      currentSegment: next ? {fromSequence:Math.max(0,next.sequence-1),toSequence:next.sequence} : null,
       // Deviation is an operational signal; it is not surfaced to passengers.
       offRoute: offRoute.offRoute,
       offRouteM: offRoute.worstOffRouteM,

@@ -98,6 +98,29 @@ export function notificationPolicies(db, config = {}) {
   async function dispatchEvent(tx, event) {
     const payload = typeof event.payload === 'string' ? JSON.parse(event.payload) : (event.payload ?? {});
     const normalized = { ...event, payload };
+    // Existing agent/direct sends enter the same inbox and delivery tables.
+    if(event.event_type==='notification.send') {
+      let recipients=[],template=payload.template??'parcel_update',channels=['in_app'];
+      if(Array.isArray(payload.recipients)) recipients=payload.recipients.map(userId=>({userId}));
+      else if(payload.kind==='channel' && CHANNELS.includes(payload.channel)) {
+        recipients=[payload.channel==='in_app'?{userId:payload.to}:{contact:payload.to}];channels=[payload.channel];
+      } else if(payload.kind==='parcel' && ['sender','receiver'].includes(payload.party)) {
+        recipients=await parcelParty(tx,{...event,aggregate_id:payload.parcelId},payload.party);channels=['sms','whatsapp'];
+      }
+      let created=0;
+      for(const recipient of recipients) {
+        const inserted=await one(tx,`INSERT INTO notifications(user_id,contact,event_type,category,template,data,source_event_id)
+          VALUES($1,$2,$3,'operational',$4,$5,$6) ON CONFLICT DO NOTHING RETURNING id`,
+        [recipient.userId??null,recipient.contact??null,event.event_type,template,JSON.stringify(safeData(payload.data)),event.id]);
+        if(!inserted)continue;created++;
+        const preferences=recipient.userId?await rows(tx,'SELECT category,channel,enabled FROM notification_preferences WHERE user_id=$1',[recipient.userId]):[];
+        for(const channel of resolveChannels({policyChannels:channels,availability,category:'operational',preferences})) {
+          if(channel.channel==='in_app' && !recipient.userId)continue;
+          await tx.query('INSERT INTO notification_deliveries(notification_id,channel,status,detail) VALUES($1,$2,$3,$4)',[inserted.id,channel.channel,channel.status,channel.detail]);
+        }
+      }
+      return created;
+    }
     const policies = await rows(tx, `SELECT * FROM notification_policies
       WHERE active AND event_type=$1 AND $2::jsonb @> payload_match`, [event.event_type, JSON.stringify(payload)]);
     let created = 0;
@@ -108,10 +131,10 @@ export function notificationPolicies(db, config = {}) {
         if (!recipient.userId && !recipient.contact) continue;
         const preferences = recipient.userId
           ? await rows(tx, 'SELECT category,channel,enabled FROM notification_preferences WHERE user_id=$1', [recipient.userId]) : [];
-        const inserted = await one(tx, `INSERT INTO notifications(policy_id,user_id,contact,event_type,category,severity,template,data,entity_type,entity_id)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING RETURNING *`,
+        const inserted = await one(tx, `INSERT INTO notifications(policy_id,user_id,contact,event_type,category,severity,template,data,entity_type,entity_id,source_event_id)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING RETURNING *`,
         [policy.id, recipient.userId ?? null, recipient.contact ?? null, event.event_type, policy.category, policy.severity,
-          policy.template, JSON.stringify(safeData(payload)), policy.entity_type, recipient.entityId ?? null]);
+          policy.template, JSON.stringify(safeData(payload)), policy.entity_type, recipient.entityId ?? null, event.id]);
         if (!inserted) continue;
         created++;
         for (const channel of resolveChannels({ policyChannels: policy.channels, availability, mandatory: policy.mandatory, category: policy.category, preferences })) {
@@ -130,12 +153,12 @@ export function notificationPolicies(db, config = {}) {
   // Mark earlier advice about the same entity as superseded so a passenger is
   // never left holding two different "leave at" times.
   async function supersede(tx, notification) {
-    await tx.query(`UPDATE notifications SET superseded_at=now()
+    const previous=await rows(tx,`UPDATE notifications SET superseded_at=now()
       WHERE id<>$1 AND superseded_at IS NULL AND entity_type=$2 AND entity_id=$3 AND template=$4
-      AND (user_id=$5 OR ($5::uuid IS NULL AND contact=$6))`,
+      AND (user_id=$5 OR ($5::uuid IS NULL AND contact=$6)) RETURNING id,created_at`,
     [notification.id, notification.entity_type, notification.entity_id, notification.template, notification.user_id, notification.contact]);
-    await tx.query('UPDATE notifications SET supersedes_id=$2 WHERE id=$1 AND supersedes_id IS NULL',
-      [notification.id, notification.id]);
+    if(previous.length) await tx.query('UPDATE notifications SET supersedes_id=$2 WHERE id=$1 AND supersedes_id IS NULL',
+      [notification.id,previous.sort((a,b)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime())[0].id]);
   }
 
   return {

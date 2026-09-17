@@ -16,7 +16,7 @@ const apiUrl = process.env.VITE_API_URL
 // offline action queue (localStorage) until reconnection.
 export default defineConfig({
   plugins: [react(), VitePWA({
-    registerType: 'autoUpdate',
+    registerType: 'prompt',
     manifest: {
       name: 'LeRoutier',
       short_name: 'LeRoutier',
@@ -37,10 +37,8 @@ export default defineConfig({
     },
     workbox: {
       navigateFallback: '/index.html',
-      runtimeCaching: [{
-        urlPattern: ({ url, request }) => url.origin === self.location.origin && request.destination === 'document',
-        handler: 'NetworkFirst',
-      }],
+      navigateFallbackDenylist: [/^\/api\//],
+      runtimeCaching: [],
     },
   })],
   resolve: { dedupe: ['react', 'react-dom'] },

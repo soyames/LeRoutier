@@ -31,7 +31,7 @@ test('unconfigured outbound providers stay unavailable instead of faking success
 });
 
 test('configured providers become available and in_app always terminates the order',()=>{
-  const availability=channelAvailability({notificationProviders:{sms:{}}});
+  const availability=channelAvailability({notificationProviders:{sms:{idempotent:true,send:async()=>({accepted:true})}}});
   assert.equal(availability.sms,true);
   assert.equal(availability.whatsapp,false);
   const resolved=resolveChannels({policyChannels:['sms','whatsapp'],availability,mandatory:true,category:'critical'});
@@ -39,7 +39,7 @@ test('configured providers become available and in_app always terminates the ord
 });
 
 test('preferences suppress optional categories but never mandatory alerts',()=>{
-  const availability=channelAvailability({notificationProviders:{sms:{}}});
+  const availability=channelAvailability({notificationProviders:{sms:{idempotent:true,send:async()=>({accepted:true})}}});
   const preferences=[{category:'operational',channel:'sms',enabled:false},{category:'critical',channel:'sms',enabled:false}];
   const optional=resolveChannels({policyChannels:['sms'],availability,mandatory:false,category:'operational',preferences});
   assert.equal(optional.find(r=>r.channel==='sms').status,'suppressed');

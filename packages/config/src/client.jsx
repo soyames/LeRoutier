@@ -36,7 +36,7 @@ export function ApiProvider({baseUrl='',role,children}) {
     if(!base) throw new Error('API non configurée.');
     if(!navigator.onLine) throw new Error('Hors ligne. Réessayez après reconnexion.');
     const bearer=await authorization(token);
-    const response=await fetch(base+'/api/v1'+path,{method,signal,cache:'no-store',headers:{'content-type':'application/json',...(bearer?{authorization:'Bearer '+bearer}:{}),...(key?{'idempotency-key':key}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+    const response=await fetch(base+'/api/v1'+path,{method,signal,cache:'no-store',headers:{'content-type':'application/json','x-request-id':crypto.randomUUID(),...(bearer?{authorization:'Bearer '+bearer}:{}),...(key?{'idempotency-key':key}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
     let payload;
     try { payload=await response.json(); } catch { throw new Error('Le service est indisponible.'); }
     if(!response.ok){

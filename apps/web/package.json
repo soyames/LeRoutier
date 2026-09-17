@@ -18,7 +18,8 @@
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "react-router": "catalog:"
+    "react-router": "catalog:",
+    "workbox-window": "^7.4.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "catalog:",
