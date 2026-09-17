@@ -7,11 +7,20 @@
   "rewrites": [
     {
       "source": "/api/v1/:path*",
-      "destination": "https://le-routier-api.vercel.app/api/v1/:path*"
+      "destination": "https://api.leroutier.app/api/v1/:path*"
     },
     {
       "source": "/(.*)",
       "destination": "/index.html"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "le-routier.vercel.app" }],
+      "destination": "https://leroutier.app/$1",
+      "permanent": true,
+      "statusCode": 308
     }
   ],
   "headers": [
@@ -20,7 +29,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://apis.google.com; frame-src https://leroutier-df848.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://*.googleusercontent.com; font-src 'self' data:; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; connect-src 'self' https://le-routier-api.vercel.app https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://apis.google.com https://leroutier-df848.firebaseapp.com"
+          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://apis.google.com; frame-src https://leroutier-df848.firebaseapp.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://*.googleusercontent.com; font-src 'self' data:; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; connect-src 'self' https://api.leroutier.app https://le-routier-api.vercel.app https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://apis.google.com https://leroutier-df848.firebaseapp.com"
         },
         {
           "key": "X-Content-Type-Options",

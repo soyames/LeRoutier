@@ -156,36 +156,31 @@ methods and bodies are all forwarded intact.
 Two consequences worth stating plainly:
 
 - **No CORS entry is needed for the unified app.** A direct cross-origin call
-  from `https://le-routier.vercel.app` to the API is still refused with
+  from `https://leroutier.app` to the API is still refused with
   `403 Origin is not allowed`, because the unified origin is deliberately not
   in `CORS_ORIGINS`. Add it only if you switch back to direct calls.
-- **Attaching a custom domain needs no rebuild.** `same-origin` follows
-  whatever domain serves the app, so `leroutier.bj` works through the same
-  rewrite the moment DNS points at the project.
+- **Attaching the custom domain needed no rebuild.** `same-origin` follows
+  whatever domain serves the app, so `leroutier.app` works through the same
+  rewrite now that the domain is attached.
 
-Direct API usage is unchanged: `le-routier-api.vercel.app/api/v1` still serves
-the legacy apps exactly as before.
+Direct API usage is unchanged: the canonical API is served at
+`api.leroutier.app/api/v1` — a domain alias of the `le-routier-api` Vercel
+project. The legacy Vercel hostname keeps working during the transition.
 
-## Future custom domain
+## Domain state (2026-09)
 
-Attaching `https://leroutier.bj` requires no code change and no rebuild:
-
-1. attach the domain to the `le-routier` Vercel project;
-2. add `leroutier.bj` to the Firebase authorized-domain list. There is no
-   redirect URI to register: the sign-in flow is same-origin, so the domain is
-   the only thing Firebase needs to know about.
-   provider's registered redirect URIs.
-
-That is the whole list. `VITE_API_URL=same-origin` follows the new domain
-automatically, and no `CORS_ORIGINS` entry is required while the app calls the
-API through its own origin. Existing origins stay in `CORS_ORIGINS` until the
-old apps are retired.
+- `https://leroutier.app` — canonical frontend (attached to the `le-routier`
+  project; `www.leroutier.app` and `le-routier.vercel.app` 308-redirect to it).
+- `https://api.leroutier.app` — canonical API hostname.
+- `https://le-routier.vercel.app` — legacy frontend URL, redirect only.
+- `https://le-routier-api.vercel.app` — legacy API origin, kept during the
+  transition.
 
 ### OIDC redirect URIs
 
 | Now | Future |
 | --- | --- |
-| `https://le-routier.vercel.app/auth/callback` | `https://leroutier.bj/auth/callback` |
+| `https://le-routier.vercel.app/auth/callback` | `https://leroutier.app/auth/callback` |
 | `https://le-routier-passenger.vercel.app/auth/callback` | retired with the old app |
 | `https://le-routier-driver.vercel.app/auth/callback` | retired with the old app |
 | `https://le-routier-ops.vercel.app/auth/callback` | retired with the old app |

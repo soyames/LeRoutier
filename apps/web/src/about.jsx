@@ -7,12 +7,13 @@ import { Link } from 'react-router';
 // the product; nothing overpromises delivery, GPS or payment outcomes.
 
 function Section({ title, children }) {
-  return <section className="stack"><h2>{title}</h2>{children}</section>;
+  return <section className="stack about-section"><h2>{title}</h2>{children}</section>;
 }
 
 export function About() {
-  return <main className="page stack" style={{ maxWidth: 920, margin: '0 auto' }}>
+  return <main className="page stack" style={{ maxWidth: 920, margin: '0 auto', minWidth: 0 }}>
     <header className="stack">
+      <img className="about-hero" src="/about-hero.svg" alt="Bus interurbain LeRoutier reliant des villes du Bénin, avec un colis et un repère de position" width="960" height="360"/>
       <h1>À propos de LeRoutier</h1>
       <p className="lead">LeRoutier est la plateforme numérique d’exploitation et de transaction du transport routier interurbain et de la mobilité par colis au Bénin.</p>
     </header>

@@ -103,7 +103,7 @@ Then sign in to the Ops app with the bootstrapped identity.
 
 - [ ] Confirm `GET /api/v1/payments/config` shows collections available.
 - [ ] FedaPay dashboard: webhook #8590 enabled, URL
-  `https://le-routier-api.vercel.app/api/v1/webhooks/fedapay`, secret stored
+  `https://api.leroutier.app/api/v1/webhooks/fedapay`, secret stored
   in Vercel `FEDAPAY_WEBHOOK_SECRET` (distinct per endpoint, sandbox vs live differ).
 - [ ] Send one FedaPay test webhook event from the dashboard; it must be
   answered 200 and appear as an anomaly or ignored event (never a charge).

@@ -97,7 +97,7 @@ Prerequisites:
 - A real, verified operator with a published service and a low fare.
 - `GET /api/v1/payments/config` reports `available: true`.
 - FedaPay webhook endpoint enabled and pointing at
-  `https://le-routier-api.vercel.app/api/v1/webhooks/fedapay`, with the
+  `https://api.leroutier.app/api/v1/webhooks/fedapay`, with the
   per-endpoint secret set in `FEDAPAY_WEBHOOK_SECRET`.
 
 Record **before**: booking count, payment count, the operator's settlement

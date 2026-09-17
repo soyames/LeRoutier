@@ -47,6 +47,7 @@ removed rather than left to mislead.
 - [`operations/DATABASE_ENVIRONMENTS.md`](operations/DATABASE_ENVIRONMENTS.md) — production, local Docker, tests, and the guards between them
 - [`operations/RUNBOOKS.md`](operations/RUNBOOKS.md) — migrations, incidents, recovery
 - [`operations/VERCEL.md`](operations/VERCEL.md) — projects, environment-variable ownership, deployment
+- [`operations/FEDAPAY_WEBHOOKS.md`](operations/FEDAPAY_WEBHOOKS.md) — webhook signature, event classification, the minimum safe subscription
 - [`operations/PILOT_ROLLOUT.md`](operations/PILOT_ROLLOUT.md) — how the pilot starts
 - [`operations/PILOT_TEST_PLAN.md`](operations/PILOT_TEST_PLAN.md) — what the pilot verifies
 - [`operations/AUTH_PRODUCTION_SETUP.md`](operations/AUTH_PRODUCTION_SETUP.md) — Firebase Authentication and Google Sign-In

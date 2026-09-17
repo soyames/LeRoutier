@@ -181,7 +181,7 @@ Everything a gateway integration needs. An adapter is one object in
 
 | What to obtain | Why |
 | --- | --- |
-| **Webhook URL** | `https://le-routier-api.vercel.app/api/v1/ussd/webhook/<provider>` |
+| **Webhook URL** | `https://api.leroutier.app/api/v1/ussd/webhook/<provider>` |
 | **HTTP method and content type** | JSON and form-encoded are both handled |
 | **Authentication scheme** | header name, algorithm, and what exactly is signed — the raw body, or a canonical string |
 | **Shared secret** | delivered out of band; goes in `USSD_WEBHOOK_SECRET` |

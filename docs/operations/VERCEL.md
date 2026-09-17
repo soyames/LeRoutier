@@ -18,7 +18,7 @@ The API must allow every deployed frontend origin. `CORS_ORIGINS` on
 existing three kept until the old apps are retired:
 
 ```
-https://le-routier.vercel.app,https://le-routier-passenger.vercel.app,https://le-routier-driver.vercel.app,https://le-routier-ops.vercel.app
+https://leroutier.app,https://le-routier.vercel.app,https://le-routier-passenger.vercel.app,https://le-routier-driver.vercel.app,https://le-routier-ops.vercel.app
 ```
 
 A future custom domain is appended the same way. Exact origins only — no
