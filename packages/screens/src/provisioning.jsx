@@ -1,6 +1,21 @@
 import { useRef, useState } from 'react';
 import { useApi, useSession } from '@leroutier/config/client';
-import { Card, SectionTitle, ApiState } from '@leroutier/ui';
+import { Card, SectionTitle, ApiState, fcfa } from '@leroutier/ui';
+import { splitCommission, LEROUTIER_COMMISSION_BP } from '@leroutier/domain';
+
+// Live preview of the commercial split, computed with the SAME integer-money
+// module the API uses. The published fare is the final customer price; the 5%
+// commission comes out of it and is never added on top. Shown only to the
+// operator — passengers see the final price and nothing else.
+function FareBreakdown({total}){
+  if(total===null) return <p className="small muted">Le tarif publié est le prix final payé par le client. La commission LeRoutier (5&nbsp;%) en est déduite&nbsp;: elle n’est jamais ajoutée au-dessus du prix affiché.</p>;
+  const split=splitCommission(total);
+  return <div className="stack" role="status" aria-label="Détail commercial avant publication">
+    <div className="row"><span>Prix final client</span><strong>{fcfa(total)}</strong></div>
+    <div className="row"><span>Commission LeRoutier ({LEROUTIER_COMMISSION_BP/100}&nbsp;%)</span><span>{fcfa(split.commissionMinor)}</span></div>
+    <div className="row"><span>Votre montant net</span><strong>{fcfa(split.netMinor)}</strong></div>
+  </div>;
+}
 
 function Field({label,name,type='text',options=undefined,...props}){
   return <label>{label}{options?<select className="control" name={name} required {...props}><option value="">Sélectionner…</option>{options.map(o=><option key={o.id} value={o.id}>{o.name || o.display_name || o.registration}</option>)}</select>:<input className="control" name={name} type={type} required {...props}/>}</label>;
@@ -17,7 +32,12 @@ function ProvisionForm({title,path,children,body,onSaved,method='POST'}){
   return <details><summary>{title}</summary><form className="stack" onSubmit={submit}><fieldset disabled={busy || !online} className="stack">{children}<button className="btn btn-primary">Enregistrer</button></fieldset>{error && <p role="alert">{error}</p>}</form></details>;
 }
 export function Provisioning({onSaved=()=>{}}){
-  const {user}=useSession(),catalog=useApi(user?'/ops/provisioning':null),[operator,setOperator]=useState(''),[notice,setNotice]=useState(''),[stopCount,setStopCount]=useState(2);
+  const {user}=useSession(),catalog=useApi(user?'/ops/provisioning':null),[operator,setOperator]=useState(''),[notice,setNotice]=useState(''),[stopCount,setStopCount]=useState(2),[fareTotal,setFareTotal]=useState(null);
+  function fareInput(e){
+    const values=[...e.currentTarget.querySelectorAll('input[name="fare"]')].map(i=>Number(i.value||0));
+    const sum=values.reduce((a,b)=>a+b,0);
+    setFareTotal(sum>0?sum:null);
+  }
   if(!user)return null;
   const data=catalog.data,operatorId=user.operator_id || operator || data?.operators[0]?.id;
   const saved=()=>{setNotice('Création enregistrée.');catalog.reload();onSaved();};
@@ -41,9 +61,12 @@ export function Provisioning({onSaved=()=>{}}){
       <ProvisionForm title="Ajouter un arrêt" path="/ops/stops" body={f=>({name:f.get('name'),placeId:f.get('place'),latitude:Number(f.get('latitude')),longitude:Number(f.get('longitude'))})} {...formProps}><Field label="Localité" name="place" options={data.places}/><Field label="Nom de l’arrêt" name="name" maxLength={100}/><Field label="Latitude" name="latitude" type="number" step="any" min={-90} max={90}/><Field label="Longitude" name="longitude" type="number" step="any" min={-180} max={180}/></ProvisionForm>
       {operatorId && <>
         <ProvisionForm title="Créer une ligne et ses tarifs" path="/ops/routes" body={f=>({operatorId,name:f.get('name'),stops:f.getAll('stop').map((stopId,i)=>({stopId,fareToNext:i===stopCount-1?0:Number(f.getAll('fare')[i])}))})} {...formProps}>
-          <Field label="Nom de la ligne" name="name" maxLength={200}/><p className="small muted">Ajoutez les arrêts dans l’ordre du voyage. Le tarif de chaque tronçon est exprimé en FCFA.</p>
-          {Array.from({length:stopCount},(_,i)=><div className="stack" key={i}><Field label={`Arrêt ${i+1}`} name="stop" options={data.stops}/>{i<stopCount-1 && <Field label={`Tarif de l’arrêt ${i+1} au suivant`} name="fare" type="number" min={0} max={1000000}/>}</div>)}
-          <div className="controls"><button type="button" className="btn btn-soft" disabled={stopCount>=100} onClick={()=>setStopCount(n=>n+1)}>Ajouter un arrêt à la ligne</button><button type="button" className="btn btn-soft" disabled={stopCount<=2} onClick={()=>setStopCount(n=>n-1)}>Retirer le dernier arrêt</button></div>
+          <div className="stack" onInput={fareInput}>
+            <Field label="Nom de la ligne" name="name" maxLength={200}/><p className="small muted">Ajoutez les arrêts dans l’ordre du voyage. Le tarif de chaque tronçon est exprimé en FCFA.</p>
+            {Array.from({length:stopCount},(_,i)=><div className="stack" key={i}><Field label={`Arrêt ${i+1}`} name="stop" options={data.stops}/>{i<stopCount-1 && <Field label={`Tarif de l’arrêt ${i+1} au suivant`} name="fare" type="number" min={0} max={1000000}/>}</div>)}
+            <div className="controls"><button type="button" className="btn btn-soft" disabled={stopCount>=100} onClick={()=>setStopCount(n=>n+1)}>Ajouter un arrêt à la ligne</button><button type="button" className="btn btn-soft" disabled={stopCount<=2} onClick={()=>setStopCount(n=>n-1)}>Retirer le dernier arrêt</button></div>
+            <FareBreakdown total={fareTotal}/>
+          </div>
         </ProvisionForm>
         <ProvisionForm title="Planifier un départ" path="/ops/services" body={f=>({routeId:f.get('route'),vehicleId:f.get('vehicle'),driverId:f.get('driver'),departureAt:new Date(String(f.get('departure'))).toISOString()})} {...formProps}>
           <Field label="Ligne" name="route" options={scope(data.routes)}/><Field label="Véhicule" name="vehicle" options={scope(data.vehicles).filter(v=>v.status==='active')}/><Field label="Conducteur" name="driver" options={scope(data.users).filter(u=>u.role==='driver' && u.active && u.driver_active)}/><Field label="Date et heure de départ (heure locale)" name="departure" type="datetime-local"/><p className="small muted">Le service et son affectation seront créés ensemble. Le véhicule et le conducteur doivent être libres.</p>

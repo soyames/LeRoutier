@@ -171,12 +171,14 @@ test('walk-up cash sales confirm the booking, record cash and credit the operato
   assert.equal(payment.status,'succeeded');
   const credit=await one("SELECT * FROM operator_settlements WHERE source='walk_up' AND reference=$1",['walkup:'+booking.id]);
   assert.equal(credit.gross_minor,2500);
+  assert.equal(credit.deduction_minor,125,'the 5% commission comes out of the final cash price');
+  assert.equal(credit.net_minor,2375);
   assert.equal(credit.operator_id,demo.operator);
   // Amount tampering is rejected; passengers can never sell cash seats.
   await assert.rejects(walkUp(driver,{serviceId:demo.service,origin:0,destination:1,passengerName:'X',passengerPhone:'+229 61999998',amountMinor:1,cashReference:'R-2'},randomUUID()),{code:'INVALID_WALKUP'});
   await assert.rejects(walkUp(passenger,{serviceId:demo.service,origin:0,destination:1,passengerName:'X',passengerPhone:'+229 61999998',amountMinor:2500,cashReference:'R-3'},randomUUID()),{code:'FORBIDDEN'});
   const summary=await settle.summary(ops);
-  assert.equal(summary.available,2500);
+  assert.equal(summary.available,2375,'available balance is the operator net, commission already deducted');
 });
 
 test('only independent owner-drivers can withdraw operator revenue',async()=>{

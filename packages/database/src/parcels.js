@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { invariant, uuid, idempotencyKey } from '@leroutier/domain';
+import { invariant, uuid, idempotencyKey, splitCommission } from '@leroutier/domain';
+import { operatorSettlements } from './operator-settlements.js';
+import { fareIntelligence } from './fare-intelligence.js';
 import { audit } from './identities.js';
 
 // Parcel Logistics v1 domain service. Lifecycle, chain of custody, secure
@@ -33,7 +35,7 @@ const publicParcel = (row, parties = null) => ({
   originStopId: row.origin_stop_id, destinationStopId: row.destination_stop_id,
   category: row.category, quantity: row.quantity, weightG: row.weight_g, dimensions: row.dimensions,
   declaredValueMinor: row.declared_value_minor, notes: row.notes,
-  paymentResponsibility: row.payment_responsibility, priceMinor: row.price_minor,
+  paymentResponsibility: row.payment_responsibility, priceMinor: row.price_minor, serviceLevel: row.service_level,
   status: row.status, etaAt: row.eta_at, createdAt: row.created_at, updatedAt: row.updated_at,
   parties: parties ? parties.reduce((acc, p) => { acc[p.role] = { name: p.name, phone: p.phone }; return acc; }, {}) : undefined,
 });
@@ -51,6 +53,8 @@ async function trackingNumber(tx) {
 }
 
 export function parcels(db) {
+  const settlements = operatorSettlements(db);
+  const fares = fareIntelligence(db);
   async function addEvent(tx, { parcelId, kind, actor = null, principalId = null, serviceId = null, vehicleId = null, stopId = null, note = null, idempotencyKeyValue = null }) {
     const row = await one(tx, `INSERT INTO parcel_events(parcel_id,kind,actor_id,actor_role,principal_id,operator_id,service_id,vehicle_id,stop_id,note,idempotency_key)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING RETURNING id`,
@@ -86,13 +90,14 @@ export function parcels(db) {
   async function loadParties(tx, parcelId) {
     return (await tx.query('SELECT * FROM parcel_parties WHERE parcel_id=$1 ORDER BY role', [parcelId])).rows;
   }
-  async function rateFor(tx, { operatorId, originStopId, destinationStopId, category, weightG = 0, declaredValueMinor = 0 }) {
-    const rows = (await tx.query(`SELECT * FROM parcel_rate_rules WHERE operator_id=$1 AND active=true
+  async function rateFor(tx, { operatorId, originStopId, destinationStopId, category, weightG = 0, declaredValueMinor = 0, serviceLevel = 'standard' }) {
+    invariant(['standard', 'express'].includes(serviceLevel), 'INVALID_QUOTE', 'Service level is invalid.', 409);
+    const rows = (await tx.query(`SELECT * FROM parcel_rate_rules WHERE operator_id=$1 AND active=true AND service_level=$6
       AND (origin_stop_id IS NULL OR origin_stop_id=$2) AND (destination_stop_id IS NULL OR destination_stop_id=$3)
       AND (category IS NULL OR category=$4)
       AND (min_weight_g IS NULL OR min_weight_g<=$5) AND (max_weight_g IS NULL OR max_weight_g>=$5)
       ORDER BY (origin_stop_id IS NOT NULL)::int DESC,(destination_stop_id IS NOT NULL)::int DESC,(category IS NOT NULL)::int DESC
-      LIMIT 1`, [operatorId, originStopId, destinationStopId, category, weightG])).rows;
+      LIMIT 1`, [operatorId, originStopId, destinationStopId, category, weightG, serviceLevel])).rows;
     const rule = rows[0];
     invariant(rule, 'PRICING_UNAVAILABLE', 'Aucune grille tarifaire n’est configurée pour ce trajet — aucun prix ne peut être inventé.', 503);
     const perKg = Math.ceil((weightG / 1000) * rule.per_kg_minor);
@@ -100,7 +105,7 @@ export function parcels(db) {
     return { ruleId: rule.id, amountMinor: rule.base_minor + perKg + declared, currency: 'XOF' };
   }
   async function findCarrier(tx, originStopId, destinationStopId, requestedOperatorId = null) {
-    const rows = (await tx.query(`SELECT s.id,s.operator_id,o.name AS operator_name,
+    const rows = (await tx.query(`SELECT s.id,s.operator_id,s.route_id,s.departure_at,s.arrival_at,o.name AS operator_name,
       (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$1) AS origin,
       (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$2) AS destination
       FROM services s JOIN operators o ON o.id=s.operator_id
@@ -111,28 +116,66 @@ export function parcels(db) {
     }
     invariant(false, 'INVALID_JOURNEY', 'Aucun service actif ne relie ces deux points dans l’ordre demandé.', 409);
   }
+  // Express means same-day delivery as actually operated. Eligibility follows
+  // the operator's own schedule: the qualifying service must depart today and
+  // arrive today (scheduled arrival, or departure plus the route's road
+  // duration). Without that evidence Express fails closed — no misleading
+  // same-day promise is ever made.
+  const BENIN_DAY = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Porto-Novo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
+  async function assertExpressFeasible(tx, service, now = Date.now()) {
+    const departureMs = new Date(service.departure_at).getTime();
+    const today = BENIN_DAY(now);
+    invariant(departureMs > now, 'EXPRESS_UNAVAILABLE', 'Aucun départ restant aujourd’hui ne permet une livraison Express le jour même.', 409);
+    let arrivalMs = service.arrival_at ? new Date(service.arrival_at).getTime() : null;
+    if (arrivalMs === null) {
+      const geometry = await one(tx, 'SELECT duration_s FROM route_geometries WHERE route_id=$1', [service.route_id]);
+      if (geometry?.duration_s) arrivalMs = departureMs + geometry.duration_s * 1000;
+    }
+    invariant(arrivalMs !== null, 'EXPRESS_UNAVAILABLE', 'L’heure d’arrivée n’est pas assez fiable pour garantir une livraison Express le jour même.', 409);
+    invariant(BENIN_DAY(departureMs) === today && BENIN_DAY(arrivalMs) === today && arrivalMs > departureMs,
+      'EXPRESS_UNAVAILABLE', 'La livraison le jour même ne peut pas être garantie sur ce trajet aujourd’hui.', 409);
+    return true;
+  }
+  // A parcel payment that succeeded credits the operator settlement (gross
+  // minus commission) and records the transaction as market evidence.
+  // Idempotent per parcel payment: replays never double-credit or double-count.
+  async function settleParcelPayment(tx, parcel, payment) {
+    const operatorType = (await one(tx, 'SELECT type FROM operators WHERE id=$1', [parcel.operator_id]))?.type ?? null;
+    const split = splitCommission(payment.amount_minor);
+    await settlements.credit(tx, { operatorId: parcel.operator_id,
+      source: payment.provider === 'cash' ? 'parcel_cash' : 'parcel_online',
+      reference: 'parcel-payment:' + payment.id, grossMinor: split.grossMinor, deductionMinor: split.commissionMinor });
+    await fares.recordTransaction(tx, { operatorId: parcel.operator_id, originStopId: parcel.origin_stop_id,
+      destinationStopId: parcel.destination_stop_id,
+      fareType: parcel.service_level === 'express' ? 'parcel_express' : 'parcel_standard',
+      priceMinor: payment.amount_minor, operatorType, sourceReference: 'parcel-payment:' + payment.id,
+      observedAt: new Date().toISOString() });
+  }
 
   return {
     // --- pricing / quotes ---
     async quote(actor, input) {
       const q = input;
-      invariant(q && Object.keys(q).every(k => ['originStopId', 'destinationStopId', 'category', 'weightG', 'declaredValueMinor', 'operatorId'].includes(k)),
+      invariant(q && Object.keys(q).every(k => ['originStopId', 'destinationStopId', 'category', 'weightG', 'declaredValueMinor', 'operatorId', 'serviceLevel'].includes(k)),
         'INVALID_QUOTE', 'Unexpected quote fields.');
       uuid(q.originStopId); uuid(q.destinationStopId);
       invariant(typeof q.category === 'string' && q.category.length <= 40 && Number.isInteger(q.weightG ?? 0) && Number.isInteger(q.declaredValueMinor ?? 0),
         'INVALID_QUOTE', 'Quote fields are invalid.');
+      const serviceLevel = q.serviceLevel ?? 'standard';
       return db.transaction(async tx => {
         const carrier = await findCarrier(tx, q.originStopId, q.destinationStopId, q.operatorId ?? (actor?.role === 'ops' ? actor.operator_id : null));
-        const rate = await rateFor(tx, { operatorId: carrier.operator_id, originStopId: q.originStopId, destinationStopId: q.destinationStopId, category: q.category, weightG: q.weightG ?? 0, declaredValueMinor: q.declaredValueMinor ?? 0 });
-        return { ...rate, operatorId: carrier.operator_id, operatorName: carrier.operator_name };
+        if (serviceLevel === 'express') await assertExpressFeasible(tx, carrier);
+        const rate = await rateFor(tx, { operatorId: carrier.operator_id, originStopId: q.originStopId, destinationStopId: q.destinationStopId, category: q.category, weightG: q.weightG ?? 0, declaredValueMinor: q.declaredValueMinor ?? 0, serviceLevel });
+        return { ...rate, serviceLevel, operatorId: carrier.operator_id, operatorName: carrier.operator_name };
       });
     },
     async create(actor, input, key) {
       invariant(actor?.role === 'passenger' || actor?.role === 'ops', 'FORBIDDEN', 'Passenger or Ops access required.', 403);
       idempotencyKey(key);
       invariant(input && Object.keys(input).every(k => ['senderName', 'senderPhone', 'receiverName', 'receiverPhone', 'originStopId', 'destinationStopId',
-        'category', 'quantity', 'weightG', 'dimensions', 'declaredValueMinor', 'notes', 'paymentResponsibility', 'operatorId', 'consignmentPointId', 'pickupPointId'].includes(k)),
+        'category', 'quantity', 'weightG', 'dimensions', 'declaredValueMinor', 'notes', 'paymentResponsibility', 'operatorId', 'consignmentPointId', 'pickupPointId', 'serviceLevel'].includes(k)),
       'INVALID_PARCEL', 'Unexpected parcel fields.');
+      const serviceLevel = input.serviceLevel ?? 'standard';
       if (input.consignmentPointId) uuid(input.consignmentPointId);
       if (input.pickupPointId) uuid(input.pickupPointId);
       const party = (name, phone) => {
@@ -177,13 +220,14 @@ export function parcels(db) {
             'INVALID_POINT', 'Point de retrait colis invalide.', 409);
         }
         const carrier = await findCarrier(tx, input.originStopId, input.destinationStopId, actor?.role === 'ops' ? (input.operatorId ?? actor.operator_id) : input.operatorId ?? null);
-        const rate = await rateFor(tx, { operatorId: carrier.operator_id, originStopId: input.originStopId, destinationStopId: input.destinationStopId, category: input.category, weightG: weightG ?? 0, declaredValueMinor: declaredValue ?? 0 });
+        if (serviceLevel === 'express') await assertExpressFeasible(tx, carrier);
+        const rate = await rateFor(tx, { operatorId: carrier.operator_id, originStopId: input.originStopId, destinationStopId: input.destinationStopId, category: input.category, weightG: weightG ?? 0, declaredValueMinor: declaredValue ?? 0, serviceLevel });
         const number = await trackingNumber(tx);
         const row = await one(tx, `INSERT INTO parcels(tracking_number,operator_id,origin_stop_id,destination_stop_id,category,quantity,weight_g,dimensions,
-          declared_value_minor,notes,payment_responsibility,price_minor,status,idempotency_key,request_fingerprint,created_by,eta_at,consignment_point_id,pickup_point_id)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'created',$13,$14,$15,NULL,$16,$17) RETURNING *`,
+          declared_value_minor,notes,payment_responsibility,price_minor,service_level,status,idempotency_key,request_fingerprint,created_by,eta_at,consignment_point_id,pickup_point_id)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'created',$14,$15,$16,NULL,$17,$18) RETURNING *`,
         [number, carrier.operator_id, input.originStopId, input.destinationStopId, input.category, quantity, weightG, dimensions === null ? null : JSON.stringify(dimensions),
-          declaredValue, notes, responsibility, rate.amountMinor, key, fingerprint, actor.id, input.consignmentPointId ?? null, input.pickupPointId ?? null]);
+          declaredValue, notes, responsibility, rate.amountMinor, serviceLevel, key, fingerprint, actor.id, input.consignmentPointId ?? null, input.pickupPointId ?? null]);
         await tx.query('INSERT INTO parcel_parties(parcel_id,role,name,phone) VALUES($1,$2,$3,$4),($1,$5,$6,$7)',
           [row.id, 'sender', sender.name, sender.phone, 'receiver', receiver.name, receiver.phone]);
         await addEvent(tx, { parcelId: row.id, kind: 'created', actor, stopId: input.originStopId });
@@ -431,6 +475,7 @@ export function parcels(db) {
         [parcel.id, input.provider, input.reference, input.amountMinor, parcel.payment_responsibility, storedKey, fingerprint, actor.id]);
         await emit(tx, 'parcel.payment_recorded', parcel.id, { trackingNumber: parcel.tracking_number, amountMinor: input.amountMinor });
         await audit(tx, actor.id, 'parcel.payment_recorded', parcel.id, parcel.operator_id, { amountMinor: input.amountMinor, provider: input.provider });
+        await settleParcelPayment(tx, parcel, row);
         return { id: row.id, parcelId: parcel.id, provider: row.provider, status: row.status, amountMinor: row.amount_minor, currency: row.currency };
       });
     },
@@ -447,6 +492,7 @@ export function parcels(db) {
         invariant(['pending', 'succeeded'].includes(payment.status), 'PAYMENT_TRANSITION', 'Payment cannot be reconciled from its current state.', 409);
         const row = await one(tx, 'UPDATE parcel_payments SET status=$2,updated_at=now() WHERE id=$1 RETURNING *', [payment.id, 'succeeded']);
         await audit(tx, actor?.id ?? null, 'parcel.payment_reconciled', parcel.id, parcel.operator_id, { parcelPaymentId: payment.id });
+        await settleParcelPayment(tx, parcel, row);
         return { id: row.id, parcelId: parcel.id, status: row.status, amountMinor: row.amount_minor };
       });
     },
@@ -555,23 +601,33 @@ export function parcels(db) {
         return db.transaction(async tx => (await tx.query('SELECT * FROM parcel_rate_rules WHERE ($1::uuid IS NULL OR operator_id=$1) ORDER BY created_at', [actor.operator_id])).rows);
       }
       idempotencyKey(key);
-      invariant(input && Object.keys(input).every(k => ['operatorId', 'originStopId', 'destinationStopId', 'category', 'minWeightG', 'maxWeightG', 'baseMinor', 'perKgMinor', 'declaredValueBp'].includes(k)),
+      invariant(input && Object.keys(input).every(k => ['operatorId', 'originStopId', 'destinationStopId', 'category', 'minWeightG', 'maxWeightG', 'baseMinor', 'perKgMinor', 'declaredValueBp', 'serviceLevel'].includes(k)),
         'INVALID_RULE', 'Unexpected rule fields.');
       const operatorId = input.operatorId ?? actor.operator_id;
+      const serviceLevel = input.serviceLevel ?? 'standard';
       invariant(operatorId, 'INVALID_RULE', 'Operator is required.');
       uuid(operatorId);
       if (input.originStopId) uuid(input.originStopId);
       if (input.destinationStopId) uuid(input.destinationStopId);
+      invariant(['standard', 'express'].includes(serviceLevel), 'INVALID_RULE', 'Service level is invalid.', 409);
       invariant(Number.isInteger(input.baseMinor) && input.baseMinor >= 0 &&
         Number.isInteger(input.perKgMinor ?? 0) && (input.perKgMinor ?? 0) >= 0 &&
         Number.isInteger(input.declaredValueBp ?? 0) && (input.declaredValueBp ?? 0) >= 0, 'INVALID_RULE', 'Rule amounts are invalid.');
       return db.transaction(async tx => {
         invariant(!actor.operator_id || actor.operator_id === operatorId, 'FORBIDDEN', 'Operation is not permitted.', 403);
-        const row = await one(tx, `INSERT INTO parcel_rate_rules(operator_id,origin_stop_id,destination_stop_id,category,min_weight_g,max_weight_g,base_minor,per_kg_minor,declared_value_bp)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+        const row = await one(tx, `INSERT INTO parcel_rate_rules(operator_id,origin_stop_id,destination_stop_id,category,min_weight_g,max_weight_g,base_minor,per_kg_minor,declared_value_bp,service_level)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
         [operatorId, input.originStopId ?? null, input.destinationStopId ?? null, input.category ?? null,
-          input.minWeightG ?? null, input.maxWeightG ?? null, input.baseMinor, input.perKgMinor ?? 0, input.declaredValueBp ?? 0]);
+          input.minWeightG ?? null, input.maxWeightG ?? null, input.baseMinor, input.perKgMinor ?? 0, input.declaredValueBp ?? 0, serviceLevel]);
         await audit(tx, actor.id, 'parcel.rate_rule_created', row.id, operatorId);
+        // An OD-specific rule publishes that corridor's base fare: it opens a
+        // new historical period for the operator (standard or express level).
+        if (row.origin_stop_id && row.destination_stop_id) {
+          const operatorType = (await one(tx, 'SELECT type FROM operators WHERE id=$1', [operatorId]))?.type ?? null;
+          await fares.recordPublished(tx, { operatorId, originStopId: row.origin_stop_id, destinationStopId: row.destination_stop_id,
+            fareType: serviceLevel === 'express' ? 'parcel_express' : 'parcel_standard', priceMinor: row.base_minor,
+            operatorType, sourceType: 'leroutier_published', sourceReference: 'parcel-rule:' + row.id });
+        }
         return row;
       });
     },

@@ -35,6 +35,7 @@ removed rather than left to mislead.
 - [`product/SCREEN_DATA_SOURCES.md`](product/SCREEN_DATA_SOURCES.md) — screen → endpoint → service → table
 - [`product/FIRST_LAST_MILE.md`](product/FIRST_LAST_MILE.md) — getting to the bus, and the Gozem handoff
 - [`product/DRIVER_EARNINGS.md`](product/DRIVER_EARNINGS.md) — who owns which money
+- [`product/FARE_INTELLIGENCE.md`](product/FARE_INTELLIGENCE.md) — the 5% commission model, fare history and the deterministic recommendation engine
 - [`UI_IMPLEMENTATION.md`](UI_IMPLEMENTATION.md) — design system implementation notes
 
 ## Operations

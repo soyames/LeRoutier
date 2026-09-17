@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { invariant, uuid, idempotencyKey, journeySegments } from '@leroutier/domain';
 import { activeIdentity, audit } from './identities.js';
+import { fareIntelligence } from './fare-intelligence.js';
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 function text(value,label,max=100){invariant(typeof value==='string' && value.trim().length>0 && value.length<=max,'INVALID_INPUT',`${label} is required.`);return value.trim();}
@@ -48,6 +49,7 @@ async function provisionUser(tx,actor,input,role,issuer){
 }
 
 export function provisioning(db,{issuer}={issuer:undefined}) {
+  const fares = fareIntelligence(db);
   async function mutate(actor,kind,input,key,fn){
     idempotencyKey(key);const fingerprint=hash([kind,input]);
     return db.transaction(async tx=>{
@@ -128,7 +130,17 @@ export function provisioning(db,{issuer}={issuer:undefined}) {
       }
       const route=await row(tx,'INSERT INTO routes(operator_id,name) VALUES($1,$2) RETURNING *',[operatorId,text(input.name,'Route name',200)]);
       for(const [sequence,s] of input.stops.entries())await tx.query('INSERT INTO route_stops(route_id,sequence,stop_id,fare_to_next) VALUES($1,$2,$3,$4)',[route.id,sequence,s.stopId,s.fareToNext]);
-      await audit(tx,current.id,'route.created',route.id,operatorId,{stopCount:ids.length});return route;
+      await audit(tx,current.id,'route.created',route.id,operatorId,{stopCount:ids.length});
+      // Each published segment fare opens a new historical period for that OD
+      // pair: the previous fare stays in history, the new one is current.
+      const operatorType=(await row(tx,'SELECT type FROM operators WHERE id=$1',[operatorId]))?.type ?? null;
+      for(const [sequence,s] of input.stops.entries()){
+        if(sequence===input.stops.length-1)continue;
+        await fares.recordPublished(tx,{operatorId,originStopId:s.stopId,destinationStopId:input.stops[sequence+1].stopId,
+          routeId:route.id,segmentSequence:sequence,fareType:'passenger',priceMinor:s.fareToNext,
+          operatorType,sourceType:'leroutier_published',sourceReference:`route:${route.id}:${sequence}`});
+      }
+      return route;
     });},
     service(actor,input,key){return mutate(actor,'service',input,key,async(tx,current)=>{
       only(input,['routeId','vehicleId','driverId','departureAt','convoyeurId','departurePointId','arrivalPointId']);

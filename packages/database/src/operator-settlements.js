@@ -48,7 +48,7 @@ export function operatorSettlements(db, adapter = null) {
       if (row.net_minor <= need) { need -= row.net_minor; if (need === 0) break; continue; }
       const excess = row.net_minor - need;
       await tx.query(`INSERT INTO operator_settlements(operator_id,source,reference,gross_minor,deduction_minor,currency,earned_at,available_at)
-        VALUES($1,$2,$3,$4,0,$5,$6,$7)`,[row.operator_id,row.source,'split:'+row.reference,excess,row.currency,row.earned_at,row.available_at]);
+        VALUES($1,$2,$3,$4,0,$5,$6,$7)`,[row.operator_id,row.source,'split:'+row.reference+':'+requestId,excess,row.currency,row.earned_at,row.available_at]);
       await tx.query('UPDATE operator_settlements SET gross_minor=$2 WHERE id=$1',[row.id,need + row.deduction_minor]);
       need = 0; break;
     }
@@ -103,12 +103,14 @@ export function operatorSettlements(db, adapter = null) {
       invariant(input && Object.keys(input).every(k => ['operatorId', 'source', 'reference', 'grossMinor', 'deductionMinor'].includes(k)),
         'INVALID_CREDIT', 'Unexpected credit fields.');
       uuid(input.operatorId);
-      invariant(['walk_up', 'parcel_cash'].includes(input.source) && typeof input.reference === 'string' && input.reference.length > 0 && input.reference.length <= 150 &&
+      invariant(['walk_up', 'parcel_cash', 'ticket_online', 'parcel_online'].includes(input.source) && typeof input.reference === 'string' && input.reference.length > 0 && input.reference.length <= 150 &&
         Number.isInteger(input.grossMinor) && input.grossMinor > 0 &&
         (input.deductionMinor === undefined || (Number.isInteger(input.deductionMinor) && input.deductionMinor >= 0 && input.deductionMinor <= input.grossMinor)),
       'INVALID_CREDIT', 'Credit details are invalid.');
+      // One (source,reference) credits once: a replayed provider event or a
+      // repeated cash entry can never credit the operator twice.
       const row = await one(tx, `INSERT INTO operator_settlements(operator_id,source,reference,gross_minor,deduction_minor)
-        VALUES($1,$2,$3,$4,$5) RETURNING *`, [input.operatorId, input.source, input.reference, input.grossMinor, input.deductionMinor ?? 0]);
+        VALUES($1,$2,$3,$4,$5) ON CONFLICT (operator_id,source,reference) DO NOTHING RETURNING *`, [input.operatorId, input.source, input.reference, input.grossMinor, input.deductionMinor ?? 0]);
       await emit(tx, 'operator_settlement.credited', row.id, { operatorId: row.operator_id, grossMinor: row.gross_minor, source: row.source });
       return row;
     },

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
 import { Card, Badge, StatCard, SectionTitle, ApiState, ErrorState, SkeletonCards } from '@leroutier/ui';
 import { status, fcfa } from '@leroutier/ui';
+import { splitCommission } from '@leroutier/domain';
 import { Provisioning } from './provisioning.jsx';
 // Leaflet loads only when an operator actually opens a map.
 const TransportMap = lazy(() => import('./map.jsx'));
@@ -290,13 +291,57 @@ export function Stations(){
   </>;
 }
 
+// Fare Intelligence is operator-only advisory comparison: the operator keeps
+// the final decision. Passengers never see this card or the commission model.
+function FareInsight(){
+  const {user,request,online}=useSession();
+  const catalog=useApi(user?'/ops/provisioning':null);
+  const [origin,setOrigin]=useState(''),[destination,setDestination]=useState(''),[fareType,setFareType]=useState('passenger');
+  const insight=useApi(user && origin && destination?`/ops/fare-intelligence?originStopId=${encodeURIComponent(origin)}&destinationStopId=${encodeURIComponent(destination)}&fareType=${fareType}`:null);
+  const [notice,setNotice]=useState(''),[error,setError]=useState('');
+  async function accept(){
+    setError('');setNotice('');
+    try{
+      await request('/ops/parcel-rate-rules',{method:'POST',body:{
+        originStopId:origin,destinationStopId:destination,baseMinor:insight.data.suggestedPriceMinor,
+        serviceLevel:fareType==='parcel_express'?'express':'standard'}});
+      setNotice('Règle tarifaire mise à jour avec le prix suggéré.');insight.reload();
+    }catch(e){setError(e.message);}
+  }
+  const i=insight.data;
+  return <Card className="stack">
+    <SectionTitle title="Intelligence tarifaire"/>
+    <p className="small muted">Comparaison consultative avec le marché observé. Vous restez responsable du tarif final&nbsp;: rien n’est imposé ni synchronisé.</p>
+    {catalog.loading||catalog.error||!catalog.data?<ApiState resource={catalog}/>:<div className="between wrap">
+      <label className="grow">Départ<select className="control" value={origin} onChange={e=>setOrigin(e.target.value)}><option value="">Choisir…</option>{catalog.data.stops.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+      <label className="grow">Arrivée<select className="control" value={destination} onChange={e=>setDestination(e.target.value)}><option value="">Choisir…</option>{catalog.data.stops.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+      <label>Service<select className="control" value={fareType} onChange={e=>setFareType(e.target.value)}>
+        <option value="passenger">Billet passager</option><option value="parcel_standard">Colis standard</option><option value="parcel_express">Colis express</option></select></label>
+    </div>}
+    {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
+    {origin&&destination&&(insight.loading?<p>Analyse en cours…</p>:insight.error?<p role="alert">{insight.error}</p>:i&&i.status==='insufficient_data'?<p role="status">{i.message}</p>:i&&<div className="stack">
+      <div className="row"><span>Votre prix actuel</span><strong>{i.currentPriceMinor===null?'—':fcfa(i.currentPriceMinor)}</strong></div>
+      <div className="row"><span>Fourchette typique du marché</span><span>{fcfa(i.typicalRange[0])}–{fcfa(i.typicalRange[1])}</span></div>
+      <div className="row"><span>Prix suggéré</span><strong>{fcfa(i.suggestedPriceMinor)}</strong></div>
+      {i.advice==='above'&&<p role="status">Votre tarif actuel est supérieur aux tarifs comparables sur ce trajet.</p>}
+      {i.advice==='below'&&<p role="status">Votre tarif actuel est inférieur aux tarifs comparables sur ce trajet.</p>}
+      {i.advice==='within_range'&&<p role="status">Votre tarif actuel est dans la fourchette typique du marché.</p>}
+      <div className="controls">
+        {fareType!=='passenger'&&<button className="btn btn-primary" disabled={!online||i.currentPriceMinor===i.suggestedPriceMinor} onClick={accept}>Utiliser le prix suggéré</button>}
+        {fareType==='passenger'&&<span className="small muted">Pour un billet, créez une nouvelle ligne avec ce tarif — les tarifs d’un service déjà réservé sont immuables.</span>}
+        <button className="btn btn-soft" onClick={()=>setOrigin('')}>Garder mon prix</button>
+      </div>
+    </div>)}
+  </Card>;
+}
+
 export function Parcels(){
   const {user,request,online}=useSession();
   const fleet=useApi(user?'/ops/fleet':null);
   const rateRules=useApi(user?'/ops/parcel-rate-rules':null);
   const [error,setError]=useState(''),[notice,setNotice]=useState('');
   const [parcelQ,setParcelQ]=useState(''),[parcelsList,setParcelsList]=useState(null),[assignments,setAssignments]=useState({});
-  const [ruleBase,setRuleBase]=useState(''),[rulePerKg,setRulePerKg]=useState(''),[ruleBp,setRuleBp]=useState('');
+  const [ruleBase,setRuleBase]=useState(''),[rulePerKg,setRulePerKg]=useState(''),[ruleBp,setRuleBp]=useState(''),[ruleLevel,setRuleLevel]=useState('standard');
   async function act(path,body,onDone){setError('');setNotice('');try{await request(path,{method:'POST',body});onDone?.();setNotice('Action enregistrée.');}catch(e){setError(e.message);}}
   async function searchParcels(e){e.preventDefault();setError('');try{setParcelsList(await request('/ops/parcels?q='+encodeURIComponent(parcelQ)));}catch(e){setError(e.message);}}
   return <>
@@ -320,13 +365,22 @@ export function Parcels(){
         </div></div>)}
     </Card>
     <SectionTitle icon={Package} title="Grille tarifaire colis"/>
-    {rateRules.loading || rateRules.error || !rateRules.data?.length ? <ApiState resource={rateRules} empty="Aucune règle tarifaire configurée — la création de colis échoue sans grille explicite."/> : rateRules.data.map(r=><Card key={r.id} className="between"><div><h3>{fcfa(r.base_minor)}</h3><span className="small muted">+ {r.per_kg_minor} FCFA/kg{r.declared_value_bp?` · +${r.declared_value_bp/100}% valeur déclarée`:''}{r.category?` · catégorie ${r.category}`:''}{r.origin_stop_id?' · trajet spécifique':' · tous trajets'}</span></div></Card>)}
+    {rateRules.loading || rateRules.error || !rateRules.data?.length ? <ApiState resource={rateRules} empty="Aucune règle tarifaire configurée — la création de colis échoue sans grille explicite."/> : rateRules.data.map(r=><Card key={r.id} className="between"><div><h3>{fcfa(r.base_minor)}</h3><span className="small muted">+ {r.per_kg_minor} FCFA/kg{r.declared_value_bp?` · +${r.declared_value_bp/100}% valeur déclarée`:''}{r.category?` · catégorie ${r.category}`:''}{r.origin_stop_id?' · trajet spécifique':' · tous trajets'}{r.service_level==='express'?' · EXPRESS':''}</span></div></Card>)}
     <Card className="stack"><div className="between wrap">
       <label>Base (FCFA)<input className="control" type="number" min={0} value={ruleBase} onChange={e=>setRuleBase(e.target.value)}/></label>
       <label>Par kg (FCFA)<input className="control" type="number" min={0} value={rulePerKg} onChange={e=>setRulePerKg(e.target.value)}/></label>
       <label>Valeur déclarée (‱)<input className="control" type="number" min={0} value={ruleBp} onChange={e=>setRuleBp(e.target.value)}/></label>
-      <button className="btn btn-soft" disabled={!online || ruleBase===''} onClick={()=>act('/ops/parcel-rate-rules',{baseMinor:Number(ruleBase),perKgMinor:Number(rulePerKg||0),declaredValueBp:Number(ruleBp||0)},()=>rateRules.reload())}>Ajouter la règle</button>
-    </div></Card>
+      <label>Niveau de service<select className="control" value={ruleLevel} onChange={e=>setRuleLevel(e.target.value)}><option value="standard">Standard</option><option value="express">Express (jour même)</option></select></label>
+      <button className="btn btn-soft" disabled={!online || ruleBase===''} onClick={()=>act('/ops/parcel-rate-rules',{baseMinor:Number(ruleBase),perKgMinor:Number(rulePerKg||0),declaredValueBp:Number(ruleBp||0),serviceLevel:ruleLevel},()=>rateRules.reload())}>Ajouter la règle</button>
+    </div>
+    {Number(ruleBase||0)>0 && <div className="stack">
+      <div className="row"><span>Prix final client (base)</span><strong>{fcfa(Number(ruleBase))}</strong></div>
+      <div className="row"><span>Commission LeRoutier (5 %)</span><span>{fcfa(splitCommission(Number(ruleBase)).commissionMinor)}</span></div>
+      <div className="row"><span>Votre montant net (base)</span><strong>{fcfa(splitCommission(Number(ruleBase)).netMinor)}</strong></div>
+      <p className="small muted">La commission est déduite du prix final payé par l’expéditeur&nbsp;; elle n’est jamais ajoutée au-dessus.</p>
+    </div>}
+    </Card>
+    <FareInsight/>
   </>;
 }
 

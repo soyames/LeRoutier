@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
-import { invariant, uuid, idempotencyKey } from '@leroutier/domain';
+import { invariant, uuid, idempotencyKey, splitCommission } from '@leroutier/domain';
 import { transport } from './transport.js';
+import { operatorSettlements } from './operator-settlements.js';
+import { fareIntelligence } from './fare-intelligence.js';
 import { audit } from './identities.js';
 const one=async(tx,sql,args=[]) => (await tx.query(sql,args)).rows[0];
 const digest=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
@@ -9,6 +11,8 @@ const publicPayment=p=>({id:p.id,bookingId:p.booking_id,provider:p.provider,stat
 
 export function payments(db,adapter=null){
   const domain=transport(db);
+  const settlements=operatorSettlements(db);
+  const fares=fareIntelligence(db);
   async function apply(event){
     invariant(event && Object.keys(event).every(k=>['paymentId','eventId','reference','amountMinor','currency','status'].includes(k)),'INVALID_PAYMENT_EVENT','Invalid payment event.');
     uuid(event.paymentId);
@@ -36,6 +40,19 @@ export function payments(db,adapter=null){
         if(b.status==='held' && !otherPaid && ['scheduled','active'].includes(s.status) && b.origin_sequence>=s.current_sequence && (s.status==='active' || new Date(s.departure_at)>new Date())){
           await transport(nested(tx)).transition({id:b.passenger_id,role:'passenger'},b.id,'confirm');
         }else{reconciliation='review';await audit(tx,null,'payment.refund_review',p.id,s.operator_id,{bookingId:b.id});}
+        // The customer paid the final price: the operator settlement credits
+        // gross minus commission, and the transaction becomes market evidence.
+        // Both are idempotent per payment, so a replayed webhook changes nothing.
+        const split=splitCommission(event.amountMinor);
+        await settlements.credit(tx,{operatorId:s.operator_id,source:'ticket_online',reference:'payment:'+p.id,
+          grossMinor:split.grossMinor,deductionMinor:split.commissionMinor});
+        const od=await one(tx,`SELECT o.stop_id AS origin_stop_id,d.stop_id AS destination_stop_id,op.type AS operator_type
+          FROM service_stops o JOIN service_stops d ON d.service_id=o.service_id AND d.sequence=$3
+          JOIN operators op ON op.id=$2
+          WHERE o.service_id=$1 AND o.sequence=$4`, [b.service_id,s.operator_id,b.destination_sequence,b.origin_sequence]);
+        if(od) await fares.recordTransaction(tx,{operatorId:s.operator_id,originStopId:od.origin_stop_id,destinationStopId:od.destination_stop_id,
+          routeId:s.route_id,fareType:'passenger',priceMinor:event.amountMinor,operatorType:od.operator_type,
+          sourceReference:'payment:'+p.id,observedAt:new Date().toISOString()});
       }
       if(event.status==='refunded'){
         if(['held','confirmed'].includes(b.status))await transport(nested(tx)).transition({id:b.passenger_id,role:'passenger'},b.id,'cancel');

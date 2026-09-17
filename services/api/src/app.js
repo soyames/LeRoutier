@@ -20,6 +20,8 @@ import { walkUpBookings } from '@leroutier/database/walkup';
 import { notificationPolicies } from '@leroutier/database/notifications';
 import { notificationDelivery } from '@leroutier/database/notification-delivery';
 import { operationalHealth } from '@leroutier/database/operational-health';
+import { fareIntelligence } from '@leroutier/database/fare-intelligence';
+import { commercial } from '@leroutier/database/commercial';
 import { mobility } from '@leroutier/database/mobility';
 import { journeys } from '@leroutier/database/journeys';
 import { tracking } from '@leroutier/database/tracking';
@@ -38,6 +40,8 @@ class RawResponse {
 
 export function createApi(db, config, keyResolver=undefined, adapter=paymentAdapter(config)) {
   const health=operationalHealth(db);
+  const fares=fareIntelligence(db);
+  const commerce=commercial(db);
   const domain=transport(db), auth=authentication(db,config,keyResolver),provision=provisioning(db,config);
   const pay=payments(db,adapter),ticket=tickets(db);
   const earn=earnings(db),payout=payouts(db,adapter,config),recover=recovery(db),parcel=parcels(db);
@@ -316,6 +320,26 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='GET' && path==='/ops/parcels') return parcel.listOps(actor,{status:url.searchParams.get('status')??undefined,q:url.searchParams.get('q')??undefined});
     if(method==='GET' && path==='/ops/parcel-rate-rules') return parcel.rateRules(actor);
     if(method==='POST' && path==='/ops/parcel-rate-rules') return parcel.rateRules(actor,await body(),req.headers.get('idempotency-key'));
+    // Fare Intelligence is operator-only: passengers and parcel senders see
+    // the final price, never the market comparison or the commission model.
+    if(method==='GET' && path==='/ops/fare-intelligence') {
+      invariant(actor?.role==='ops','FORBIDDEN','Operations access required.',403);
+      const originStopId=url.searchParams.get('originStopId'),destinationStopId=url.searchParams.get('destinationStopId');
+      const fareType=url.searchParams.get('fareType')??'passenger';
+      const operatorId=actor.operator_id??url.searchParams.get('operatorId');
+      invariant(operatorId,'INVALID_INPUT','Operator is required.',409);
+      return fares.recommend({originStopId,destinationStopId,fareType,ownOperatorId:operatorId});
+    }
+    if(method==='POST' && path==='/ops/fare-observations') {
+      invariant(actor?.role==='ops','FORBIDDEN','Operations access required.',403);
+      const input=await body();
+      invariant(input && Object.keys(input).every(k=>['originStopId','destinationStopId','fareType','priceMinor','sourceReference','sourceUrl','observedAt'].includes(k)),
+        'INVALID_OBSERVATION','Unexpected observation fields.');
+      invariant(typeof input.sourceUrl==='string' && /^https:\/\/[^\s]+$/i.test(input.sourceUrl) && input.sourceUrl.length<=2000,
+        'INVALID_OBSERVATION','A public https source URL is required.');
+      return db.transaction(tx=>fares.recordExternal(tx,{...input,sourceReference:input.sourceUrl,sourceType:'external_public'}));
+    }
+    if(method==='GET' && path==='/ops/plan') return commerce.plan(actor,url.searchParams.get('operatorId'));
     const parcelPath=path.match(/^\/parcels\/([^/]+)(?:\/(label|events|accept|assign|scan|ready|pickup-code|pickup|exceptions|cancel|payments))?$/);
     if(parcelPath){
       const id=parcelPath[1],action=parcelPath[2];

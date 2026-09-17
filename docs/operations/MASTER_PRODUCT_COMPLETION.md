@@ -35,6 +35,8 @@ results and [operational drills](OPERATIONAL_DRILLS.md) for reproducible checks.
 | PWA | READY | Installable manifest/icons, offline shell only, update prompt, reconnect and explicit pending mutations. |
 | Accessibility | READY | Automated axe and keyboard/focus tests across public, legal, passenger, crew and Ops views; mobile viewport. Not a certification. |
 | Operations / onboarding | READY | Independent/company verification, staff/vehicle assignments, RBAC and tenant isolation; Gozem suggested_external only. |
+| Fare Intelligence | READY | Deterministic engine, segment-level history, external observations, freshness weighting, robust quartiles, advisory-only UI and passenger isolation tested. |
+| Commercial model | READY | 5 % commission included in the final price (integer math, gross = commission + net), company plan representation without billing activation, independent drivers: 0 subscription, ledger integration for cash and online transactions. |
 | Legacy retirement | EXTERNAL | Shared screens/builds and regression coverage retained. No legacy deployment deleted; explicit owner retirement approval required. |
 
 ## Fixed during this continuation
