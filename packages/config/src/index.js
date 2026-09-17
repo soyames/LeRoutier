@@ -46,6 +46,8 @@ export function serverConfig(env = process.env) {
   return {
     databaseUrl: env.DATABASE_URL, schema,
     production: env.NODE_ENV === 'production' || env.VERCEL === '1',
+    // Destructive retention execution is opt-in; the default scan is a dry run.
+    retentionExecute: env.RETENTION_EXECUTE === 'true',
     ...authConfig(env),
     corsOrigins: (env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
     // Server-only payment configuration. FEDAPAY_ENVIRONMENT must be 'sandbox' or 'live';
