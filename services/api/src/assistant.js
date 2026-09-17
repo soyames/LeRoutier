@@ -24,12 +24,19 @@ const when = iso => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', 
 // ---- deterministic intent rules ---------------------------------------------
 // [name, matcher, capabilities] — a rule fires only when the caller's role is
 // allowed by `roles` (null = everyone including anonymous).
-// Intent matching must survive Unicode variance: mobile keyboards and some
-// transport layers deliver decomposed accents (NFD) or plain ASCII, while the
-// rules are written with composed accents. Both the message and the patterns
-// are therefore folded (accents stripped) and matched a second time, so a
-// user writing "departs" or "départs" reaches the same deterministic tool.
-const fold = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '');
+// Intent matching must survive Unicode variance: mobile keyboards deliver
+// decomposed accents (NFD) or plain ASCII, and some build/transport layers
+// double-encode UTF-8 into mojibake (é -> Ã©). Both the message and the
+// patterns are folded — known mojibake pairs repaired, accents stripped,
+// non-ASCII removed — and matched a second time, so "départs", "departs",
+// "départs" and any double-encoded form reach the same deterministic
+// tool. The SQL tools underneath still match the canonical stored names.
+const fold = s => [...String(s)
+  .replace(/Ã©/g, 'é').replace(/Ã¨/g, 'è').replace(/Ã´/g, 'ô').replace(/Ã§/g, 'ç')
+  .replace(/Ã /g, 'à').replace(/Ãª/g, 'ê').replace(/Ã®/g, 'î').replace(/Ã»/g, 'û')
+  .replace(/Ã¹/g, 'ù').replace(/Ã«/g, 'ë').replace(/Ã¯/g, 'ï')
+  .normalize('NFD').replace(/[̀-ͯ]/g, '')]
+  .filter(c => c.charCodeAt(0) < 128).join('');
 
 /** @type {[string, RegExp, {roles: string[]|null}][]} */
 const RULES = [
@@ -249,9 +256,10 @@ export function assistantService({ db, domain, parcels, fares, health, track = n
     for (const [name, pattern, { roles }] of RULES) {
       if (roles && !roles.includes(role)) continue;
       if (pattern.test(message)) return name;
-      // The accented rules also match folded (accent-stripped) input, so a
-      // user writing "departs" or a layer delivering NFD accents reaches the
-      // same tool.
+      // The accented rules also match folded (accent-stripped, mojibake-
+      // repaired) input — and a folded pattern matches a folded message, so
+      // whichever side a transport/build layer corrupted, the intent still
+      // resolves deterministically.
       const foldedPattern = new RegExp(fold(pattern.source), pattern.flags);
       if (foldedPattern.source !== pattern.source && foldedPattern.test(foldedMessage)) return name;
     }
