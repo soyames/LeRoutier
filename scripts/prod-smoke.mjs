@@ -38,6 +38,18 @@ for (const path of ['/privacy','/terms','/legal','/cancellations','/cookies']) {
   response.status===200 ? ok(`Legal route ${path}`) : fail(`Legal route ${path}`,`status ${response.status}`);
 }
 {
+  // The custom authDomain proxy: leroutier.app serves Firebase's auth helper
+  // for the SAME project, without Firebase Hosting or any billing. The SPA
+  // rewrite must never swallow it.
+  const response=await fetch(unified+'/__/auth/handler');
+  const text=await response.text();
+  response.status===200 && text.length>200 && !text.includes('id="root"')
+    ? ok('Firebase auth helper proxied on the app domain') : fail('Firebase auth helper proxy',`status ${response.status}`);
+  const csp=response.headers.get('content-security-policy') ?? '';
+  csp.includes("frame-src 'self'") && csp.includes('https://accounts.google.com')
+    ? ok('PWA CSP allows same-origin auth iframe and Google') : fail('PWA CSP','auth iframe origins missing');
+}
+{
   const {response,body}=await get('/api/v1/services');
   response.status===200 && Array.isArray(body?.data) ? ok('Public trip search') : fail('Public trip search',`status ${response.status}`);
 }
