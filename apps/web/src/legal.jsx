@@ -32,6 +32,7 @@ function List({ children }) { return <ul style={{ margin: 0, paddingLeft: '1.25r
 export function LegalFooter() {
   return <footer aria-label="Informations légales" className="small muted" style={{ padding: '18px 4px 6px', textAlign: 'center' }}>
     <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '10px 16px' }}>
+      <Link to="/about">À propos</Link>
       <Link to="/legal">Mentions légales</Link>
       <Link to="/privacy">Confidentialité</Link>
       <Link to="/terms">Conditions d’utilisation</Link>
