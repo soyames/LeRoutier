@@ -68,6 +68,12 @@ export function onboarding(db) {
         const operator = await one(tx, `INSERT INTO operators(name,type,admin_user_id,verification_status,contact_phone,country,registration_ref)
           VALUES($1,'company',$2,'pending_verification',$3,$4,$5) RETURNING *`,
         [input.displayName.trim(), actor.id, input.contactPhone.trim(), input.country.toLowerCase(), registrationRef === null ? null : registrationRef.trim()]);
+        // Company commercial model: a fixed SaaS subscription plus the 5%
+        // transaction commission. The plan is represented here with no price
+        // decided (billing is not activated); the commission applies from the
+        // first transaction through the settlement ledger.
+        await tx.query(`INSERT INTO operator_plans(operator_id,plan,monthly_price_minor,billing_status,included_features)
+          VALUES($1,'standard',NULL,'not_billed','["operational_management","fare_intelligence"]'::jsonb) ON CONFLICT DO NOTHING`, [operator.id]);
         await tx.query(`UPDATE users SET role='ops',operator_id=$2,display_name=$3,profile_completed_at=now(),updated_at=now() WHERE id=$1`, [actor.id, operator.id, user.display_name || input.displayName.trim()]);
         await audit(tx, actor.id, 'operator.onboarded', operator.id, operator.id, { key, type: 'company' });
         await audit(tx, actor.id, 'identity.role_assigned', actor.id, operator.id, { role: 'ops', via: 'company_onboarding' });

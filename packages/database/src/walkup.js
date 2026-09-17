@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { invariant, uuid, idempotencyKey } from '@leroutier/domain';
+import { invariant, uuid, idempotencyKey, splitCommission } from '@leroutier/domain';
 import { transport } from './transport.js';
 import { operatorSettlements } from './operator-settlements.js';
+import { fareIntelligence } from './fare-intelligence.js';
 import { audit } from './identities.js';
 
 // Walk-up cash bookings: the ONLY cash channel. Authorized crew (Driver or
@@ -14,6 +15,7 @@ const digest = x => createHash('sha256').update(JSON.stringify(x)).digest('hex')
 export function walkUpBookings(db) {
   const domain = transport(db);
   const settlements = operatorSettlements(db);
+  const fares = fareIntelligence(db);
   return async function create(actor, input, key) {
     invariant(actor?.role === 'driver' || actor?.role === 'convoyeur', 'FORBIDDEN', 'Crew access required.', 403);
     idempotencyKey(key);
@@ -65,8 +67,20 @@ export function walkUpBookings(db) {
       [booking.id, input.cashReference.trim(), input.amountMinor, 'walkup:' + key, digest([booking.id, 'cash', input.cashReference.trim()]), actor.id]);
       const confirmed = await domain.txTransition(tx, { id: guest.id, role: 'passenger' }, booking.id, 'confirm');
 
-      // Revenue belongs to the operator — never to the crew member.
-      await settlements.credit(tx, { operatorId: service.operator_id, source: 'walk_up', reference: 'walkup:' + booking.id, grossMinor: input.amountMinor });
+      // Revenue belongs to the operator, minus the platform commission. The
+      // cash amount is the final customer price: the 5% comes out of it and
+      // the ledger records gross, commission (deduction) and operator net.
+      const split = splitCommission(input.amountMinor);
+      await settlements.credit(tx, { operatorId: service.operator_id, source: 'walk_up', reference: 'walkup:' + booking.id,
+        grossMinor: split.grossMinor, deductionMinor: split.commissionMinor });
+      // The completed cash sale is also market evidence for its corridor.
+      const od = await one(tx, `SELECT o.stop_id AS origin_stop_id,d.stop_id AS destination_stop_id,op.type AS operator_type
+        FROM service_stops o JOIN service_stops d ON d.service_id=o.service_id AND d.sequence=$3
+        JOIN operators op ON op.id=$2 WHERE o.service_id=$1 AND o.sequence=$4`,
+      [service.id, service.operator_id, input.destination, input.origin]);
+      if (od) await fares.recordTransaction(tx, { operatorId: service.operator_id, originStopId: od.origin_stop_id,
+        destinationStopId: od.destination_stop_id, routeId: service.route_id, fareType: 'passenger', priceMinor: input.amountMinor,
+        operatorType: od.operator_type, sourceReference: 'walkup:' + booking.id, observedAt: new Date().toISOString() });
       await audit(tx, actor.id, 'booking.walkup_sold', booking.id, service.operator_id, {
         key, fingerprint, bookingId: booking.id, serviceId: service.id, amountMinor: input.amountMinor, role: actor.role, guestPassengerId: guest.id,
       });
