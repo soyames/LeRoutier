@@ -21,13 +21,14 @@ const clearIntent = () => { try { window.sessionStorage.removeItem(INTENT); } ca
  * The search fields, shared by the public home and the results screen so the
  * hero task looks and behaves identically wherever it appears.
  */
-export function TripSearchFields({ stops, from, to, day, setFrom, setTo, setDay, onSwap }) {
+export function TripSearchFields({ stops, from, to, day, setFrom, setTo, setDay, onSwap, allowCurrentLocation = false }) {
   // Resolved once per mount: the earliest selectable day.
   const [minDay] = useState(() => isoDay(Date.now()));
   return <div className="trip-search">
     <div className="trip-endpoints">
       <label className="field">Départ
         <select className="control" aria-label="Départ" value={from} onChange={e => setFrom(e.target.value)}>
+          {allowCurrentLocation && <option value="my-location">Ma position actuelle</option>}
           {stops.map(s => <option key={s.stopId} value={s.stopId}>{s.city}</option>)}
         </select>
       </label>
@@ -60,7 +61,7 @@ export function TripSearchHero() {
     <h1>Où allez-vous ?</h1>
     {routes.loading ? <SkeletonCards count={1} lines={3}/>
       : !stops.length
-        ? <p>Le réseau LeRoutier s’ouvre progressivement. Revenez bientôt pour rechercher un départ.</p>
+        ? <p>Entrez votre destination pour voir les départs disponibles.</p>
         : <form className="stack" onSubmit={search}>
           <TripSearchFields stops={stops} from={origin} to={destination} day={day}
             setFrom={setFrom} setTo={setTo} setDay={setDay} onSwap={() => { setFrom(destination); setTo(origin); }}/>
@@ -78,6 +79,48 @@ function Leg({ city, point, landmark, end = false }) {
       <strong>{city}</strong>
       {placeLabel(point, landmark) && <span className="small muted"> · {placeLabel(point, landmark)}</span>}
     </div>
+  </div>;
+}
+
+// Door-to-destination planning from the passenger's current position. The
+// coordinates stay on the device except for this one transient request: the
+// API resolves the first mile and never stores or shares the position with
+// operators. Intercity facts come from the existing service domain — no
+// model, no Google, no second journey engine.
+function JourneyPlanner({ destination, choose }) {
+  const [position, setPosition] = useState(null), [geoState, setGeoState] = useState('idle'), [geoError, setGeoError] = useState('');
+  const plan = useApi(position && destination ? `/journey-plan?lat=${position.latitude}&lon=${position.longitude}&destinationStopId=${destination}` : null);
+  function locate() {
+    setGeoState('asking'); setGeoError('');
+    if (!navigator.geolocation) { setGeoState('denied'); setGeoError('La géolocalisation n’est pas disponible sur cet appareil. Choisissez un départ manuellement.'); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => { setPosition({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }); setGeoState('granted'); },
+      () => { setGeoState('denied'); setGeoError('Position non autorisée. Choisissez un départ manuellement.'); },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
+  }
+  if (!destination) return <p className="small muted" role="status">Choisissez une destination pour voir les départs accessibles depuis votre position.</p>;
+  return <div className="stack">
+    {position === null && <div className="controls">
+      <button className="btn btn-primary" disabled={geoState === 'asking'} onClick={locate}>
+        {geoState === 'asking' ? 'Localisation en cours…' : 'Utiliser ma position actuelle'}</button>
+      {geoError && <span className="small muted">{geoError}</span>}
+    </div>}
+    {position && (plan.loading ? <p role="status">Recherche des départs accessibles…</p>
+      : plan.error ? <ErrorState text="Impossible de calculer votre trajet pour le moment." onRetry={plan.reload}/>
+        : !plan.data?.options?.length ? <Card className="stack"><strong>Aucun départ disponible pour cet itinéraire pour le moment.</strong>
+          <p className="small muted">Essayez une autre destination, une autre date, ou choisissez un départ manuel.</p></Card>
+          : plan.data.options.filter(o => o.feasible).map(o => <Card key={o.serviceId + o.originSequence} className="trip-card">
+            <div className="between wrap"><div><strong>{o.operatorName}</strong><span className="small muted"> · {o.routeName}</span></div>
+              <Badge tone={o.available > 2 ? 'success' : o.available ? 'warning' : 'danger'}>
+                <Armchair size={13}/>{o.available ? `${o.available} place${o.available > 1 ? 's' : ''}` : 'Complet'}</Badge></div>
+            <div className="stack">
+              {o.firstMile && <Leg city={o.pickupStop.city} point={`${Math.round(o.firstMile.distanceM / 1000 * 10) / 10} km à pied jusqu’à ${o.pickupStop.name}`} landmark="Premier kilomètre — transport local non inclus"/>}
+              <Leg city={`${time(o.departureAt)} · ${o.pickupStop.city} → ${o.dropoffStop.city}`} point="Trajet LeRoutier" landmark={`Arrivée estimée ${time(o.etaAt)} · ${fcfa(o.fare.amountMinor)}`} end={!o.lastMile}/>
+              {o.lastMile && <Leg city={o.dropoffStop.city} point={`${Math.round(o.lastMile.distanceM / 1000 * 10) / 10} km à pied`} landmark="Dernier kilomètre — transport local non inclus" end/>}
+            </div>
+            <div className="trip-foot"><div><span className="trip-price">{fcfa(o.fare.amountMinor)}</span><span className="small muted"> · prix final, transport local non inclus</span></div>
+              <button className="btn btn-primary" disabled={!o.available} onClick={() => choose(o)}>Choisir ce trajet</button></div>
+          </Card>))}
   </div>;
 }
 
@@ -154,13 +197,17 @@ export function Trips() {
     {routes.loading ? <SkeletonCards count={1} lines={4}/>
       : routes.error ? <ErrorState text="Impossible de charger le réseau pour le moment." onRetry={routes.reload}/>
         : !stops.length ? <ApiState resource={routes} emptyTitle="Aucune ligne publiée"
-          empty="Le réseau LeRoutier s’ouvre progressivement. Revenez bientôt."/>
+          empty="Aucune ligne publiée pour le moment. Entrez votre destination pour voir les départs disponibles."/>
           : <Card className="stack">
-            <TripSearchFields stops={stops} from={from} to={to} day={day}
-              setFrom={setOrigin} setTo={setDestination} setDay={value => { setDay(value); setAnyDay(false); }} onSwap={swap}/>
+            <TripSearchFields stops={stops} from={from} to={to} day={day} allowCurrentLocation
+              setFrom={setOrigin} setTo={setDestination} setDay={value => { setDay(value); setAnyDay(false); }}
+              onSwap={() => { if (from !== 'my-location') swap(); }}/>
             {from === to && <p className="small muted" role="status">Choisissez deux villes différentes.</p>}
             <span className="small muted">1 place par réservation · paiement en ligne sécurisé</span>
           </Card>}
+
+    {from === 'my-location' && to && from !== to && <JourneyPlanner destination={to}
+      choose={o => hold(o.serviceId, o.originSequence, o.destinationSequence)}/>}
 
     <SectionTitle title={anyDay || showingNext ? 'Prochains départs' : `Départs du ${dayLong(day)}`}/>
     {showingNext && <p className="small muted" role="status">Aucun départ le {dayLong(day)} — voici les prochains départs sur ce trajet.</p>}

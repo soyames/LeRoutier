@@ -192,12 +192,14 @@ test('the privacy policy and the implementation agree about Google', async ({ pa
   await isolateProvider(page);
   await page.goto(UNIFIED + '/privacy');
   const text = await page.getByRole('main').innerText();
-  // The published policy promises identity and basic profile only, and says
-  // roles never come from the provider. The code must not exceed that: this
-  // test is what keeps the two from drifting apart.
+  // The published policy promises identity and basic profile only, and names
+  // the services it deliberately does not ask for. The code must not exceed
+  // that: this test is what keeps the two from drifting apart.
   expect(text).toMatch(/Firebase Authentication/);
   expect(text).toMatch(/Gmail/);
-  expect(text).toMatch(/rôles LeRoutier restent déterminés dans notre propre système/);
+  // Public copy stays product language: no internal authorization wording.
+  expect(text).not.toMatch(/rôles LeRoutier restent déterminés dans notre propre système/);
+  expect(text).not.toMatch(/OpenRouter|Gemini/);
 });
 
 test('the scopes requested never exceed what the policy describes', async () => {
