@@ -88,6 +88,7 @@ export function transport(db) {
     await tx.query('INSERT INTO booking_passengers(booking_id,passenger_id) VALUES($1,$2)', [booking.id, actor.id]);
     await tx.query(`INSERT INTO booking_segments(booking_id,service_id,seat_number,sequence)
       SELECT $1,$2,$3,generate_series($4::integer,$5::integer-1)`, [booking.id, serviceId, seat.seat_number, origin, destination]);
+    await tx.query('UPDATE users SET last_meaningful_activity_at=now() WHERE id=$1', [actor.id]);
     await emit(tx, 'booking.held', booking.id, { serviceId });
     return booking;
   }
