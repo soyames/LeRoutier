@@ -211,7 +211,8 @@ test('intent routing survives Unicode variance: composed, decomposed and ASCII s
   const composed = await ask('Quels départs depuis Cotonou ?', passengerToken, { sessionId: 'fold-session-01' });
   const decomposed = await ask('Quels de\u0301parts depuis Cotonou ?', passengerToken, { sessionId: 'fold-session-02' });
   const ascii = await ask('Quels departs depuis Cotonou ?', passengerToken, { sessionId: 'fold-session-03' });
-  for (const r of [composed, decomposed, ascii]) {
+  const mojibake = await ask('Quels dÃ©parts depuis Cotonou ?', passengerToken, { sessionId: 'fold-session-05' });
+  for (const r of [composed, decomposed, ascii, mojibake]) {
     assert.equal(r.status, 200);
     assert.equal((await body(r)).data.intent, 'trip_search');
   }
