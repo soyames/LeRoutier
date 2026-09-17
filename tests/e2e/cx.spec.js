@@ -191,7 +191,7 @@ test('a granted position plans a door-to-destination itinerary with an honest no
     return r.fulfill({ json: { data: { options: [], originResolved: null, generatedAt: '2026-09-17T00:00:00Z' } } });
   });
   await page.addInitScript(() => {
-    navigator.geolocation.getCurrentPosition = cb => cb({ coords: { latitude: 6.355, longitude: 2.435 } });
+    navigator.geolocation.getCurrentPosition = cb => cb(/** @type {any} */({ coords: { latitude: 6.355, longitude: 2.435 } }));
   });
   await page.goto('http://127.0.0.1:4176/trips');
   await page.getByLabel('Départ', { exact: true }).selectOption('my-location');
