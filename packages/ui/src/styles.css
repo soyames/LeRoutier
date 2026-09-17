@@ -115,3 +115,25 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .lr-map .leaflet-control-attribution{font-size:10px;background:rgba(255,255,255,.85)}
 .lr-vehicle-marker span{display:block;width:22px;height:22px;border-radius:50%;background:var(--primary);border:3px solid #fff;box-shadow:0 2px 8px rgba(15,23,42,.35)}
 .journey-step.active{background:var(--primary-soft);border-color:#ffdfba}
+
+/* ── Assistant ────────────────────────────────────────────────────────────
+   Floating launcher and drawer. Integrated, not bolted on: the panel uses
+   the app palette and sits above the shell without covering navigation on
+   desktop. */
+.assistant-launcher{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));
+  z-index:70;width:52px;height:52px;border-radius:50%;border:none;background:var(--primary);color:#fff;
+  display:grid;place-items:center;box-shadow:0 6px 18px rgba(15,23,42,.35);cursor:pointer}
+.assistant-panel{position:fixed;right:max(12px,env(safe-area-inset-right));bottom:max(76px,env(safe-area-inset-bottom));
+  z-index:70;width:min(380px,calc(100vw - 24px));max-height:min(560px,calc(100vh - 96px));
+  background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 16px 48px rgba(15,23,42,.28);
+  display:flex;flex-direction:column;overflow:hidden}
+.assistant-panel header{padding:12px 14px;border-bottom:1px solid var(--line)}
+.assistant-panel h2{font-size:15px;margin:0}
+.assistant-thread{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.assistant-msg{max-width:85%;padding:9px 12px;border-radius:14px;background:var(--soft);font-size:14px;line-height:1.45}
+.assistant-msg.user{align-self:flex-end;background:var(--primary);color:#fff}
+.assistant-msg .small{margin-bottom:3px;display:block}
+.assistant-msg p{margin:0}
+.assistant-input{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
+.assistant-input .control{flex:1}
+@media(max-width:640px){.assistant-panel{right:10px;left:10px;width:auto}}

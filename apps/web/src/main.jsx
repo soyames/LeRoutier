@@ -5,6 +5,8 @@ import { BrowserRouter, Route, Routes } from 'react-router';
 import '@leroutier/ui/styles.css';
 import App from './App.jsx';
 import {PwaUpdate} from './pwa-update.jsx';
+import {Assistant} from './assistant.jsx';
+import { About } from './about.jsx';
 import { LegalNotice, PrivacyPolicy, TermsOfUse, CancellationPolicy, CookiePolicy } from './legal.jsx';
 
 // VITE_API_URL may be an absolute API origin, or the literal "same-origin" to
@@ -23,6 +25,7 @@ createRoot(document.getElementById('root')).render(
     <ApiProvider baseUrl={apiUrl} role={['passenger', 'driver', 'convoyeur', 'ops']}>
       <PwaUpdate/>
       <Routes>
+        <Route path="/about" element={<About/>}/>
         <Route path="/legal" element={<LegalNotice/>}/>
         <Route path="/privacy" element={<PrivacyPolicy/>}/>
         <Route path="/terms" element={<TermsOfUse/>}/>
@@ -36,6 +39,9 @@ createRoot(document.getElementById('root')).render(
         <Route path="/ops/:section" element={<App/>}/>
         <Route path="*" element={<App/>}/>
       </Routes>
+      {/* After the shell in DOM order, so the app's skip link stays the first
+          tabbable element and the launcher never steals the keyboard start. */}
+      <Assistant/>
     </ApiProvider>
   </BrowserRouter></React.StrictMode>,
 );
