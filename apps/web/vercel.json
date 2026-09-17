@@ -19,7 +19,6 @@
       "source": "/(.*)",
       "has": [{ "type": "host", "value": "le-routier.vercel.app" }],
       "destination": "https://leroutier.app/$1",
-      "permanent": true,
       "statusCode": 308
     }
   ],
