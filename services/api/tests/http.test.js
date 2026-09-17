@@ -65,6 +65,28 @@ test('a malformed identifier is refused without costing a database write',async(
   assert.deepEqual(subjects,[],'rejecting bad input must not consume the limiter');
 });
 
+// ------------------------------------------------------------ journey-plan --
+// The geography model: place ids resolve to coordinates before planning, so a
+// place that is not a stop still plans — and an empty catalogue stays honest.
+test('journey-plan resolves place ids to coordinates and answers honestly on an empty catalogue',async()=>{
+  const cid=nodeCrypto.randomUUID(),pid=nodeCrypto.randomUUID();
+  const places={[cid]:{id:cid,name:'Cotonou',kind:'city',latitude:'6.37',longitude:'2.39'},
+    [pid]:{id:pid,name:'Parakou',kind:'city',latitude:'9.34',longitude:'2.63'}};
+  const stub={transaction:async fn=>fn({query:async(sql,params)=>{
+    if(/FROM places WHERE id=\$1 AND latitude IS NOT NULL/.test(sql)) return {rows:places[params[0]]?[places[params[0]]]:[]};
+    return {rows:[]};
+  }})};
+  const api=createApi(stub,config);
+  const r=await api(new Request(`http://localhost/api/v1/journey-plan?originPlaceId=${cid}&destinationPlaceId=${pid}`));
+  assert.equal(r.status,200);
+  const body=await r.json();
+  assert.deepEqual(body.data.options,[],'an empty transport catalogue plans to zero options, honestly');
+  assert.equal(typeof body.data.generatedAt,'string');
+  // A place id that does not resolve is a clean 404, not a silent empty plan.
+  const missing=await api(new Request(`http://localhost/api/v1/journey-plan?originPlaceId=${nodeCrypto.randomUUID()}&destinationPlaceId=${pid}`));
+  assert.equal(missing.status,404);
+});
+
 // ------------------------------------------------------------------ USSD ----
 // The gateway callback is the one public endpoint that mutates. These tests
 // guard the door; the journeys behind it live in the database suite.

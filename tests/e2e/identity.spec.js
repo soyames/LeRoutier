@@ -30,7 +30,12 @@ test('public browsing still works while sign-in is unavailable', async ({ page }
   await mockApi(page);
   await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: { demoLogin: false, oidc: null } } }));
   await page.goto(APP + '/trips');
-  await expect(page.getByText('Opérateur démo')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rechercher un trajet' })).toBeVisible();
+  await page.getByLabel('Destination').click(); await page.getByLabel('Destination').fill('Cotonou'); await page.getByLabel('Destination').press('Enter');
+  await page.getByRole('button', { name: 'Rechercher un trajet' }).click();
+  // The search ran without an account; the planner asks for the position only
+  // now that the search needs it.
+  await expect(page.getByRole('button', { name: 'Utiliser ma position actuelle' })).toBeVisible();
   await page.goto(APP + '/parcels/track');
   await expect(page.getByRole('heading', { name: /Suivre un colis/ })).toBeVisible();
 });
@@ -41,6 +46,10 @@ test('a new passenger is asked to complete their profile before booking', async 
   await signInAs(me({ role: 'passenger', needs_profile: true, display_name: '' }))(page);
   await page.goto(APP + '/trips');
   await login(page);
+  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByLabel('Ville de départ').click(); await page.getByLabel('Ville de départ').fill('Cotonou'); await page.getByLabel('Ville de départ').press('Enter');
+  await page.getByLabel('Destination').click(); await page.getByLabel('Destination').fill('Parakou'); await page.getByLabel('Destination').press('Enter');
+  await page.getByRole('button', { name: 'Rechercher un trajet' }).click();
   // The trip cannot be taken until the profile exists, and the button says why.
   await expect(page.getByRole('button', { name: 'Complétez votre profil' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Complétez votre profil' })).toBeDisabled();

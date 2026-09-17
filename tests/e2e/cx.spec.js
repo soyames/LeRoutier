@@ -3,10 +3,13 @@ import { mockApi } from './api-fixture.js';
 
 const me=role=>Object.assign({id:'00000000-0000-4000-8000-000000000099',display_name:'Test Identity',needs_profile:false},{...role});
 const demoAs=role=>page=>page.route('**/api/v1/auth/demo',r=>r.fulfill({json:{data:{token:'fixture-session-'+r.request().postDataJSON().role,user:me(role)}}}));
+// Legacy stop-id deep links stay on the old service list (kept for links
+// already in circulation); new searches carry namespaced place ids.
+const STOP_LINK='http://127.0.0.1:4173/trips?from=00000000-0000-4000-8000-000000000200&to=00000000-0000-4000-8000-000000000203';
 
 test('anonymous passenger searches without login and never sees cash',async({page})=>{
   await mockApi(page);
-  await page.goto('http://127.0.0.1:4173/');
+  await page.goto(STOP_LINK);
   await expect(page.getByText('Opérateur démo')).toBeVisible();
   await expect(page.getByRole('button',{name:'Se connecter pour réserver'})).toBeEnabled();
   await expect(page.getByText(/espèces/i)).toHaveCount(0);
@@ -14,7 +17,7 @@ test('anonymous passenger searches without login and never sees cash',async({pag
 
 test('a result card leads with times, places and fare — not with internal metadata',async({page})=>{
   await mockApi(page);
-  await page.goto('http://127.0.0.1:4173/');
+  await page.goto(STOP_LINK);
   // Times first, then the exact boarding point, then the price.
   await expect(page.getByText('07:30')).toBeVisible();
   await expect(page.getByText('13:40')).toBeVisible();
@@ -29,7 +32,7 @@ test('a result card leads with times, places and fare — not with internal meta
 
 test('a date with no departure falls forward instead of dead-ending',async({page})=>{
   await mockApi(page);
-  await page.goto('http://127.0.0.1:4173/');
+  await page.goto(STOP_LINK);
   // The fixture departs tomorrow, so today's default finds nothing and the
   // screen offers the next departures rather than an empty list.
   await expect(page.getByText(/voici les prochains départs/i)).toBeVisible();
@@ -40,9 +43,12 @@ test('search can be swapped and dated',async({page})=>{
   await mockApi(page);
   await page.goto('http://127.0.0.1:4173/');
   await expect(page.getByLabel('Date')).toBeVisible();
-  const before=await page.getByLabel('Départ',{exact:true}).inputValue();
+  await page.getByLabel('Départ',{exact:true}).selectOption('place');
+  await page.getByLabel('Ville de départ').click();await page.getByLabel('Ville de départ').fill('Cotonou');await page.getByLabel('Ville de départ').press('Enter');
+  await page.getByLabel('Destination').click();await page.getByLabel('Destination').fill('Parakou');await page.getByLabel('Destination').press('Enter');
   await page.getByRole('button',{name:'Inverser départ et arrivée'}).click();
-  await expect(page.getByLabel('Arrivée',{exact:true})).toHaveValue(before);
+  await expect(page.getByRole('button',{name:'Ville de départ : Parakou. Effacer'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Destination : Cotonou. Effacer'})).toBeVisible();
 });
 
 test('operator onboarding lives on its own public path with explicit choices',async({page})=>{
@@ -159,26 +165,34 @@ test('ticket shows the exact boarding point, a short reference and a map afforda
   await expect(page.getByRole('button',{name:'Afficher mon billet'})).toBeVisible();
 });
 
-test('empty production database shows honest product empty states',async({page})=>{
+test('empty production database shows the search form, never a passive empty card',async({page})=>{
   await mockApi(page);
   await page.route('**/api/v1/routes',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/journey-plan*',r=>r.fulfill({json:{data:{options:[],originResolved:null,generatedAt:'2026-09-17T00:00:00Z'}}}));
   await page.goto('http://127.0.0.1:4173/');
-  await expect(page.getByText('Aucune ligne publiée').first()).toBeVisible();
-  await expect(page.getByText(/Entrez votre destination pour voir les départs disponibles/)).toBeVisible();
+  // The search form is built from geography: zero routes must not hide it.
+  await expect(page.getByLabel('Départ',{exact:true})).toBeVisible();
+  await expect(page.getByLabel('Destination')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Rechercher un trajet'})).toBeVisible();
+  await page.getByLabel('Départ',{exact:true}).selectOption('place');
+  await page.getByLabel('Ville de départ').fill('Cotonou');await page.getByLabel('Ville de départ').press('Enter');
+  await page.getByLabel('Destination').fill('Parakou');await page.getByLabel('Destination').press('Enter');
+  await page.getByRole('button',{name:'Rechercher un trajet'}).click();
+  await expect(page.getByText('Aucun départ disponible pour cet itinéraire pour le moment.')).toBeVisible();
+  await expect(page.getByText(/Entrez votre destination/)).toHaveCount(0);
 });
 
 test('quick search offers current location with a graceful manual fallback', async ({ page }) => {
   await mockApi(page);
   await page.route('**/api/v1/journey-plan*', r => r.fulfill({ json: { data: { options: [], originResolved: null, generatedAt: '2026-09-17T00:00:00Z' } } }));
-  await page.goto('http://127.0.0.1:4176/trips');
+  await page.goto('http://127.0.0.1:4176/trips?from=my-location&to=place%3A00000000-0000-4000-8000-000000000303');
   const origin = page.getByLabel('Départ', { exact: true });
-  await expect(origin.locator('option[value="my-location"]')).toHaveCount(1);
+  await expect(origin.locator('option[value="current"]')).toHaveCount(1);
   // Permission denied → clear guidance and the manual path stays available.
   await page.context().grantPermissions([], { origin: 'http://127.0.0.1:4176' }).catch(() => {});
-  await origin.selectOption('my-location');
   await expect(page.getByRole('button', { name: 'Utiliser ma position actuelle' })).toBeVisible();
   await page.getByRole('button', { name: 'Utiliser ma position actuelle' }).click();
-  await expect(page.getByText(/Position non autorisée|pas disponible/i)).toBeVisible();
+  await expect(page.getByText(/Position non disponible/)).toBeVisible();
   // The manual search path is never blocked by a missing GPS permission.
   await expect(origin).toBeVisible();
 });
@@ -193,8 +207,7 @@ test('a granted position plans a door-to-destination itinerary with an honest no
   await page.addInitScript(() => {
     navigator.geolocation.getCurrentPosition = cb => cb(/** @type {any} */({ coords: { latitude: 6.355, longitude: 2.435 } }));
   });
-  await page.goto('http://127.0.0.1:4176/trips');
-  await page.getByLabel('Départ', { exact: true }).selectOption('my-location');
+  await page.goto('http://127.0.0.1:4176/trips?from=my-location&to=place%3A00000000-0000-4000-8000-000000000303');
   await page.getByRole('button', { name: 'Utiliser ma position actuelle' }).click();
   await expect(page.getByText('Aucun départ disponible pour cet itinéraire pour le moment.')).toBeVisible();
   expect(plans.some(u => u.includes('lat=6.355')), 'the plan request carries the transient position').toBeTruthy();

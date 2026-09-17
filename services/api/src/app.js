@@ -197,13 +197,25 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     // Door-to-destination journey planning over the existing service domain.
     // The passenger's exact current coordinates are transient: used only to
     // resolve the first mile, never stored and never exposed to operators.
+    // Origins/destinations may be stops, canonical geography places, or raw
+    // coordinates: a place that is not served still resolves to a first/last
+    // mile around the nearest practical stop.
     if(method==='GET' && path==='/journey-plan') {
       const q = url.searchParams;
       const origin = q.has('lat') && q.has('lon') ? { latitude: Number(q.get('lat')), longitude: Number(q.get('lon')) } : null;
+      const originPlaceId = q.get('originPlaceId');
+      const destinationPlaceId = q.get('destinationPlaceId');
+      const resolvePlace = async id => id ? (await list(`SELECT id,name,kind,latitude,longitude FROM places WHERE id=$1 AND latitude IS NOT NULL LIMIT 1`, [uuid(id)]))[0] : null;
+      const originPlace = originPlaceId ? await resolvePlace(originPlaceId) : null;
+      const destinationPlace = destinationPlaceId ? await resolvePlace(destinationPlaceId) : null;
+      // A place id that does not resolve is a bad request, not a silent
+      // "no origin/destination" — the caller must know the id was wrong.
+      invariant(!originPlaceId || originPlace, 'INVALID_JOURNEY', 'Origin place is unknown.', 404);
+      invariant(!destinationPlaceId || destinationPlace, 'INVALID_JOURNEY', 'Destination place is unknown.', 404);
       return planner.plan({
-        originStopId: q.get('originStopId'), origin,
-        destinationStopId: q.get('destinationStopId'),
-        destination: q.has('destLat') && q.has('destLon') ? { latitude: Number(q.get('destLat')), longitude: Number(q.get('destLon')) } : null,
+        originStopId: originPlace ? null : q.get('originStopId'), origin: origin ?? (originPlace ? { latitude: Number(originPlace.latitude), longitude: Number(originPlace.longitude) } : null),
+        destinationStopId: destinationPlace ? null : q.get('destinationStopId'),
+        destination: q.has('destLat') && q.has('destLon') ? { latitude: Number(q.get('destLat')), longitude: Number(q.get('destLon')) } : (destinationPlace ? { latitude: Number(destinationPlace.latitude), longitude: Number(destinationPlace.longitude) } : null),
         departureAt: q.get('departureAt'),
       });
     }
@@ -222,10 +234,12 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       const kindFilter=type==='commune'
         ? `kind='city' AND parent_id IN (SELECT id FROM places WHERE kind='department')`
         : type ? `kind='${type}'` : 'TRUE';
-      if(q) return list(`SELECT id,name,kind,parent_id,latitude,longitude FROM places
+      // normalized_name and aliases ride along so the client can fold accents
+      // and match spelling variants over the full commune list offline.
+      if(q) return list(`SELECT id,name,kind,parent_id,latitude,longitude,normalized_name,aliases FROM places
         WHERE (name ILIKE $1 OR normalized_name ILIKE $2 OR aliases::text ILIKE $2) AND ${kindFilter}
         ORDER BY (kind='city') DESC, name LIMIT 100`,[`%${q}%`,`%${q.toLowerCase()}%`]);
-      return list(`SELECT id,name,kind,parent_id,latitude,longitude FROM places
+      return list(`SELECT id,name,kind,parent_id,latitude,longitude,normalized_name,aliases FROM places
         WHERE ${kindFilter} ORDER BY name LIMIT 200`);
     }
     if(method==='GET' && path==='/routes') return list(`SELECT r.*,coalesce((SELECT json_agg(json_build_object('sequence',rs.sequence,'stopId',s.id,'name',s.name,'city',p.name) ORDER BY rs.sequence)
