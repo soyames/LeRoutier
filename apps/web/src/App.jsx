@@ -12,7 +12,7 @@ import { Home } from './home.jsx';
 import { PASSENGER, WORK, OPS, workspacesFor, capabilities, workspaceOf, isAuthorized } from './workspaces.js';
 import {
   Search, Ticket, UserRound, Package, Bell, Home as HomeIcon, Route, Users, QrCode,
-  Wallet, BusFront, MapPin, Radio, WalletCards, ShieldAlert, Settings as SettingsIcon, Layers, Lock,
+  Wallet, BusFront, MapPin, Radio, WalletCards, ShieldAlert, Settings as SettingsIcon, Layers, Lock, LogOut, ShieldCheck,
 } from 'lucide-react';
 
 // Deep-linked ticket: the booking id leads the list and drives the end-to-end
@@ -52,6 +52,29 @@ function SignInRequired() {
       <p className="small muted">Une seule identité LeRoutier donne accès à tous vos espaces autorisés. Vous reviendrez ici après la connexion.</p>
     </Card>
     <SessionPanel/>
+  </div>;
+}
+
+// The account avatar: anonymous shows a neutral user icon that leads to
+// sign-in; an authenticated user shows their initials (or the icon) and a
+// small account menu. Never a hardcoded "LR" placeholder.
+function AccountMenu() {
+  const { user, logout } = useSession();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const initials = user?.display_name
+    ? user.display_name.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
+    : '';
+  return <div className="account-menu-wrap">
+    <button className="avatar-btn" aria-label={user ? `Compte de ${user.display_name}` : 'Se connecter'}
+      aria-expanded={open} onClick={() => { if (user) setOpen(o => !o); else navigate('/account'); }}>
+      {user && initials ? <span className="avatar" aria-hidden="true">{initials}</span> : <UserRound size={19} aria-hidden="true"/>}
+    </button>
+    {open && user && <div className="account-menu" role="menu" aria-label="Menu du compte">
+      <button role="menuitem" onClick={() => { setOpen(false); navigate('/account'); }}><UserRound size={15}/>Mon profil</button>
+      <button role="menuitem" onClick={() => { setOpen(false); navigate('/account'); }}><ShieldCheck size={15}/>Confidentialité et données</button>
+      <button role="menuitem" onClick={async () => { setOpen(false); await logout(); }}><LogOut size={15}/>Déconnexion</button>
+    </div>}
   </div>;
 }
 
@@ -156,6 +179,7 @@ export default function App() {
     online={online} role={scoped.role} title={scoped.titles[page] ?? 'LeRoutier'} subtitle="LeRoutier · Bénin"
     nav={scoped.nav} active={page} onNavigate={id => navigate(`${scoped.prefix}/${id}`.replace(/\/+$/, '') || '/')}
     unread={unread} onNotifications={() => navigate(`${scoped.prefix}/notifications`)} onHome={() => navigate('/')}
+    avatar={<AccountMenu/>}
     actions={<WorkspaceSwitcher current={workspace} onSwitch={path => navigate(path)}/>}>
     {content}
   </AppShell>;

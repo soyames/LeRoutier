@@ -56,7 +56,7 @@ test('production login unavailable fails closed without token input or demo logi
   await isolateProvider(page);
   await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: { demoLogin: false, firebase: null } } }));
   await page.goto('http://127.0.0.1:4173/');
-  await expect(page.getByRole('button', { name: 'Se connecter', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Connexion indisponible' })).toBeDisabled();
   await expect(page.getByText('La connexion sécurisée n’est pas encore configurée.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connexion de développement' })).toHaveCount(0);
   // No password field, no token box: there is no second way in.
@@ -69,7 +69,7 @@ test('a configured provider is offered by name', async ({ page }) => {
   await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: { demoLogin: false, firebase: FIREBASE } } }));
   await page.goto('http://127.0.0.1:4173/');
   // A person about to hand over an identity is told to whom.
-  await expect(page.getByRole('button', { name: 'Se connecter avec Google' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Continuer avec Google' })).toBeEnabled();
   await expect(page.getByText('La connexion sécurisée n’est pas encore configurée.')).toHaveCount(0);
 });
 
@@ -82,7 +82,7 @@ test('the browser is never given anything but the four public identifiers', asyn
     await r.fulfill({ json: { data: published } });
   });
   await page.goto('http://127.0.0.1:4173/');
-  await expect(page.getByRole('button', { name: 'Se connecter avec Google' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continuer avec Google' })).toBeVisible();
   const payload = /** @type {any} */ (published);
   expect(payload, 'the app must have asked for its sign-in configuration').toBeTruthy();
   expect(Object.keys(payload.firebase).sort()).toEqual(['apiKey', 'appId', 'authDomain', 'projectId', 'providers']);
@@ -99,7 +99,7 @@ test('a passenger completes their profile and signs out leaving nothing behind',
   await expect(page.getByRole('button', { name: 'Choisir ce trajet' })).toBeEnabled();
 
   await page.getByRole('button', { name: 'Déconnexion' }).click();
-  await expect(page.getByRole('button', { name: 'Se connecter', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connexion indisponible' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Se connecter pour réserver' })).toBeEnabled();
 
   // Signing out leaves no authentication material anywhere a next user could
@@ -120,7 +120,7 @@ test('driver app shows explicit unprovisioned state for passenger identity', asy
 
 test('ops app denies passenger identity and hides provisioning controls', async ({ page }) => {
   await signedIn(page, 4175);
-  await expect(page.getByText('Votre compte passager n’a pas accès au centre opérationnel. Créez un compte opérateur (compagnie) pour administrer.')).toBeVisible();
+  await expect(page.getByText('Cet espace est réservé aux opérateurs de transport.')).toBeVisible();
   await expect(page.getByText('Provisionner un agent Ops', { exact: true })).toHaveCount(0);
 });
 
