@@ -206,3 +206,15 @@ test('fare intelligence explanation comes from the deterministic engine, never a
   // insufficient-data message — never an invented figure.
   assert.match(out.data.reply, /tarif|Tarif|Pas encore assez de données|Publiez d’abord/);
 });
+
+test('intent routing survives Unicode variance: composed, decomposed and ASCII spellings', async () => {
+  const composed = await ask('Quels départs depuis Cotonou ?', passengerToken, { sessionId: 'fold-session-01' });
+  const decomposed = await ask('Quels de\u0301parts depuis Cotonou ?', passengerToken, { sessionId: 'fold-session-02' });
+  const ascii = await ask('Quels departs depuis Cotonou ?', passengerToken, { sessionId: 'fold-session-03' });
+  for (const r of [composed, decomposed, ascii]) {
+    assert.equal(r.status, 200);
+    assert.equal((await body(r)).data.intent, 'trip_search');
+  }
+  const privacyAscii = await ask('Quelles donnees avez-vous sur moi ?', passengerToken, { sessionId: 'fold-session-04' });
+  assert.equal((await body(privacyAscii)).data.intent, 'privacy_summary');
+});

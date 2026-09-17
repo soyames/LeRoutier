@@ -451,7 +451,7 @@ export function Tracking() {
 // "Confidentialité et données": the user's own data, one coherent place for
 // exports, consents, correction requests, account deletion and retention.
 // French-first, simple actions; the API enforces ownership on every call.
-function PrivacyCenter() {
+export function PrivacyCenter() {
   const { user, request, online } = useSession();
   const summary = useApi(user ? '/me/privacy' : null);
   const consents = useApi(user ? '/me/consents' : null);
@@ -682,10 +682,41 @@ function Steps({ current, labels }) {
   </span>)}</div>;
 }
 
+// A city picker over the canonical Benin geography (12 departments, 77
+// communes), independent of transport routes. Picking a city shows whether a
+// parcel service actually exists there today: geography availability and
+// transport availability are deliberately not conflated.
+function CityPicker({ label, selected, onPick, stops }) {
+  const places = useApi('/places?type=commune');
+  const departments = useApi('/places?type=department');
+  const [query, setQuery] = useState('');
+  const communes = (places.data || []).filter(p => !query.trim() ||
+    (p.name + ' ' + (p.normalized_name || '')).toLowerCase().includes(query.trim().toLowerCase()));
+  const deptName = id => (departments.data || []).find(d => d.id === id)?.name || '';
+  return <div className="stack">
+    <label>{label}
+      <input className="control" type="search" placeholder="Rechercher une ville…" value={query}
+        onChange={e => setQuery(e.target.value)} aria-label={`Rechercher une ville pour ${label}`}/>
+    </label>
+    <select className="control" aria-label={label} value={selected?.id || ''} onChange={e => {
+      const place = (places.data || []).find(p => p.id === e.target.value);
+      onPick(place ? { place, stopId: stops.find(s => s.city?.toLowerCase() === place.name.toLowerCase())?.stopId ?? null } : null);
+    }}>
+      <option value="">Choisir…</option>
+      {communes.map(p => <option key={p.id} value={p.id}>{p.name}{deptName(p.parent_id) ? ` (${deptName(p.parent_id)})` : ''}</option>)}
+    </select>
+    {places.loading && <p className="small muted" role="status">Chargement des villes…</p>}
+    {selected && !selected.stopId && <p className="small muted" role="status">Aucun service colis pour cette ville pour le moment.</p>}
+    {selected?.stopId && <p className="small muted" role="status">Service disponible depuis {selected.place.name}.</p>}
+    {!places.loading && !places.data?.length && <p className="small muted" role="status">Aucune ville disponible pour le moment.</p>}
+  </div>;
+}
+
 export function Parcels() {
   const { user, request, online } = useSession();
   const routes = useApi('/routes'), mine = useApi(user ? '/me/parcels' : null);
   const stops = routes.data?.[0]?.stops || [];
+  const [originPick, setOriginPick] = useState(null), [destinationPick, setDestinationPick] = useState(null);
   const [step, setStep] = useState(0);
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [senderName, setSenderName] = useState(user?.display_name || ''), [senderPhone, setSenderPhone] = useState(user?.phone || '');
@@ -729,10 +760,10 @@ export function Parcels() {
       {!user && <p className="small muted" role="status">Connectez-vous pour créer un envoi.</p>}
       {user && <form className="stack" onSubmit={create}>
         {step === 0 && <>
-          <label>Ville de départ<select className="control" value={origin} onChange={e => setOrigin(e.target.value)}>
-            <option value="">Choisir…</option>{stops.map(s => <option key={s.stopId} value={s.stopId}>{s.city}</option>)}</select></label>
-          <label>Ville d’arrivée<select className="control" value={destination} onChange={e => setDestination(e.target.value)}>
-            <option value="">Choisir…</option>{stops.map(s => <option key={s.stopId} value={s.stopId}>{s.city}</option>)}</select></label>
+          <CityPicker label="Ville de départ" stops={stops} selected={originPick}
+            onPick={p => { setOriginPick(p); setOrigin(p?.stopId || ''); }}/>
+          <CityPicker label="Ville d’arrivée" stops={stops} selected={destinationPick}
+            onPick={p => { setDestinationPick(p); setDestination(p?.stopId || ''); }}/>
           {origin && destination && origin === destination && <p className="small muted" role="status">Choisissez deux villes différentes.</p>}
           <button type="button" className="btn btn-primary" disabled={!canRoute} onClick={() => setStep(1)}>Continuer</button>
         </>}

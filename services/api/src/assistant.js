@@ -24,6 +24,13 @@ const when = iso => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', 
 // ---- deterministic intent rules ---------------------------------------------
 // [name, matcher, capabilities] — a rule fires only when the caller's role is
 // allowed by `roles` (null = everyone including anonymous).
+// Intent matching must survive Unicode variance: mobile keyboards and some
+// transport layers deliver decomposed accents (NFD) or plain ASCII, while the
+// rules are written with composed accents. Both the message and the patterns
+// are therefore folded (accents stripped) and matched a second time, so a
+// user writing "departs" or "départs" reaches the same deterministic tool.
+const fold = s => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '');
+
 /** @type {[string, RegExp, {roles: string[]|null}][]} */
 const RULES = [
   ['trip_search', /(trajet|voyag(e|er)|départ|aller à|bus|car |horaire|route)/i, { roles: null }],
@@ -238,9 +245,15 @@ export function assistantService({ db, domain, parcels, fares, health, track = n
   // ---- intent resolution ----------------------------------------------------
   function resolveIntent(message, actor) {
     const role = actorRole(actor);
+    const foldedMessage = fold(message);
     for (const [name, pattern, { roles }] of RULES) {
       if (roles && !roles.includes(role)) continue;
       if (pattern.test(message)) return name;
+      // The accented rules also match folded (accent-stripped) input, so a
+      // user writing "departs" or a layer delivering NFD accents reaches the
+      // same tool.
+      const foldedPattern = new RegExp(fold(pattern.source), pattern.flags);
+      if (foldedPattern.source !== pattern.source && foldedPattern.test(foldedMessage)) return name;
     }
     return 'unknown';
   }
