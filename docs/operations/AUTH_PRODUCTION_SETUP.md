@@ -113,6 +113,13 @@ same URI.
 The same proxy pattern is how `/api/v1` reaches the API; both rewrites sit
 above the SPA fallback, so neither can be swallowed by the app shell.
 
+**Hard dependency**: the apex `leroutier.app` must serve the app directly.
+While Vercel's platform redirect (apex → www) is active, the auth helper is
+served from `www.leroutier.app` — a different origin than the authDomain —
+and Firebase rejects the popup/redirect handshake. The owner toggles
+"Redirect to www" off in the Vercel dashboard (Domains → leroutier.app);
+the proxy and CSP are already correct and need no further change.
+
 > The Google provider's **Web SDK configuration** is where an external OAuth
 > client id and secret go, if the project uses one. That secret stays in the
 > console. It never enters this repository, Vercel, or a browser bundle.
