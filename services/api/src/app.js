@@ -24,6 +24,7 @@ import { fareIntelligence } from '@leroutier/database/fare-intelligence';
 import { commercial } from '@leroutier/database/commercial';
 import { assistantService } from './assistant.js';
 import { privacyCenter, retentionEngine } from '@leroutier/database/privacy';
+import { journeyPlanning } from '@leroutier/database/journey-planning';
 import { mobility } from '@leroutier/database/mobility';
 import { journeys } from '@leroutier/database/journeys';
 import { tracking } from '@leroutier/database/tracking';
@@ -73,6 +74,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const ussd=createUssdEngine({db,domain,parcels:parcel,payments:pay,tracking:track,config:config.ussd ?? {}});
   const privacy=privacyCenter(db);
   const retention=retentionEngine(db);
+  const planner=journeyPlanning(db,{boardingBufferS:config.journey?.boardingBufferS ?? 600});
   const assistant=assistantService({db,domain,parcels:parcel,fares,health,track,privacy});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
   async function limited(subject) {
@@ -192,6 +194,19 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     // Authenticated traffic is metered per identity further down.
     const meterAnonymous=()=>limited('public-catalogue:'+((req.headers.get('x-forwarded-for')||'').split(',')[0].trim()||'local'));
     if(method==='GET' && ['/stops','/places','/routes','/services'].includes(path)) await meterAnonymous();
+    // Door-to-destination journey planning over the existing service domain.
+    // The passenger's exact current coordinates are transient: used only to
+    // resolve the first mile, never stored and never exposed to operators.
+    if(method==='GET' && path==='/journey-plan') {
+      const q = url.searchParams;
+      const origin = q.has('lat') && q.has('lon') ? { latitude: Number(q.get('lat')), longitude: Number(q.get('lon')) } : null;
+      return planner.plan({
+        originStopId: q.get('originStopId'), origin,
+        destinationStopId: q.get('destinationStopId'),
+        destination: q.has('destLat') && q.has('destLon') ? { latitude: Number(q.get('destLat')), longitude: Number(q.get('destLon')) } : null,
+        departureAt: q.get('departureAt'),
+      });
+    }
     if(method==='GET' && path==='/stops') {
       const search=(url.searchParams.get('q') || '').slice(0,100);
       return list(`SELECT s.*,p.name AS city FROM stops s JOIN places p ON p.id=s.place_id

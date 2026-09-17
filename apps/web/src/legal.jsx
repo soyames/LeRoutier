@@ -1,7 +1,7 @@
 import { Link } from 'react-router';
 import { Card, SectionTitle } from '@leroutier/ui';
 
-const UPDATED = '16 septembre 2026';
+const UPDATED = '17 septembre 2026';
 const SUPPORT_EMAIL = 'leroutierbj@gmail.com';
 
 function LegalLayout({ title, intro, children }) {
@@ -53,8 +53,8 @@ export function LegalNotice() {
       <P>Contact LeRoutier : <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>.</P>
     </Section>
     <Section title="Objet de LeRoutier">
-      <P>LeRoutier fournit une plateforme numérique de recherche de trajets, réservation, suivi de voyage, gestion de services de transport, suivi de colis et outils destinés aux opérateurs de transport, chauffeurs, convoyeurs et voyageurs.</P>
-      <P>Lorsqu’un trajet est exécuté par un transporteur, une compagnie ou un chauffeur indépendant identifié dans la réservation, ce prestataire est responsable de l’exécution matérielle du transport dans les limites prévues par la loi et par les conditions applicables au service. DIGITAL CONDORDIA exploite la plateforme LeRoutier et n’est pas réputée transporteur pour un trajet sauf indication expresse contraire.</P>
+      <P>LeRoutier est une plateforme numérique exploitée par DIGITAL CONDORDIA. Les trajets proposés sur la plateforme sont réalisés par les compagnies de transport ou les chauffeurs indépendants identifiés lors de la réservation.</P>
+      <P>Sauf indication contraire, DIGITAL CONDORDIA n’exploite pas elle-même les véhicules utilisés pour ces trajets.</P>
     </Section>
     <Section title="Infrastructure et prestataires techniques">
       <P>LeRoutier peut s’appuyer sur des prestataires techniques pour l’hébergement, la base de données, l’authentification, le paiement, les cartes, les notifications et certaines fonctions d’assistance. Ces prestataires n’acquièrent aucun droit de propriété sur les données de l’utilisateur du seul fait de leur traitement technique.</P>
@@ -95,19 +95,19 @@ export function PrivacyPolicy() {
         <li>Améliorer la fiabilité et l’ergonomie du service à partir de mesures agrégées ou minimisées.</li>
       </List>
     </Section>
-    <Section title="4. Authentification Google et Firebase">
-      <P>Lorsque vous choisissez une connexion gérée par Google ou Firebase Authentication, LeRoutier reçoit uniquement les informations nécessaires à l’authentification et au profil que vous avez autorisées, par exemple un identifiant de compte, votre email et des informations de profil de base. LeRoutier ne demande pas l’accès à Gmail, Google Drive, Google Calendar ou à d’autres contenus Google qui ne sont pas nécessaires à la connexion.</P>
-      <P>Les rôles LeRoutier restent déterminés dans notre propre système. Une information de rôle provenant d’un fournisseur d’identité ne permet pas de devenir administrateur, opérateur, chauffeur ou convoyeur.</P>
+    <Section title="4. Connexion avec Google">
+      <P>Lorsque vous vous connectez avec Google, LeRoutier reçoit les informations nécessaires à votre authentification et à votre profil : un identifiant de compte, votre adresse e-mail et des informations de profil de base. LeRoutier ne demande pas l’accès à Gmail, Google Drive, Google Calendar ou à d’autres contenus Google qui ne sont pas nécessaires à la connexion.</P>
+      <P>Vous pouvez aussi créer un compte avec une adresse e-mail et un mot de passe. Les mots de passe sont gérés par le service d’authentification (Firebase Authentication) et ne sont jamais transmis ni conservés par LeRoutier.</P>
     </Section>
     <Section title="5. Prestataires et destinataires">
       <P>Nous partageons uniquement les données nécessaires avec les personnes et prestataires qui doivent intervenir pour fournir le service. Il peut s’agir du transporteur chargé du trajet, du prestataire de paiement, de l’hébergeur, du service de base de données, du fournisseur d’identité, de services de cartes et d’itinéraires, de fournisseurs de notification et, lorsque cela est activé, d’un opérateur ou agrégateur USSD.</P>
-      <P>FedaPay traite les paiements en ligne. Firebase Authentication et Google assurent la connexion. Pour l’assistance opérationnelle, Gemini peut recevoir des faits minimisés ; OpenRouter peut intervenir en secours pour des tâches à faible risque. Les projections transmises excluent les noms, téléphones, emails, coordonnées privées, codes de retrait et secrets de paiement. Ces modèles ne décident ni d’un paiement, ni d’un droit d’accès, ni de la disponibilité d’une place.</P>
+      <P>FedaPay traite les paiements en ligne. Firebase Authentication et Google assurent la connexion. Certaines fonctions d’assistance peuvent utiliser des services d’intelligence artificielle. Nous limitons les informations transmises au strict nécessaire et excluons les données sensibles qui ne sont pas utiles à la demande.</P>
     </Section>
     <Section title="6. Localisation et suivi des véhicules">
       <P>La localisation d’un véhicule peut être traitée pendant un service actif pour afficher sa progression, estimer l’arrivée, améliorer la coordination et gérer un incident. Les accès sont limités selon les rôles et l’opérateur concerné. Les données de localisation ne doivent pas être utilisées pour surveiller une personne en dehors des finalités opérationnelles autorisées.</P>
     </Section>
     <Section title="7. Conservation">
-      <P>La politique technique prévoit 30 jours pour les positions GPS brutes des services terminés, hors incident non résolu ou conservation spécifique pour un audit. La purge est contrôlée ; les preuves financières et les dossiers de litige ne sont pas effacés automatiquement par une demande de suppression de compte.</P>
+      <P>Les positions GPS brutes associées à un service terminé sont conservées pendant 30 jours, sauf lorsqu’elles doivent être conservées plus longtemps pour traiter un incident, un litige ou une obligation légale. Les preuves financières et les dossiers de litige ne sont pas effacés automatiquement par une demande de suppression de compte.</P>
       <P>Nous conservons les données pendant la durée nécessaire à la finalité pour laquelle elles ont été collectées, à la sécurité du service, au traitement des litiges et aux obligations légales ou comptables applicables. Les durées peuvent différer selon la catégorie de données. Lorsque la conservation n’est plus nécessaire, les données sont supprimées, anonymisées ou rendues inaccessibles conformément aux procédures applicables.</P>
     </Section>
     <Section title="8. Transferts et hébergement hors du Bénin">
@@ -135,13 +135,14 @@ export function TermsOfUse() {
       <P>LeRoutier met en relation les voyageurs avec des opérateurs de transport et fournit des outils de réservation, paiement, suivi, exploitation et logistique. Sauf indication expresse contraire, DIGITAL CONDORDIA exploite la plateforme et n’exécute pas matériellement le transport. Le transporteur ou chauffeur indépendant identifié pour le service est responsable de l’exécution du trajet conformément à la loi et aux conditions applicables.</P>
     </Section>
     <Section title="3. Compte et informations fournies">
-      <P>Vous devez fournir des informations exactes et tenir à jour celles qui sont nécessaires au service. Vous êtes responsable de l’utilisation de votre compte et devez signaler rapidement toute utilisation non autorisée. Les comptes, rôles et accès professionnels ne peuvent être cédés ou partagés de manière à contourner les contrôles d’autorisation.</P>
+      <P>Vous devez fournir des informations exactes et tenir à jour celles qui sont nécessaires au service. Vous êtes responsable de l’utilisation de votre compte et devez signaler rapidement toute utilisation non autorisée. Les comptes et accès professionnels ne peuvent être cédés ou partagés de manière à contourner les contrôles d’accès.</P>
+      <P>Vous pouvez demander la suppression de votre compte depuis « Confidentialité et données » dans l’application. Votre identité de connexion et vos données seront supprimées ou anonymisées. Certaines données peuvent être conservées lorsqu’elles sont nécessaires pour des obligations légales, comptables, de sécurité ou de résolution de litiges.</P>
     </Section>
     <Section title="4. Recherche, prix et disponibilité">
       <P>Les horaires, prix, arrêts et capacités affichés sont fondés sur les informations enregistrées pour chaque service. La disponibilité d’une place n’est garantie qu’après la création et la confirmation de la réservation selon le statut affiché. Une information de recherche ou un écran de paiement en attente ne constitue pas à lui seul un billet confirmé.</P>
     </Section>
     <Section title="5. Paiement">
-      <P>Pour les réservations voyageurs effectuées dans l’application, les paiements sont réalisés par les moyens en ligne proposés au moment de l’achat. Un paiement n’est considéré réussi qu’après confirmation vérifiée du prestataire de paiement. Le retour vers l’application, une capture d’écran, un SMS non vérifié ou une simple saisie utilisateur ne suffisent pas à confirmer un paiement.</P>
+      <P>Pour les réservations voyageurs effectuées dans l’application, les paiements sont réalisés par les moyens en ligne proposés au moment de l’achat. Votre réservation est confirmée lorsque LeRoutier reçoit la confirmation du paiement. Un SMS, une capture d’écran ou le simple retour vers l’application ne vaut pas confirmation de paiement.</P>
       <P>Les ventes au comptant réalisées par un équipage autorisé suivent un flux distinct et sont enregistrées pour le compte de l’opérateur concerné.</P>
     </Section>
     <Section title="6. Billet, embarquement et comportement">
@@ -209,7 +210,7 @@ export function CancellationPolicy() {
 export function CookiePolicy() {
   return <LegalLayout title="Cookies et technologies similaires" intro="Informations sur le stockage technique utilisé par LeRoutier et par certains services tiers.">
     <Section title="Fonctionnement essentiel">
-      <P>LeRoutier peut utiliser des mécanismes de stockage local, de cache PWA ou des technologies équivalentes strictement nécessaires au fonctionnement, à la sécurité, aux préférences et à la continuité de l’expérience. Les jetons d’authentification de l’application sont conçus pour ne pas être conservés durablement dans le navigateur lorsqu’une conservation n’est pas nécessaire.</P>
+      <P>LeRoutier utilise le stockage local de votre navigateur pour garder votre session de connexion, mémoriser vos préférences et permettre à l’application de fonctionner hors ligne (cache de l’application installable). Votre session reste active pendant la durée de votre session de navigation ; la fermeture de l’application vous déconnecte.</P>
     </Section>
     <Section title="Mesure et publicité">
       <P>LeRoutier n’utilise pas, dans sa configuration actuelle, de cookies publicitaires destinés à établir un profil publicitaire intersites. Si cette pratique devait changer, cette page et les mécanismes de consentement seraient mis à jour avant activation lorsque la loi l’exige.</P>
