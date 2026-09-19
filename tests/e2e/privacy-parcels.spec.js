@@ -3,7 +3,7 @@ import { mockApi } from './api-fixture.js';
 
 // The Privacy Center deep link and the geography-backed parcel city picker:
 // real routes, real data endpoints, no blank pages.
-const APP = 'http://127.0.0.1:4176';
+const APP = 'http://127.0.0.1:4173';
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const me = extra => ({ id: id(99), display_name: 'Test Identity', needs_profile: false, ...extra });
 const PASSENGER = me({ role: 'passenger', operator_id: null });

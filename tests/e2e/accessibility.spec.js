@@ -13,7 +13,7 @@ import { mockApi } from './api-fixture.js';
 // product is used one-handed, on a phone, often in bright sunlight, sometimes
 // by someone who is not a confident reader. Contrast and target size are not
 // compliance details here, they are whether the thing works at the station.
-const APP = 'http://127.0.0.1:4176';
+const APP = 'http://127.0.0.1:4173';
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const me = extra => ({ id: id(99), display_name: 'Test Identity', needs_profile: false, ...extra });
 const PASSENGER = me({ role: 'passenger', operator_id: null });

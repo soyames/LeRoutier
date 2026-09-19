@@ -7,7 +7,7 @@ import { mockApi } from './api-fixture.js';
 // /auth/config, /me provisioning and the profile PATCH.
 test.use({ trace: 'off', video: 'off', screenshot: 'off' });
 
-const APP = 'http://127.0.0.1:4176';
+const APP = 'http://127.0.0.1:4173';
 const FIREBASE = {
   apiKey: 'browser-test-api-key', authDomain: 'example.firebaseapp.com',
   projectId: 'example-project', appId: '1:1:web:test',

@@ -3,8 +3,6 @@ import { mockApi } from './api-fixture.js';
 
 const me=role=>Object.assign({id:'00000000-0000-4000-8000-000000000099',display_name:'Test Identity',needs_profile:false},{...role});
 const demoAs=role=>page=>page.route('**/api/v1/auth/demo',r=>r.fulfill({json:{data:{token:'fixture-session-'+r.request().postDataJSON().role,user:me(role)}}}));
-// Legacy stop-id deep links stay on the old service list (kept for links
-// already in circulation); new searches carry namespaced place ids.
 const STOP_LINK='http://127.0.0.1:4173/trips?from=00000000-0000-4000-8000-000000000200&to=00000000-0000-4000-8000-000000000203';
 
 test('anonymous passenger searches without login and never sees cash',async({page})=>{
@@ -65,18 +63,18 @@ test('operator onboarding lives on its own public path with explicit choices',as
 test('company driver sees crew navigation without revenue or fleet tools',async({page})=>{
   await mockApi(page);
   await demoAs({role:'driver',operator_type:'company',verification_status:'verified',operator_id:'00000000-0000-4000-8000-000000000001'})(page);
-  await page.goto('http://127.0.0.1:4174/');
+  await page.goto('http://127.0.0.1:4173/work/today');
   await page.getByRole('button',{name:'Connexion de développement'}).click();
   await expect(page.getByRole('navigation').getByRole('button',{name:'Aujourd’hui'})).toBeVisible();
   await expect(page.getByRole('navigation').getByRole('button',{name:'Manifeste'})).toBeVisible();
-  await expect(page.getByRole('navigation').getByRole('button',{name:'Gains'})).toHaveCount(0);
+  await expect(page.getByRole('navigation').getByRole('button',{name:'Recettes'})).toHaveCount(0);
   await expect(page.getByRole('navigation').getByRole('button',{name:'Points'})).toHaveCount(0);
 });
 
 test('company crew reaching the revenue screen see no ledger and no withdrawal',async({page})=>{
   await mockApi(page);
   await demoAs({role:'driver',operator_type:'company',verification_status:'verified',operator_id:'00000000-0000-4000-8000-000000000001',operator_name:'Baobab Express'})(page);
-  await page.goto('http://127.0.0.1:4174/earnings');
+  await page.goto('http://127.0.0.1:4173/work/earnings');
   await page.getByRole('button',{name:'Connexion de développement'}).click();
   await expect(page.getByText(/reviennent à Baobab Express/)).toBeVisible();
   // No balance, no withdrawal control is presented to company crew at all.
@@ -88,12 +86,12 @@ test('independent owner-driver sees revenue, points and verification state',asyn
   await mockApi(page);
   await demoAs({role:'driver',operator_type:'independent',verification_status:'pending_verification',operator_id:'00000000-0000-4000-8000-000000000001'})(page);
   await page.route('**/api/v1/operator/settlements',r=>r.fulfill({json:{data:{summary:{available:12000,reserved:0,paid:0,reversed:0,currency:'XOF',verificationStatus:'pending_verification'},entries:[]}}}));
-  await page.goto('http://127.0.0.1:4174/');
+  await page.goto('http://127.0.0.1:4173/work/today');
   await page.getByRole('button',{name:'Connexion de développement'}).click();
   // The verification state is phrased for the person waiting on it.
   await expect(page.getByText('Vérification en cours').first()).toBeVisible();
   await expect(page.getByText('pending_verification')).toHaveCount(0);
-  await page.getByRole('navigation').getByRole('button',{name:'Gains'}).click();
+  await page.getByRole('navigation').getByRole('button',{name:'Recettes'}).click();
   await expect(page.getByText('Recette de mon activité')).toBeVisible();
   await expect(page.getByText('12 000 FCFA')).toBeVisible();
   await expect(page.getByText(/retraits s’ouvriront dès la validation/)).toBeVisible();
@@ -104,20 +102,20 @@ test('independent owner-driver sees revenue, points and verification state',asyn
 test('convoyeur gets crew-specific navigation without driver-centric items',async({page})=>{
   await mockApi(page);
   await demoAs({role:'convoyeur',operator_type:'company',verification_status:'verified',operator_id:'00000000-0000-4000-8000-000000000001'})(page);
-  await page.goto('http://127.0.0.1:4174/');
+  await page.goto('http://127.0.0.1:4173/work/today');
   await page.getByRole('button',{name:'Connexion de développement'}).click();
   await expect(page.locator('.lr-role-strip > span')).toHaveText('Convoyeur');
   await expect(page.getByText('Mon service')).toBeVisible();
   await expect(page.getByRole('navigation').getByRole('button',{name:'Service'})).toBeVisible();
   await expect(page.getByRole('navigation').getByRole('button',{name:'Scanner'})).toBeVisible();
   await expect(page.getByRole('navigation').getByRole('button',{name:'Véhicule'})).toHaveCount(0);
-  await expect(page.getByRole('navigation').getByRole('button',{name:'Gains'})).toHaveCount(0);
+  await expect(page.getByRole('navigation').getByRole('button',{name:'Recettes'})).toHaveCount(0);
 });
 
 test('the crew home leads with the service, its load and big actions',async({page})=>{
   await mockApi(page);
   await demoAs({role:'driver',operator_type:'company',verification_status:'verified',operator_id:'00000000-0000-4000-8000-000000000001'})(page);
-  await page.goto('http://127.0.0.1:4174/');
+  await page.goto('http://127.0.0.1:4173/work/today');
   await page.getByRole('button',{name:'Connexion de développement'}).click();
   await expect(page.getByText('07:30')).toBeVisible();
   await expect(page.getByText('à bord')).toBeVisible();
@@ -128,10 +126,10 @@ test('the crew home leads with the service, its load and big actions',async({pag
   await expect(page.getByText('active',{exact:true})).toHaveCount(0);
 });
 
-test('unprovisioned passenger identity gets a useful explanation in the driver app',async({page})=>{
+test('unprovisioned passenger identity gets a useful explanation in the crew workspace',async({page})=>{
   await mockApi(page);
   await demoAs({role:'passenger'})(page);
-  await page.goto('http://127.0.0.1:4174/');
+  await page.goto('http://127.0.0.1:4173/work/today');
   await page.getByRole('button',{name:'Connexion de développement'}).click();
   await expect(page.getByText('Votre compte passager n’est pas encore provisionné comme équipage. Créez un compte opérateur ou demandez votre provisionnement.')).toBeVisible();
 });
@@ -142,7 +140,7 @@ test('verified Ops with no data sees a guided setup that opens each form',async(
   await page.route('**/api/v1/ops/provisioning',r=>r.fulfill({json:{data:{operators:[],users:[],routes:[],vehicles:[],places:[],stops:[]}}}));
   await page.route('**/api/v1/ops/fleet',r=>r.fulfill({json:{data:{services:[],vehicles:[]}}}));
   await page.route('**/api/v1/operators/*/stations',r=>r.fulfill({json:{data:[]}}));
-  await page.goto('http://127.0.0.1:4175/');
+  await page.goto('http://127.0.0.1:4173/ops/today');
   await page.getByRole('button',{name:'Connexion de développement'}).click();
   await expect(page.getByText('Mettons votre compagnie en route')).toBeVisible();
   await expect(page.getByText('6 étapes restantes')).toBeVisible();
@@ -185,11 +183,11 @@ test('empty production database shows the search form, never a passive empty car
 test('quick search offers current location with a graceful manual fallback', async ({ page }) => {
   await mockApi(page);
   await page.route('**/api/v1/journey-plan*', r => r.fulfill({ json: { data: { options: [], originResolved: null, generatedAt: '2026-09-17T00:00:00Z' } } }));
-  await page.goto('http://127.0.0.1:4176/trips?from=my-location&to=place%3A00000000-0000-4000-8000-000000000303');
+  await page.goto('http://127.0.0.1:4173/trips?from=my-location&to=place%3A00000000-0000-4000-8000-000000000303');
   const origin = page.getByLabel('Départ', { exact: true });
   await expect(origin.locator('option[value="current"]')).toHaveCount(1);
   // Permission denied → clear guidance and the manual path stays available.
-  await page.context().grantPermissions([], { origin: 'http://127.0.0.1:4176' }).catch(() => {});
+  await page.context().grantPermissions([], { origin: 'http://127.0.0.1:4173' }).catch(() => {});
   await expect(page.getByRole('button', { name: 'Utiliser ma position actuelle' })).toBeVisible();
   await page.getByRole('button', { name: 'Utiliser ma position actuelle' }).click();
   await expect(page.getByText(/Position non disponible/)).toBeVisible();
@@ -207,7 +205,7 @@ test('a granted position plans a door-to-destination itinerary with an honest no
   await page.addInitScript(() => {
     navigator.geolocation.getCurrentPosition = cb => cb(/** @type {any} */({ coords: { latitude: 6.355, longitude: 2.435 } }));
   });
-  await page.goto('http://127.0.0.1:4176/trips?from=my-location&to=place%3A00000000-0000-4000-8000-000000000303');
+  await page.goto('http://127.0.0.1:4173/trips?from=my-location&to=place%3A00000000-0000-4000-8000-000000000303');
   await page.getByRole('button', { name: 'Utiliser ma position actuelle' }).click();
   await expect(page.getByText('Aucun départ disponible pour cet itinéraire pour le moment.')).toBeVisible();
   expect(plans.some(u => u.includes('lat=6.355')), 'the plan request carries the transient position').toBeTruthy();

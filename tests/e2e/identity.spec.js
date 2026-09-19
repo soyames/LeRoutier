@@ -3,7 +3,7 @@ import { mockApi } from './api-fixture.js';
 
 // Production identity and authorisation behaviour: the states a real pilot user
 // can land in, and the ones they must never be able to reach.
-const APP = 'http://127.0.0.1:4176';
+const APP = 'http://127.0.0.1:4173';
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const IDENTITY = id(99);
 const me = extra => ({ id: IDENTITY, display_name: 'Test Identity', needs_profile: false, ...extra });

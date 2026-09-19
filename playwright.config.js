@@ -1,9 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// The unified PWA is served alongside the three original apps: both are tested
-// until the old apps are retired, so consolidation cannot silently regress them.
-const apps = ['passenger-web', 'driver-web', 'ops-web', 'web'];
-
 export default defineConfig({
   testDir: './tests/e2e',
   testIgnore: /(^|\/)(live\.spec\.js|.*\.live\.spec\.js)$/,
@@ -22,9 +18,9 @@ export default defineConfig({
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
     { name: 'mobile', use: { ...devices['Pixel 7'] } },
   ],
-  webServer: apps.map((app, index) => ({
-    command: `pnpm --filter @leroutier/${app} preview --host 127.0.0.1 --port ${4173 + index} --strictPort`,
-    url: `http://127.0.0.1:${4173 + index}`,
+  webServer: {
+    command: 'pnpm --filter @leroutier/web preview --host 127.0.0.1 --port 4173 --strictPort',
+    url: 'http://127.0.0.1:4173',
     reuseExistingServer: false,
-  })),
+  },
 });

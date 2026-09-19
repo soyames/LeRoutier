@@ -19,11 +19,8 @@ cases *inside* LeRoutier — a user never meets our deployment architecture.
 | Conduite / Convoyeur | `/work` | crew attached to an operator |
 | Exploitation | `/ops` | operations staff |
 
-`apps/web` is that application. `apps/passenger-web`, `apps/driver-web` and
-`apps/ops-web` are the **legacy** single-role apps: still deployed and still
-tested so consolidation cannot silently regress, but no longer the product.
-The unified app is the only canonical frontend and all role workspaces are
-reachable from it.
+`apps/web` is that application and the only frontend. All role workspaces are
+reachable from it; there are no separate passenger, driver or operations apps.
 
 ## The rule that shapes everything
 
@@ -37,7 +34,6 @@ operations, USSD — goes through the same booking and capacity logic in
 | Path | What lives there |
 | --- | --- |
 | `apps/web` | the unified PWA |
-| `apps/{passenger,driver,ops}-web` | legacy single-role apps, kept for regression |
 | `services/api` | the only thing that talks to the database (`/api/v1`) |
 | `packages/domain` | booking, capacity, fares, state machines — pure logic |
 | `packages/database` | schema, migrations, data access, safety guards |

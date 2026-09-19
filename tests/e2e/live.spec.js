@@ -26,7 +26,7 @@ test('Passenger, Ops and Driver complete a real database-backed journey with rea
   await expect(passenger.getByText('À payer')).toBeVisible();
 
   // 3. Ops records the counter cash payment from the Payments section.
-  await ops.goto('http://127.0.0.1:4175/');await ops.getByRole('button',{name:'Connexion de développement'}).click();
+  await ops.goto('http://127.0.0.1:4173/ops/today');await ops.getByRole('button',{name:'Connexion de développement'}).click();
   await ops.getByRole('navigation').getByRole('button',{name:'Paiements'}).click();
   await expect(ops.getByLabel('Référence du reçu')).toBeVisible();
   await ops.getByLabel('Référence du reçu').fill('DEMO-E2E-RECEIPT');
@@ -40,7 +40,7 @@ test('Passenger, Ops and Driver complete a real database-backed journey with rea
   await expect(passenger.getByText(/LR-[0-9A-F]{4}-[0-9A-F]{4}/)).toBeVisible();
 
   // 5. Driver boards and alights through the Manifest page; advances on Today.
-  await driver.goto('http://127.0.0.1:4174/');await driver.getByRole('button',{name:'Connexion de développement'}).click();
+  await driver.goto('http://127.0.0.1:4173/work/today');await driver.getByRole('button',{name:'Connexion de développement'}).click();
   await expect(driver.getByText('à bord').first()).toBeVisible();
   await driver.getByRole('navigation').getByRole('button',{name:'Manifeste'}).click();
   await expect(driver.getByText('Passager Démo')).toBeVisible();

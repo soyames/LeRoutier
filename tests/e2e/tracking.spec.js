@@ -11,7 +11,7 @@ import { mockApi, trackingFixture } from './api-fixture.js';
 //
 // No test reaches a tile server or a routing engine: the fixture blocks tiles
 // and serves geometry, so the suite is deterministic offline.
-const APP = 'http://127.0.0.1:4176';
+const APP = 'http://127.0.0.1:4173';
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const BOOKING = id(40);
 const IDENTITY = id(99);

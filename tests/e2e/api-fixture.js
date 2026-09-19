@@ -64,7 +64,9 @@ export async function mockApi(page) {
     status:200,contentType:'image/png',
     body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==','base64')}));
   await page.route('**/api/v1/auth/config',r=>r.fulfill({json:{data:{demoLogin:true}}}));
-  await page.route('**/api/v1/auth/demo',r=>r.fulfill({json:{data:{token:token(r.request().postDataJSON().role),user:{id:id(2),role:r.request().postDataJSON().role,display_name:'Compte Démo'}}}}));
+  await page.route('**/api/v1/auth/demo',r=>{const role=r.request().postDataJSON().role;
+    return r.fulfill({json:{data:{token:token(role),user:{id:id(2),role,display_name:'Compte Démo',operator_id:role==='passenger'?null:id(1)}}}});
+  });
   await page.route('**/api/v1/me',r=>{const role=(r.request().headers()['authorization']||'').replace('Bearer ','').split('-').at(-1)||'passenger';
     return r.fulfill({json:{data:{id:id(2),role,display_name:'Compte Démo',operator_id:role==='passenger'?null:id(1)}}});});
   await page.route('**/api/v1/routes',r=>r.fulfill({json:{data:[{id:id(10),stops}]}}));
@@ -117,6 +119,7 @@ export async function mockApi(page) {
   await page.route('**/api/v1/parcels/*/label',r=>r.fulfill({json:{data:{trackingNumber:'LRP-12345678',token:'LRP1.fixture',barcode:'LRP-12345678',version:1}}}));
   await page.route('**/api/v1/parcels/*/scan',r=>r.fulfill({json:{data:{id:id(50),trackingNumber:'LRP-12345678',status:'loaded'}}}));
   await page.route('**/api/v1/driver/parcels',r=>r.fulfill({json:{data:[{id:id(50),trackingNumber:'LRP-12345678',category:'documents',quantity:1,status:'manifested',originCity:'Cotonou',destinationCity:'Parakou',notes:null}]}}));
+  await page.route('**/api/v1/driver/parcels/lookup?*',r=>r.fulfill({json:{data:{id:id(50),trackingNumber:'LRP-12345678',category:'documents',quantity:1,status:'manifested',originCity:'Cotonou',destinationCity:'Parakou',notes:null}}}));
   await page.route('**/api/v1/ops/parcels*',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/api/v1/ops/parcel-rate-rules',r=>r.fulfill({json:{data:[]}}));
   // Notifications, first/last mile and journey timeline. The provider is an

@@ -4,7 +4,7 @@ import { mockApi, TEST_JOURNEY_OPTION } from './api-fixture.js';
 // The product rule: SEARCH → RESULTS → COMPARE → VIEW → SELECT → CHECKOUT
 // happen entirely anonymously. Authentication begins ONLY at
 // "Continuer vers le paiement" — and returns the user to this checkout.
-const APP = 'http://127.0.0.1:4176';
+const APP = 'http://127.0.0.1:4173';
 
 async function searchTrips(page, origin = 'Cotonou', destination = 'Parakou') {
   await page.goto(APP + '/trips');

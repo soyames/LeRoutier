@@ -375,6 +375,35 @@ export function Parcels(){
   const {user,s,cargo}=useService();
   const queue=useDriverQueue(user?.id,request);
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
+  const [lookupCode,setLookupCode]=useState(''),[scannedParcel,setScannedParcel]=useState(null),[scanning,setScanning]=useState(false);
+  const parcelScanner=useRef(null);
+  useEffect(()=>()=>{parcelScanner.current?.stop();parcelScanner.current?.destroy();},[]);
+  async function lookup(code){
+    const value=String(code||'').trim();
+    if(!value) return;
+    setBusy(true);setError('');setNotice('');
+    try{setScannedParcel(await request(`/driver/parcels/lookup?code=${encodeURIComponent(value)}`));setLookupCode(value);}
+    catch(e){setScannedParcel(null);setError(e.message);}
+    finally{setBusy(false);}
+  }
+  async function startParcelScan(){
+    setError('');setScanning(true);
+    try{
+      parcelScanner.current=new QrScanner(/** @type {HTMLVideoElement} */(document.getElementById('parcel-qr-video')),result=>{
+        const value=result.data.trim();
+        if(/^LRP1\.[A-Za-z0-9_-]+$/.test(value)){
+          parcelScanner.current?.stop();setScanning(false);lookup(value);
+        }else setError('QR colis inconnu — utilisez le numéro LRP manuscrit en secours.');
+      },{highlightScanRegion:true});
+      await parcelScanner.current.start();
+    }catch{setScanning(false);setError('Caméra indisponible — saisissez la référence LRP manuellement.');}
+  }
+  function queueParcel(kind, parcelId=scannedParcel?.id){
+    if(!parcelId || !s) return;
+    queue.enqueue('parcel',{serviceId:s.id,parcelId,kind});
+    setNotice(`${parcelLabels[kind==='loaded'?'loaded':kind==='departed'?'in_transit':'arrived']} enregistré${navigator.onLine?' et synchronisé.':' hors ligne — synchronisation en attente.'}`);
+    cargo.reload?.();setScannedParcel(null);setLookupCode('');
+  }
   async function reportProblem(p){
     const description=window.prompt('Décrivez le problème constaté sur le colis :');
     if(!description || !description.trim()) return;
@@ -387,12 +416,32 @@ export function Parcels(){
     <SectionTitle icon={Package} title="Fret & colis" trailing={cargo.data?.length?<Badge>{cargo.data.length} colis</Badge>:null}/>
     <QueueStatus queue={queue}/>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    <Card className="stack">
+      <SectionTitle icon={QrCode} title="Identifier un colis"/>
+      <p className="small muted">Scannez l’étiquette QR affichée sur le téléphone de l’expéditeur ou une étiquette imprimée. Sans imprimante, le numéro LRP court peut être écrit sur le colis.</p>
+      <div className="between wrap">
+        <label className="grow">Référence LRP<input className="control" inputMode="text" autoCapitalize="characters" placeholder="LRP-XXXXXXXX" value={lookupCode} onChange={e=>setLookupCode(e.target.value.toUpperCase())}/></label>
+        <button className="btn btn-primary" disabled={busy || !lookupCode.trim()} onClick={()=>lookup(lookupCode)}>Rechercher</button>
+        {!scanning?<button className="btn btn-soft" disabled={busy} onClick={startParcelScan}>Scanner le QR</button>
+          :<button className="btn btn-soft" onClick={()=>{parcelScanner.current?.stop();setScanning(false);}}>Arrêter la caméra</button>}
+      </div>
+      {scanning && <video id="parcel-qr-video" className="qr-video" muted playsInline aria-label="Lecture caméra QR du colis"/>}
+      {scannedParcel && <div className="summary">
+        <div className="row"><strong>{scannedParcel.trackingNumber}</strong><Badge tone={parcelTones[scannedParcel.status]}>{parcelLabels[scannedParcel.status]}</Badge></div>
+        <div className="row"><span>{scannedParcel.category} · {scannedParcel.quantity} pièce(s)</span><span>{scannedParcel.originCity} → {scannedParcel.destinationCity}</span></div>
+        <div className="controls">
+          {scannedParcel.status==='manifested' && <button className="btn btn-primary" onClick={()=>queueParcel('loaded')}>Accepter et charger</button>}
+          {scannedParcel.status==='loaded' && <button className="btn btn-primary" onClick={()=>queueParcel('departed')}>Déclarer le départ</button>}
+          {scannedParcel.status==='in_transit' && <button className="btn btn-primary" onClick={()=>queueParcel('arrived')}>Déclarer l’arrivée</button>}
+        </div>
+      </div>}
+    </Card>
     {cargo.loading || cargo.error || !cargo.data?.length ? <ApiState resource={cargo} empty="Aucun colis affecté à ce service pour le moment."/> : cargo.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.trackingNumber}</h3><Badge tone={parcelTones[p.status]}>{parcelLabels[p.status]}</Badge></div>
       <span className="small muted">{p.category} · {p.quantity} pièce(s){p.weightG?` · ${p.weightG}g`:''} · destination {p.destinationCity}</span></div>
       <div className="controls">
-        {p.status==='manifested' && <button className="btn btn-primary" disabled={busy} onClick={()=>queue.enqueue('parcel',{serviceId:s.id,parcelId:p.id,kind:'loaded'})}>Scanner le chargement</button>}
-        {p.status==='loaded' && <button className="btn btn-primary" disabled={busy} onClick={()=>queue.enqueue('parcel',{serviceId:s.id,parcelId:p.id,kind:'departed'})}>Scanner le départ</button>}
-        {p.status==='in_transit' && <button className="btn btn-primary" disabled={busy} onClick={()=>queue.enqueue('parcel',{serviceId:s.id,parcelId:p.id,kind:'arrived'})}>Scanner l’arrivée</button>}
+        {p.status==='manifested' && <button className="btn btn-primary" disabled={busy} onClick={()=>queueParcel('loaded',p.id)}>Scanner le chargement</button>}
+        {p.status==='loaded' && <button className="btn btn-primary" disabled={busy} onClick={()=>queueParcel('departed',p.id)}>Scanner le départ</button>}
+        {p.status==='in_transit' && <button className="btn btn-primary" disabled={busy} onClick={()=>queueParcel('arrived',p.id)}>Scanner l’arrivée</button>}
         {(p.status==='loaded'||p.status==='in_transit') && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>reportProblem(p)}>Signaler un problème</button>}
       </div></Card>)}
   </>;

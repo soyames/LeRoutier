@@ -3,7 +3,7 @@ import { mockApi } from './api-fixture.js';
 
 // The About page and the Assistant: public positioning, and an assistant
 // that is reachable, keyboard-operable, honest offline and role-aware.
-const APP = 'http://127.0.0.1:4176';
+const APP = 'http://127.0.0.1:4173';
 
 test.describe('About page', () => {
   test('the About page positions LeRoutier honestly with the legal entity', async ({ page }) => {

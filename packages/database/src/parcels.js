@@ -42,6 +42,7 @@ const publicParcel = (row, parties = null) => ({
 const driverParcel = row => ({ id: row.id, trackingNumber: row.tracking_number, category: row.category, quantity: row.quantity,
   weightG: row.weight_g, status: row.status, originStopId: row.origin_stop_id, destinationStopId: row.destination_stop_id,
   originCity: row.origin_city, destinationCity: row.destination_city, pickupRequired: row.pickup_required, notes: row.notes });
+const maskPhone = phone => phone ? phone.replace(/(\+?[0-9]{2})[0-9 -]+([0-9]{2})$/, '$1••••••$2') : null;
 
 async function trackingNumber(tx) {
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -263,6 +264,26 @@ export function parcels(db) {
           .map(r => driverParcel({ ...r, pickup_required: r.status === 'ready_for_pickup' }));
       });
     },
+    async lookupDriver(actor, code) {
+      invariant(actor?.role === 'driver', 'FORBIDDEN', 'Driver access required.', 403);
+      invariant(typeof code === 'string' && code.trim().length > 0 && code.trim().length <= 200,
+        'INVALID_REFERENCE', 'Saisissez le QR ou la référence LRP du colis.', 400);
+      const value = code.trim();
+      const tokenHash = value.startsWith('LRP1.') ? hash(value) : null;
+      return db.transaction(async tx => {
+        const row = await one(tx, `SELECT p.*,o.name AS origin_city,d.name AS destination_city
+          FROM parcels p
+          JOIN parcel_service_assignments psa ON psa.parcel_id=p.id
+            AND psa.status IN ('assigned','loaded','in_transit','arrived')
+          JOIN service_assignments sa ON sa.service_id=psa.service_id AND sa.driver_id=$1 AND sa.ended_at IS NULL
+          JOIN stops o ON o.id=p.origin_stop_id JOIN stops d ON d.id=p.destination_stop_id
+          LEFT JOIN parcel_labels pl ON pl.parcel_id=p.id
+          WHERE p.tracking_number=$2 OR ($3::text IS NOT NULL AND pl.token_hash=$3)
+          ORDER BY psa.created_at DESC LIMIT 1`, [actor.id, value.toUpperCase(), tokenHash]);
+        invariant(row, 'NOT_FOUND', 'Ce colis n’est pas affecté à votre service.', 404);
+        return driverParcel({ ...row, pickup_required: row.status === 'ready_for_pickup' });
+      });
+    },
     async get(actor, id) {
       return db.transaction(async tx => {
         const parcel = await authorize(tx, actor, id);
@@ -285,7 +306,17 @@ export function parcels(db) {
         const row = await one(tx, `INSERT INTO parcel_labels(parcel_id,version,token_hash) VALUES($1,1,$2)
           ON CONFLICT(parcel_id) DO UPDATE SET version=parcel_labels.version+1,token_hash=EXCLUDED.token_hash,issued_at=now()
           RETURNING version`, [parcel.id, hash(token)]);
-        return { trackingNumber: parcel.tracking_number, token, barcode: parcel.tracking_number, version: row.version };
+        const places = await one(tx, `SELECT op.name AS origin_city,dp.name AS destination_city,
+            pp.name AS receiver_name,pp.phone AS receiver_phone
+          FROM parcels p JOIN stops os ON os.id=p.origin_stop_id JOIN stops ds ON ds.id=p.destination_stop_id
+          JOIN places op ON op.id=os.place_id JOIN places dp ON dp.id=ds.place_id
+          LEFT JOIN parcel_parties pp ON pp.parcel_id=p.id AND pp.role='receiver'
+          WHERE p.id=$1`, [parcel.id]);
+        return {
+          trackingNumber: parcel.tracking_number, token, barcode: parcel.tracking_number, version: row.version,
+          origin: places?.origin_city, destination: places?.destination_city, category: parcel.category,
+          receiver: places?.receiver_name ? { initial: places.receiver_name.trim().charAt(0).toUpperCase(), phone: maskPhone(places.receiver_phone) } : null,
+        };
       });
     },
     async accept(actor, id) {

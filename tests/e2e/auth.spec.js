@@ -24,7 +24,7 @@ async function isolateProvider(page) {
 }
 
 /** Signs in through the development path: the same /me and the same role gating. */
-async function signedIn(page, port, { role = 'passenger', needsProfile = false, routes = null } = {}) {
+async function signedIn(page, { role = 'passenger', needsProfile = false, routes = null } = {}) {
   await mockApi(page);
   await isolateProvider(page);
   // Registered after the fixture so they win: Playwright tries the most
@@ -46,7 +46,8 @@ async function signedIn(page, port, { role = 'passenger', needsProfile = false, 
     }
     await r.fulfill({ json: { data: current } });
   });
-  await page.goto(`http://127.0.0.1:${port}/`);
+  const path = role === 'ops' ? '/ops/today' : role === 'driver' ? '/work/today' : '/';
+  await page.goto(`http://127.0.0.1:4173${path}`);
   await page.getByRole('button', { name: 'Connexion de développement' }).click();
 }
 
@@ -90,7 +91,7 @@ test('the browser is never given anything but the four public identifiers', asyn
 
 // ------------------------------------------------------------- the session --
 test('a passenger completes their profile and signs out leaving nothing behind', async ({ page }) => {
-  await signedIn(page, 4173, { needsProfile: true });
+  await signedIn(page, { needsProfile: true });
   await expect(page.getByRole('heading', { name: 'Complétez votre profil' })).toBeVisible();
   await page.getByLabel('Départ', { exact: true }).selectOption('place');
   await page.getByLabel('Ville de départ').fill('Cotonou'); await page.getByLabel('Ville de départ').press('Enter');
@@ -123,63 +124,12 @@ test('a passenger completes their profile and signs out leaving nothing behind',
   expect(residue).toEqual([]);
 });
 
-// ------------------------------------------------------- roles are ours ----
-test('driver app shows explicit unprovisioned state for passenger identity', async ({ page }) => {
-  await signedIn(page, 4174);
-  await expect(page.getByText('Votre compte passager n’est pas encore provisionné comme équipage. Créez un compte opérateur ou demandez votre provisionnement.')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Déconnexion' })).toBeVisible();
-});
-
-test('ops app denies passenger identity and hides provisioning controls', async ({ page }) => {
-  await signedIn(page, 4175);
-  await expect(page.getByText('Cet espace est réservé aux opérateurs de transport.')).toBeVisible();
-  await expect(page.getByText('Provisionner un agent Ops', { exact: true })).toHaveCount(0);
-});
-
-test('approved driver sees assignment and signout clears privileged data', async ({ page }) => {
-  await signedIn(page, 4174, { role: 'driver' });
-  await expect(page.getByText('à bord').first()).toBeVisible();
-  await page.getByRole('button', { name: 'Déconnexion' }).click();
-  await expect(page.getByText('à bord')).toHaveCount(0);
-});
-
-test('operator ops can create a vehicle with a stable retry key and no fake success', async ({ page }) => {
-  let attempts = 0, firstKey;
-  await signedIn(page, 4175, { role: 'ops', routes: async p => {
-    await p.route('**/api/v1/ops/provisioning', r => r.fulfill({ json: { data: {
-      operators: [{ id: '00000000-0000-4000-8000-000000000001', name: 'Test operator' }],
-      users: [], routes: [], vehicles: [], places: [], stops: [] } } }));
-    await p.route('**/api/v1/ops/vehicles', r => {
-      const key = r.request().headers()['idempotency-key'];
-      if (!attempts) firstKey = key; else expect(key === firstKey).toBe(true);
-      expect(r.request().postDataJSON()).toEqual({ operatorId: '00000000-0000-4000-8000-000000000001', registration: 'TEST-01', capacity: 12 });
-      return ++attempts === 1
-        ? r.fulfill({ status: 503, json: { error: { message: 'Réessayez.' } } })
-        : r.fulfill({ json: { data: { id: 'created' } } });
-    });
-  } });
-  // Sessions are memory-only: navigate client-side, never reload the app.
-  await page.getByRole('button', { name: 'Paramètres' }).click();
-  await expect(page.getByText('Créer un opérateur', { exact: true })).toHaveCount(0);
-  await page.getByText('Ajouter un véhicule', { exact: true }).click();
-  await page.getByLabel('Immatriculation').fill('TEST-01');
-  await page.getByLabel('Nombre de places').fill('12');
-  const form = page.locator('details').filter({ has: page.getByText('Ajouter un véhicule', { exact: true }) });
-  await form.getByRole('button', { name: 'Enregistrer', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Réessayez.');
-  // A failed create must never read as a success.
-  await expect(page.getByText('Création enregistrée.')).toHaveCount(0);
-  await form.getByRole('button', { name: 'Enregistrer', exact: true }).click();
-  await expect(page.getByText('Création enregistrée.')).toBeVisible();
-  expect(attempts).toBe(2);
-});
-
 // ---------------------------------------------------------- legal pages ----
 // Google Auth Platform will not let an app offer Google Sign-In until its
 // privacy policy and terms resolve. They must also be readable without an
 // account — a person deciding whether to hand over an identity cannot be asked
 // to sign in first. These pages are routed above the app shell in main.jsx.
-const UNIFIED = 'http://127.0.0.1:4176';
+const UNIFIED = 'http://127.0.0.1:4173';
 
 test('the pages Google requires resolve without an account', async ({ page }) => {
   await mockApi(page);
