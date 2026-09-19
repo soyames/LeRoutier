@@ -46,8 +46,8 @@ test('public parcel tracking shows a timeline and never party data',async({page}
 
 test('driver sees parcel cargo on the assigned service and scans loading',async({page})=>{
   await mockApi(page);
-  await page.goto('http://127.0.0.1:4174/');
-  await page.getByRole('button',{name:'Connexion de développement'}).click();
+  await page.goto('http://127.0.0.1:4173/work/today');
+  await page.getByRole('button',{name:'Développement : driver'}).click();
   // Sessions are memory-only: navigate client-side via the nav.
   await page.getByRole('navigation').getByRole('button',{name:'Colis'}).click();
   await expect(page.getByText('Fret & colis')).toBeVisible();
@@ -55,5 +55,18 @@ test('driver sees parcel cargo on the assigned service and scans loading',async(
   await expect(page.getByText('destination Parakou')).toBeVisible();
   const scanRequest=page.waitForRequest(request=>request.url().includes('/api/v1/parcels/')&&request.url().endsWith('/scan')&&request.method()==='POST');
   await page.getByRole('button',{name:'Scanner le chargement'}).click();
+  await scanRequest;
+});
+
+test('driver resolves a handwritten parcel reference in the unified workspace',async({page})=>{
+  await mockApi(page);
+  await page.goto('http://127.0.0.1:4173/work/today');
+  await page.getByRole('button',{name:'Développement : driver'}).click();
+  await page.getByRole('navigation').getByRole('button',{name:'Colis'}).click();
+  await page.getByLabel('Référence LRP').fill('LRP-12345678');
+  await page.getByRole('button',{name:'Rechercher'}).click();
+  await expect(page.getByText('Cotonou → Parakou')).toBeVisible();
+  const scanRequest=page.waitForRequest(request=>request.url().includes('/api/v1/parcels/')&&request.url().endsWith('/scan')&&request.method()==='POST');
+  await page.getByRole('button',{name:'Accepter et charger'}).click();
   await scanRequest;
 });

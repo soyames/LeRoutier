@@ -43,6 +43,6 @@ export default defineConfig({
   })],
   resolve: { dedupe: ['react', 'react-dom'] },
   server: { port: 3003, strictPort: true },
-  preview: { port: 4176, strictPort: true },
+  preview: { port: 4173, strictPort: true },
   define: { 'import.meta.env.VITE_API_URL': JSON.stringify(apiUrl) },
 });

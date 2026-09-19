@@ -8,7 +8,7 @@ import { audit } from './identities.js';
 // Walk-up cash bookings: the ONLY cash channel. Authorized crew (Driver or
 // Convoyeur assigned to the service) sells a seat for cash, records the
 // payment against the booking and credits the operator's settlement ledger.
-// The Passenger app never accepts cash — that rule is unchanged.
+// Passenger online checkout never accepts cash — that rule is unchanged.
 const one = async (tx, sql, args = []) => (await tx.query(sql, args)).rows[0];
 const digest = x => createHash('sha256').update(JSON.stringify(x)).digest('hex');
 

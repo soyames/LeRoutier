@@ -3,7 +3,7 @@ import { mockApi } from './api-fixture.js';
 
 // The homepage journey search: geography-backed, route-independent. The form
 // must exist even with zero routes, zero services and no login.
-const APP = 'http://127.0.0.1:4176';
+const APP = 'http://127.0.0.1:4173';
 const id = n => `00000000-0000-4000-b000-0000000003${String(n).padStart(2, '0')}1`;
 const today = () => new Date().toISOString().slice(0, 10);
 

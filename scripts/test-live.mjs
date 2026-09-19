@@ -14,7 +14,7 @@ import { nodeHandler } from '../services/api/src/node-handler.js';
 // Each journey mutates the seeded service (booking, boarding, advancing), so
 // every spec gets its own schema and its own API server. Sharing one schema
 // made the second journey depend on where the first one left the service.
-const PREVIEW_ORIGINS = [4173, 4174, 4175, 4176].flatMap(port => [`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
+const PREVIEW_ORIGINS = [4173].flatMap(port => [`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
 // Preview origins are granted explicitly so the live run does not depend on a
 // developer's local CORS_ORIGINS. Production CORS is unaffected: this config
 // exists only for these throwaway schemas and this in-process server.
@@ -24,7 +24,7 @@ const SPECS = ['tests/e2e/live.spec.js', 'tests/e2e/unified.live.spec.js'];
 function reclaimPorts() {
   if (process.platform !== 'win32') return;
   spawnSync('powershell', ['-NoProfile', '-Command',
-    'Get-NetTCPConnection -LocalPort 4000,4173,4174,4175,4176 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }'],
+    'Get-NetTCPConnection -LocalPort 4000,4173 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }'],
   { stdio: 'ignore' });
 }
 
@@ -56,8 +56,7 @@ try {
   reclaimPorts();
   // The preview servers serve prebuilt bundles; rebuild with the local API URL
   // baked in. One build serves every spec.
-  const built = spawnSync('pnpm', ['--filter', '@leroutier/passenger-web', '--filter', '@leroutier/driver-web',
-    '--filter', '@leroutier/ops-web', '--filter', '@leroutier/web', 'build'],
+  const built = spawnSync('pnpm', ['--filter', '@leroutier/web', 'build'],
   { stdio: 'inherit', shell: process.platform === 'win32', env: { ...process.env, VITE_API_URL: 'http://127.0.0.1:4000' } });
   if (built.status !== 0) throw new Error('Live e2e build failed.');
   let failures = 0;

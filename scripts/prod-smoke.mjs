@@ -2,9 +2,7 @@
 // Never charges money, never sends payouts, never mutates production data,
 // never prints secrets. Usage: PROD_API_URL=... node scripts/prod-smoke.mjs
 const api = (process.env.PROD_API_URL || 'https://api.leroutier.app').replace(/\/$/, '');
-// The unified PWA is canonical; the three originals stay until retired.
 const unified = (process.env.PROD_APP_URL || 'https://leroutier.app').replace(/\/$/, '');
-const apps = { leroutier: unified, passenger: 'https://le-routier-passenger.vercel.app', driver: 'https://le-routier-driver.vercel.app', ops: 'https://le-routier-ops.vercel.app' };
 let checks = 0, failures = 0;
 function ok(name, detail = '') { checks++; console.log(`  PASS  ${name}${detail ? ` (${detail})` : ''}`); }
 function fail(name, detail) { checks++; failures++; console.log(`  FAIL  ${name} — ${detail}`); }
@@ -71,9 +69,9 @@ for (const path of ['/privacy','/terms','/legal','/cancellations','/cookies']) {
   const { response } = await get('/api/v1/services?originStopId=not-an-id&destinationStopId=not-an-id');
   response.status === 400 ? ok('Versioned route validation works') : fail('Route validation', `status ${response.status}`);
 }
-for (const [name, url] of Object.entries(apps)) {
-  const response = await fetch(url);
-  response.status === 200 ? ok(`App ${name} serves 200`) : fail(`App ${name}`, `status ${response.status}`);
+{
+  const response = await fetch(unified);
+  response.status === 200 ? ok('Unified PWA serves 200') : fail('Unified PWA', `status ${response.status}`);
 }
 {
   // One installable PWA, branded LeRoutier rather than per role.

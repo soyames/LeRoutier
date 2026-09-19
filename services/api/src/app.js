@@ -105,7 +105,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       '/me/bookings': ['GET'], '/me/parcels': ['GET'], '/notifications': ['GET'],
       '/notifications/preferences': ['GET', 'PUT'], '/parcels/quote': ['GET'], '/parcels': ['POST'],
       '/bookings': ['POST'], '/operator/settlements': ['GET'], '/operator/payouts': ['GET', 'POST'],
-      '/driver/earnings': ['GET'], '/driver/parcels': ['GET'], '/driver/service': ['GET'],
+      '/driver/earnings': ['GET'], '/driver/parcels': ['GET'], '/driver/parcels/lookup': ['GET'], '/driver/service': ['GET'],
       '/driver/payouts': ['GET', 'POST'], '/driver/payout-destinations': ['GET', 'POST'],
       '/driver/walk-up-bookings': ['POST'], '/driver/actions': ['POST'],
       '/onboarding/me': ['GET'], '/onboarding/company': ['POST'], '/onboarding/independent': ['POST'],
@@ -420,6 +420,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='POST' && path==='/parcels') return parcel.create(actor,await body(),req.headers.get('idempotency-key'));
     if(method==='GET' && path==='/me/parcels') return parcel.listMine(actor);
     if(method==='GET' && path==='/driver/parcels') return parcel.listDriver(actor);
+    if(method==='GET' && path==='/driver/parcels/lookup') return parcel.lookupDriver(actor, url.searchParams.get('code'));
     if(method==='GET' && path==='/ops/parcels') return parcel.listOps(actor,{status:url.searchParams.get('status')??undefined,q:url.searchParams.get('q')??undefined});
     if(method==='GET' && path==='/ops/parcel-rate-rules') return parcel.rateRules(actor);
     if(method==='POST' && path==='/ops/parcel-rate-rules') return parcel.rateRules(actor,await body(),req.headers.get('idempotency-key'));

@@ -95,6 +95,22 @@ test('label QR identifies the parcel token and the barcode is the tracking numbe
   assert.equal(rotated.version,2);
   assert.notEqual(rotated.token,label.token);
 });
+test('assigned driver resolves phone QR and handwritten LRP reference without party data',async()=>{
+  const p=await created();
+  await parcel.accept(ops,p.id);
+  await parcel.assign(ops,p.id,{serviceId:demo.service});
+  const label=await parcel.label(passenger,p.id);
+  const byReference=await parcel.lookupDriver(driver,p.trackingNumber.toLowerCase());
+  assert.equal(byReference.id,p.id);
+  assert.equal(byReference.trackingNumber,p.trackingNumber);
+  assert.ok(byReference.originCity);
+  assert.ok(byReference.destinationCity);
+  assert.equal(Object.hasOwn(byReference,'parties'),false);
+  const byPhoneQr=await parcel.lookupDriver(driver,label.token);
+  assert.equal(byPhoneQr.id,p.id);
+  await assert.rejects(parcel.lookupDriver({id:randomUUID(),role:'driver'},p.trackingNumber),{code:'NOT_FOUND'});
+  await assert.rejects(parcel.lookupDriver(driver,'LRP-00000000'),{code:'NOT_FOUND'});
+});
 test('full lifecycle: accept, assign, load, depart, arrive, ready and collect with code',async()=>{
   const {p,accepted}=await readyParcel();
   assert.equal(accepted.status,'accepted');
@@ -296,6 +312,9 @@ test('end-to-end parcel lifecycle through the versioned API',async()=>{
   const id=p.data.id;
   assert.equal((await call(`/parcels/${id}/accept`,'POST',undefined,'ops')).status,200);
   assert.equal((await call(`/parcels/${id}/assign`,'POST',{serviceId:demo.service},'ops')).status,200);
+  const label=await call(`/parcels/${id}/label`);
+  assert.equal((await call(`/driver/parcels/lookup?code=${encodeURIComponent(p.data.trackingNumber)}`,'GET',undefined,'driver')).data.id,id);
+  assert.equal((await call(`/driver/parcels/lookup?code=${encodeURIComponent(label.data.token)}`,'GET',undefined,'driver')).data.id,id);
   assert.equal((await call(`/parcels/${id}/scan`,'POST',{kind:'loaded'},'driver')).status,200);
   assert.equal((await call(`/parcels/${id}/scan`,'POST',{kind:'departed'},'driver')).status,200);
   assert.equal((await call(`/parcels/${id}/scan`,'POST',{kind:'arrived'},'driver')).status,200);

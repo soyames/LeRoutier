@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 // The unified PWA against the real API and a disposable Neon schema. No route
 // is mocked here: every screen below is rendering data that actually came out
 // of PostgreSQL through /api/v1.
-const APP = 'http://127.0.0.1:4176';
+const APP = 'http://127.0.0.1:4173';
 const signIn = (page, role) => page.getByRole('button', { name: 'Développement : ' + role }).click();
 
 test('the unified PWA carries a real database-backed journey across workspaces', async ({ browser }) => {

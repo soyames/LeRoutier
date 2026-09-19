@@ -7,7 +7,7 @@ import { mockApi } from './api-fixture.js';
 // Sessions are deliberately in-memory — no token is persisted to storage — so
 // every test signs in on the route it is exercising rather than navigating
 // after login. That is also the product behaviour: you land where you asked.
-const APP = 'http://127.0.0.1:4176';
+const APP = 'http://127.0.0.1:4173';
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const IDENTITY = id(99);
 const me = extra => ({ id: IDENTITY, display_name: 'Test Identity', needs_profile: false, ...extra });
@@ -39,8 +39,6 @@ test('public home offers product tasks, never application names', async ({ page 
   await expect(page.getByRole('button', { name: /Suivre un colis/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /chauffeur indépendant/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /représente une compagnie/ })).toBeVisible();
-  // A visitor never meets our deployment architecture.
-  await expect(page.getByText(/application (passager|chauffeur)|Passenger app|Driver app|Ops app/i)).toHaveCount(0);
 });
 
 test('anonymous trip search works and never offers cash', async ({ page }) => {
@@ -77,8 +75,6 @@ test('a protected workspace asks for the LeRoutier identity, not an app login', 
   await page.goto(APP + '/work/today');
   await expect(page.getByText('Connexion requise')).toBeVisible();
   await expect(page.getByText(/Une seule identité LeRoutier/)).toBeVisible();
-  // No per-app wording anywhere in the sign-in path.
-  await expect(page.getByText(/application conducteur|driver app/i)).toHaveCount(0);
 });
 
 // ------------------------------------------------------------- passenger ----

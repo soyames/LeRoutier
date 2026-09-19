@@ -825,8 +825,14 @@ export function Parcels() {
     {label ? <Card className="card-success stack">
       <div className="between wrap"><h3>Colis enregistré</h3><Badge tone="success">{label.trackingNumber}</Badge></div>
       <div className="ticket-qr"><QRCodeSVG value={label.token} size={180} marginSize={1}/>
-        <span className="small muted">Présentez ce code à la remise du colis.</span></div>
-      <p className="small">Communiquez le numéro <strong>{label.trackingNumber}</strong> au destinataire pour qu’il suive l’envoi.</p>
+        <span className="small muted">Présentez ce QR depuis votre téléphone au conducteur. Aucune impression n’est nécessaire.</span></div>
+      <Card className="stack label-print">
+        <strong>Référence courte : {label.trackingNumber}</strong>
+        <span className="small muted">Si votre téléphone est indisponible, écrivez cette référence sur le colis.</span>
+        <span className="small">{label.origin} → {label.destination} · {categoryLabels[label.category]}{label.receiver ? ` · destinataire ${label.receiver.initial}. · ${label.receiver.phone}` : ''}</span>
+        <button type="button" className="btn btn-soft" onClick={() => window.print()}>Imprimer une étiquette (facultatif)</button>
+      </Card>
+      <p className="small">Communiquez le numéro <strong>{label.trackingNumber}</strong> au destinataire pour le suivi public. Le QR du colis ne prouve jamais son identité.</p>
       <div className="controls"><button className="btn btn-soft" onClick={() => { setLabel(null); setStep(0); }}>Envoyer un autre colis</button></div>
     </Card> : <Card className="stack">
       <Steps current={step} labels={['Trajet', 'Personnes', 'Colis & prix']}/>
