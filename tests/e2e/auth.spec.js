@@ -48,7 +48,13 @@ async function signedIn(page, { role = 'passenger', needsProfile = false, routes
   });
   const path = role === 'ops' ? '/ops/today' : role === 'driver' ? '/work/today' : '/';
   await page.goto(`http://127.0.0.1:4173${path}`);
-  await page.getByRole('button', { name: 'Connexion de développement' }).click();
+  if (role === 'passenger') {
+    await page.getByRole('button', { name: 'Se connecter' }).click();
+    await page.getByRole('button', { name: 'Connexion de développement' }).click();
+    await page.getByRole('button', { name: 'Accueil LeRoutier' }).click();
+  } else {
+    await page.getByRole('button', { name: 'Connexion de développement' }).click();
+  }
 }
 
 // ----------------------------------------------------------- fail closed --
@@ -56,7 +62,7 @@ test('production login unavailable fails closed without token input or demo logi
   await mockApi(page);
   await isolateProvider(page);
   await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: { demoLogin: false, firebase: null } } }));
-  await page.goto('http://127.0.0.1:4173/');
+  await page.goto('http://127.0.0.1:4173/account');
   await expect(page.getByRole('button', { name: 'Connexion indisponible' })).toBeDisabled();
   await expect(page.getByText('La connexion sécurisée n’est pas encore configurée.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connexion de développement' })).toHaveCount(0);
@@ -68,7 +74,7 @@ test('a configured provider is offered by name', async ({ page }) => {
   await mockApi(page);
   await isolateProvider(page);
   await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: { demoLogin: false, firebase: FIREBASE } } }));
-  await page.goto('http://127.0.0.1:4173/');
+  await page.goto('http://127.0.0.1:4173/account');
   // A person about to hand over an identity is told to whom.
   await expect(page.getByRole('button', { name: 'Continuer avec Google' })).toBeEnabled();
   await expect(page.getByText('La connexion sécurisée n’est pas encore configurée.')).toHaveCount(0);
@@ -82,7 +88,7 @@ test('the browser is never given anything but the four public identifiers', asyn
     published = { demoLogin: false, firebase: FIREBASE };
     await r.fulfill({ json: { data: published } });
   });
-  await page.goto('http://127.0.0.1:4173/');
+  await page.goto('http://127.0.0.1:4173/account');
   await expect(page.getByRole('button', { name: 'Continuer avec Google' })).toBeVisible();
   const payload = /** @type {any} */ (published);
   expect(payload, 'the app must have asked for its sign-in configuration').toBeTruthy();
@@ -92,7 +98,6 @@ test('the browser is never given anything but the four public identifiers', asyn
 // ------------------------------------------------------------- the session --
 test('a passenger completes their profile and signs out leaving nothing behind', async ({ page }) => {
   await signedIn(page, { needsProfile: true });
-  await expect(page.getByRole('heading', { name: 'Complétez votre profil' })).toBeVisible();
   await page.getByLabel('Départ', { exact: true }).selectOption('place');
   await page.getByLabel('Ville de départ').fill('Cotonou'); await page.getByLabel('Ville de départ').press('Enter');
   await page.getByLabel('Destination').fill('Parakou'); await page.getByLabel('Destination').press('Enter');
@@ -101,7 +106,7 @@ test('a passenger completes their profile and signs out leaving nothing behind',
   await page.getByRole('button', { name: 'Chauffeurs indépendants' }).click();
   await page.getByRole('button', { name: 'Choisir' }).first().click();
   await expect(page).toHaveURL(/\/checkout/);
-  await expect(page.getByText('TEST')).toBeVisible();
+  await expect(page.getByText('TEST', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Continuer vers le paiement' }).click();
   // The profile gate sits at the payment step — inline, not onboarding.
   await expect(page.getByRole('heading', { name: 'Complétez votre profil' })).toBeVisible();

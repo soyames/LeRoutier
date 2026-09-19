@@ -43,7 +43,7 @@ export function SessionPanel() {
         {!canSignin && !demoLogin && <p role="status">La connexion sécurisée n’est pas encore configurée.</p>}
         {demoLogin && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>run(loginDemo)}>Connexion de développement</button>}
         {demoLogin && Array.isArray(role) && role.length>1 && <div className="controls">
-          {role.filter(r=>r!=='convoyeur').map(r=><button key={r} className="control" disabled={busy || !online}
+          {role.map(r=><button key={r} className="control" disabled={busy || !online}
             onClick={()=>run(()=>loginDemo(r))}>Développement : {r}</button>)}
         </div>}
         {canSignin && mode==='signin' && <form className="stack" onSubmit={submitSignin}>
