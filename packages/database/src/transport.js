@@ -130,9 +130,9 @@ export function transport(db) {
      * same departures, the same fares and the same remaining seats. A second
      * copy of this query is a second answer to "is there a seat?".
      *
-     * @param {{originStopId?: string|null, destinationStopId?: string|null, limit?: number}} query
+     * @param {{originStopId?: string|null, destinationStopId?: string|null, limit?: number, includeDemo?: boolean}} query
      */
-    async search({ originStopId = null, destinationStopId = null, limit = 50 } = {}) {
+    async search({ originStopId = null, destinationStopId = null, limit = 50, includeDemo = false } = {}) {
       invariant(!originStopId === !destinationStopId, 'INVALID_JOURNEY', 'Both origin and destination are required.');
       if (originStopId) { uuid(originStopId); uuid(destinationStopId); }
       const rows = await db.transaction(async tx => (await tx.query(`SELECT s.*,r.name AS route_name,o.name AS operator_name,v.registration,
@@ -145,8 +145,8 @@ export function transport(db) {
         JOIN service_assignments a ON a.service_id=s.id AND a.ended_at IS NULL JOIN vehicles v ON v.id=a.vehicle_id
         LEFT JOIN users u ON u.id=a.driver_id
         LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id
-        WHERE s.status IN ('scheduled','active') AND (s.departure_at>now() OR s.status='active')
-        ORDER BY s.departure_at LIMIT $3`, [originStopId, destinationStopId, limit])).rows);
+        WHERE s.status IN ('scheduled','active') AND (s.departure_at>now() OR s.status='active') AND (NOT s.is_demo OR $4)
+        ORDER BY s.departure_at LIMIT $3`, [originStopId, destinationStopId, limit, includeDemo === true])).rows);
       const result = [];
       for (const service of rows) {
         const from = originStopId ? service.origin : service.current_sequence;
@@ -188,6 +188,34 @@ export function transport(db) {
     },
     async transition(actor, id, action, stopSequence = undefined) {
       return db.transaction(async tx => txTransition(tx, actor, id, action, stopSequence));
+    },
+    // Simulated payment for TEST bookings only. Strictly tied to the service's
+    // structural test flag: no real provider is ever contacted, no settlement
+    // credit is created and no fare-intelligence observation is recorded. The
+    // payment row satisfies the booking confirmation flow (paid amount check)
+    // so the full booking lifecycle is exercised without touching FedaPay.
+    async simulatedTestPayment(actor, id, key, { allowTestInventory = false } = {}) {
+      idempotencyKey(key);
+      return db.transaction(async tx => {
+        const identity = await one(tx, 'SELECT is_demo FROM users WHERE id=$1 AND active', [actor?.id]);
+        invariant(identity && (identity.is_demo === true || allowTestInventory), 'FORBIDDEN', 'Test authorization required.', 403);
+        const storedKey = 'test-payment:' + actor.id + ':' + key;
+        await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [storedKey]);
+        const { booking: b, service } = await getBooking(tx, id, actor);
+        invariant(actor?.role === 'passenger' && actor.id === b.passenger_id, 'FORBIDDEN', 'Booking is not yours.', 403);
+        invariant(service.is_demo === true, 'FORBIDDEN', 'Simulated payment is only available on TEST services.', 403);
+        const prior = await one(tx, 'SELECT * FROM payments WHERE idempotency_key=$1', [storedKey]);
+        if (prior) { invariant(prior.booking_id === id, 'IDEMPOTENCY_CONFLICT', 'Key belongs to another booking.', 409); return prior; }
+        invariant(b.status === 'held' && ['scheduled','active'].includes(service.status) && b.origin_sequence >= service.current_sequence &&
+          (service.status === 'active' || new Date(service.departure_at).getTime() > Date.now()), 'INVALID_PAYMENT', 'An active hold is required.', 409);
+        invariant(!await one(tx, "SELECT id FROM payments WHERE booking_id=$1 AND status IN ('pending','succeeded')", [id]), 'PAYMENT_EXISTS', 'Payment already exists.', 409);
+        const payment = await one(tx, `INSERT INTO payments(booking_id,provider,provider_reference,amount_minor,currency,status,idempotency_key,request_fingerprint,recorded_by)
+          VALUES($1,'demo',$2,$3,'XOF','succeeded',$4,$5,$6) RETURNING *`,
+        [id, 'TEST-SIM-' + id, b.amount_minor, storedKey, fingerprint([id, 'test']), actor.id]);
+        await txTransition(tx, actor, id, 'confirm');
+        await emit(tx, 'payment.recorded', payment.id, { bookingId: id, serviceId: service.id, test: true });
+        return payment;
+      });
     },
     async recordPayment(actor, id, input, key) {
       idempotencyKey(key);

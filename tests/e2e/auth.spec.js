@@ -96,15 +96,23 @@ test('a passenger completes their profile and signs out leaving nothing behind',
   await page.getByLabel('Ville de départ').fill('Cotonou'); await page.getByLabel('Ville de départ').press('Enter');
   await page.getByLabel('Destination').fill('Parakou'); await page.getByLabel('Destination').press('Enter');
   await page.getByRole('button', { name: 'Rechercher un trajet' }).click();
-  await expect(page.getByRole('button', { name: 'Complétez votre profil' })).toBeDisabled();
+  // Select the TEST offer: the whole checkout exercises the simulated path.
+  await page.getByRole('button', { name: 'Chauffeurs indépendants' }).click();
+  await page.getByRole('button', { name: 'Choisir' }).first().click();
+  await expect(page).toHaveURL(/\/checkout/);
+  await expect(page.getByText('TEST')).toBeVisible();
+  await page.getByRole('button', { name: 'Continuer vers le paiement' }).click();
+  // The profile gate sits at the payment step — inline, not onboarding.
+  await expect(page.getByRole('heading', { name: 'Complétez votre profil' })).toBeVisible();
   await page.getByLabel('Nom complet').fill('Voyageur Test');
   await page.getByLabel('Téléphone', { exact: true }).fill('');
   await page.getByRole('button', { name: 'Enregistrer mon profil' }).click();
-  await expect(page.getByRole('button', { name: 'Choisir ce trajet' })).toBeEnabled();
+  // Profile saved: the checkout resumes automatically and completes the
+  // simulated payment against the TEST booking.
+  await expect(page).toHaveURL(/\/tickets\//, { timeout: 15000 });
 
   await page.getByRole('button', { name: 'Déconnexion' }).click();
   await expect(page.getByRole('button', { name: 'Connexion indisponible' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Se connecter pour réserver' })).toBeEnabled();
 
   // Signing out leaves no authentication material anywhere a next user could
   // reach it — this is a shared handset at a station, not a personal laptop.

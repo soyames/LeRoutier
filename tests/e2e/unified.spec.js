@@ -50,8 +50,13 @@ test('anonymous trip search works and never offers cash', async ({ page }) => {
   await page.getByLabel('Ville de départ').click(); await page.getByLabel('Ville de départ').fill('Cotonou'); await page.getByLabel('Ville de départ').press('Enter');
   await page.getByLabel('Destination').click(); await page.getByLabel('Destination').fill('Parakou'); await page.getByLabel('Destination').press('Enter');
   await page.getByRole('button', { name: 'Rechercher un trajet' }).click();
+  // Results, fares and the TEST offer are all visible without an account.
   await expect(page.getByText('Opérateur démo')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Se connecter pour réserver' })).toBeEnabled();
+  await expect(page.getByText('TEST Chauffeur 01')).toBeVisible();
+  await expect(page.getByText('7 500 FCFA').first()).toBeVisible();
+  await expect(page.getByText('2 trajets disponibles')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Choisir' }).first()).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Voir le trajet' }).first()).toBeEnabled();
   await expect(page.getByText(/espèces/i)).toHaveCount(0);
 });
 

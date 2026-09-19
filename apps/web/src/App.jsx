@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate, useParams } from 'react-router';
 import { AppShell, Card, Badge, SectionTitle, SessionPanel, EmptyState } from '@leroutier/ui';
 import { useSession } from '@leroutier/config/client';
 import { Trips, Tickets, Stations, Tracking, Account, Parcels as PassengerParcels, ParcelTracking, OnboardingPage, PrivacyCenter } from '@leroutier/screens/passenger';
+import { Checkout } from '@leroutier/screens/checkout';
 import { Today as CrewToday, Manifest, Scanner, WalkUp, Parcels as CrewParcels, Vehicle, Points, Earnings, Profile } from '@leroutier/screens/crew';
 import { Today as OpsToday, Services, Fleet, Crew, Stations as OpsStations, Parcels as OpsParcels, Payments, Settlements, Incidents, Alerts, Settings } from '@leroutier/screens/ops';
 import { JourneyTimeline } from '@leroutier/screens/journey';
@@ -117,13 +118,13 @@ export default function App() {
   ];
   const passengerScreens = {
     '': <Home/>, trips: <Trips/>, tickets: <TicketsRoute/>, stations: <Stations/>, parcels: <ParcelsRoute/>,
-    tracking: <Tracking/>, account: <Account/>, onboarding: <OnboardingPage/>,
+    tracking: <Tracking/>, account: <Account/>, onboarding: <OnboardingPage/>, checkout: <Checkout/>,
     notifications: <NotificationCentre onOpen={to => navigate(to)}/>,
   };
   const passengerTitles = {
     '': 'LeRoutier', trips: 'Voyager', tickets: 'Mes billets', stations: 'Gares & arrêts',
     parcels: 'Colis', tracking: 'Suivi', account: 'Mon compte', onboarding: 'Travailler avec LeRoutier',
-    notifications: 'Notifications',
+    checkout: 'Paiement', notifications: 'Notifications',
   };
 
   // ---- Work (driver, independent owner-driver, convoyeur) -------------------
@@ -202,6 +203,10 @@ export default function App() {
   // Screens that need no account at all lead with the task rather than a
   // sign-in card. Authentication is offered at the action that requires it,
   // and from Compte.
-  const fullyPublic = workspace === PASSENGER && (page === '' || (page === 'parcels' && segments[1] === 'track'));
+  // Checkout controls its own auth timing: the sign-in panel appears only
+  // after "Continuer vers le paiement", never before. Search and results are
+  // fully public too — no sign-in card merely because offers exist.
+  const fullyPublic = workspace === PASSENGER && (page === '' || page === 'trips' ||
+    (page === 'parcels' && segments[1] === 'track') || page === 'checkout');
   return shell(<>{!fullyPublic && <SessionPanel/>}{privacySub ? <PrivacyCenter/> : scoped.screens[page]}</>);
 }

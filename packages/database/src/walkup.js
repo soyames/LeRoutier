@@ -70,17 +70,21 @@ export function walkUpBookings(db) {
       // Revenue belongs to the operator, minus the platform commission. The
       // cash amount is the final customer price: the 5% comes out of it and
       // the ledger records gross, commission (deduction) and operator net.
-      const split = splitCommission(input.amountMinor);
-      await settlements.credit(tx, { operatorId: service.operator_id, source: 'walk_up', reference: 'walkup:' + booking.id,
-        grossMinor: split.grossMinor, deductionMinor: split.commissionMinor });
-      // The completed cash sale is also market evidence for its corridor.
-      const od = await one(tx, `SELECT o.stop_id AS origin_stop_id,d.stop_id AS destination_stop_id,op.type AS operator_type
-        FROM service_stops o JOIN service_stops d ON d.service_id=o.service_id AND d.sequence=$3
-        JOIN operators op ON op.id=$2 WHERE o.service_id=$1 AND o.sequence=$4`,
-      [service.id, service.operator_id, input.destination, input.origin]);
-      if (od) await fares.recordTransaction(tx, { operatorId: service.operator_id, originStopId: od.origin_stop_id,
-        destinationStopId: od.destination_stop_id, routeId: service.route_id, fareType: 'passenger', priceMinor: input.amountMinor,
-        operatorType: od.operator_type, sourceReference: 'walkup:' + booking.id, observedAt: new Date().toISOString() });
+      // TEST/demo services are excluded: synthetic sales never move real
+      // settlement ledgers or become market evidence.
+      if (!service.is_demo) {
+        const split = splitCommission(input.amountMinor);
+        await settlements.credit(tx, { operatorId: service.operator_id, source: 'walk_up', reference: 'walkup:' + booking.id,
+          grossMinor: split.grossMinor, deductionMinor: split.commissionMinor });
+        // The completed cash sale is also market evidence for its corridor.
+        const od = await one(tx, `SELECT o.stop_id AS origin_stop_id,d.stop_id AS destination_stop_id,op.type AS operator_type
+          FROM service_stops o JOIN service_stops d ON d.service_id=o.service_id AND d.sequence=$3
+          JOIN operators op ON op.id=$2 WHERE o.service_id=$1 AND o.sequence=$4`,
+        [service.id, service.operator_id, input.destination, input.origin]);
+        if (od) await fares.recordTransaction(tx, { operatorId: service.operator_id, originStopId: od.origin_stop_id,
+          destinationStopId: od.destination_stop_id, routeId: service.route_id, fareType: 'passenger', priceMinor: input.amountMinor,
+          operatorType: od.operator_type, sourceReference: 'walkup:' + booking.id, observedAt: new Date().toISOString() });
+      }
       await audit(tx, actor.id, 'booking.walkup_sold', booking.id, service.operator_id, {
         key, fingerprint, bookingId: booking.id, serviceId: service.id, amountMinor: input.amountMinor, role: actor.role, guestPassengerId: guest.id,
       });

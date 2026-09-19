@@ -30,7 +30,7 @@ export function tracking(db, config = {}) {
    * off rather than the end of the line.
    */
   async function serviceTracking(tx, serviceId, { destinationSequence = null, now = Date.now() } = {}) {
-    const service = await one(tx, `SELECT s.id,s.route_id,s.status,s.current_sequence,s.departure_at,s.arrival_at,s.operator_id
+    const service = await one(tx, `SELECT s.id,s.route_id,s.status,s.current_sequence,s.departure_at,s.arrival_at,s.operator_id,s.is_demo
       FROM services s WHERE s.id=$1`, [serviceId]);
     invariant(service, 'NOT_FOUND', 'Service not found.', 404);
 
@@ -105,6 +105,9 @@ export function tracking(db, config = {}) {
     return {
       serviceId: service.id,
       serviceStatus: service.status,
+      // Synthetic TEST GPS feeds are labelled; they are never mixed with or
+      // presented as real vehicle tracking data.
+      isTest: service.is_demo === true,
       route: hasRoad
         ? { available: true, coordinates, distanceM: stored.distance_m, provider: stored.provider, generatedAt: stored.generated_at }
         // Stated plainly so no surface draws a straight line instead.

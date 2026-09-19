@@ -29,6 +29,8 @@
     "db:seed": "node --env-file=.env.local packages/database/scripts/seed.js",
     "db:status": "node --env-file=.env.local packages/database/scripts/status.js",
     "db:cleanup-tests": "node --env-file=.env.local packages/database/scripts/cleanup-test-schemas.js",
+    "seed:test-transport": "node --env-file=docker/postgres.env packages/database/scripts/seed-test-transport.js",
+    "cleanup:test-transport": "node --env-file=docker/postgres.env packages/database/scripts/cleanup-test-transport.js",
     "db:validate": "node --env-file=.env.local packages/database/scripts/validate.js",
     "db:bootstrap": "node --env-file=.env.local packages/database/scripts/bootstrap.js",
     "secrets:check": "node scripts/check-secrets.mjs",

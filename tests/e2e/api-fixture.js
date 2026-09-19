@@ -4,16 +4,6 @@ const stops=['Cotonou','Bohicon','Dassa-Zoumè','Parakou'].map((city,sequence)=>
 // arrival time / trip duration are exercised like a real service.
 const tomorrow=new Date(Date.now()+86400_000).toISOString().slice(0,10);
 export const DEPARTURE_AT=`${tomorrow}T07:30:00.000Z`, ARRIVAL_AT=`${tomorrow}T13:40:00.000Z`;
-// A planned option for /journey-plan. It departs soon (today) because the
-// planner's results screen filters to the selected day, and it mirrors the
-// API's option shape exactly: service facts, fare, availability, miles.
-const soon=new Date(Date.now()+3600_000);
-export const JOURNEY_OPTION={serviceId:id(30),operatorName:'Opérateur démo',operatorType:'company',routeName:'DEMO Cotonou → Parakou',
-  departureAt:soon.toISOString(),serviceStatus:'scheduled',originSequence:0,destinationSequence:3,
-  pickupStop:{id:id(200),name:'Gare démo',city:'Cotonou'},dropoffStop:{id:id(203),name:'Gare démo',city:'Parakou'},
-  fare:{amountMinor:7500,currency:'XOF'},available:12,feasible:true,firstMile:null,
-  intercity:{durationS:22200,etaAt:new Date(soon.getTime()+22200_000).toISOString()},
-  lastMile:null,totalDurationS:22200,etaAt:new Date(soon.getTime()+22200_000).toISOString()};
 const service={id:id(30),route_name:'DEMO Cotonou → Parakou',operator_name:'Opérateur démo',registration:'DEMO-BUS-01',driver_name:'Conducteur Démo',status:'active',capacity:12,current_sequence:0,departure_at:DEPARTURE_AT,arrival_at:ARRIVAL_AT,departure_point_name:'Godomey – Carrefour',departure_point_landmark:'Au carrefour principal',departure_point_latitude:6.37,departure_point_longitude:2.39,arrival_point_name:'Parakou – Gare centrale',arrival_point_landmark:null,arrival_point_latitude:null,arrival_point_longitude:null,is_demo:true,stops,
   availability:{origin:0,destination:3,available:12,capacity:12,stops,fare:{amountMinor:7500,currency:'XOF'},segments:[0,1,2].map(sequence=>({sequence,available:12,occupied:0}))}};
 // A stretch of RNIE 2 — Cotonou → Abomey-Calavi → Allada → Bohicon →
@@ -23,6 +13,30 @@ const service={id:id(30),route_name:'DEMO Cotonou → Parakou',operator_name:'Op
 export const RNIE2=[[2.4183,6.3654],[2.3899,6.4102],[2.3556,6.4486],[2.2712,6.5521],[2.1511,6.6656],
   [2.1188,6.8402],[2.0876,7.0195],[2.0667,7.1783],[2.1004,7.3925],[2.1562,7.5688],[2.1833,7.7500],
   [2.3402,7.9011],[2.4833,8.0333],[2.5389,8.4127],[2.5901,8.7903],[2.6104,9.0512],[2.6300,9.3370]];
+
+// Planned options for /journey-plan. They depart soon (today) because the
+// planner's results screen filters to the selected day, and they mirror the
+// API's option shape exactly: service facts, vehicle, fare, availability,
+// miles, geometry. One real offer, one structurally-marked TEST offer.
+const soon=new Date(Date.now()+3600_000);
+const INTERMEDIATE=[
+  {sequence:0,stopId:id(200),name:'Gare démo',city:'Cotonou',latitude:6.3654,longitude:2.4183},
+  {sequence:1,stopId:id(201),name:'Gare démo',city:'Bohicon',latitude:7.1783,longitude:2.0667},
+  {sequence:2,stopId:id(202),name:'Gare démo',city:'Dassa-Zoumè',latitude:7.7500,longitude:2.1833},
+  {sequence:3,stopId:id(203),name:'Gare démo',city:'Parakou',latitude:9.3370,longitude:2.6300},
+];
+const baseOption={
+  departureAt:soon.toISOString(),serviceStatus:'scheduled',originSequence:0,destinationSequence:3,
+  pickupStop:{id:id(200),name:'Gare démo',city:'Cotonou',latitude:6.3654,longitude:2.4183},
+  dropoffStop:{id:id(203),name:'Gare démo',city:'Parakou',latitude:9.3370,longitude:2.63},
+  intermediateStops:INTERMEDIATE,routeGeometry:RNIE2,livePosition:null,
+  fare:{amountMinor:7500,currency:'XOF'},capacity:12,feasible:true,firstMile:null,waitingS:0,
+  intercity:{durationS:22200,etaAt:new Date(soon.getTime()+22200_000).toISOString()},
+  lastMile:null,totalDurationS:22200,etaAt:new Date(soon.getTime()+22200_000).toISOString()};
+export const JOURNEY_OPTION={...baseOption,serviceId:id(30),operatorName:'Opérateur démo',operatorType:'company',
+  routeName:'DEMO Cotonou → Parakou',vehicle:{registration:'DEMO-BUS-01',model:'Autocar'},available:12,isTest:false};
+export const TEST_JOURNEY_OPTION={...baseOption,serviceId:id(31),operatorName:'TEST Chauffeur 01',operatorType:'independent',
+  routeName:'TEST Service Cotonou–Parakou',vehicle:{registration:'TEST-001',model:'Toyota Hiace'},available:3,isTest:true};
 
 const TRACKED_STOPS=[['Cotonou',6.3654,2.4183,'passed'],['Bohicon',7.1783,2.0667,'passed'],
   ['Dassa-Zoumè',7.7500,2.1833,'next'],['Parakou',9.3370,2.6300,'upcoming']]
@@ -58,12 +72,19 @@ export async function mockApi(page) {
   await page.route('**/api/v1/places?type=commune',r=>r.fulfill({json:{data:stops.map((s,i)=>({id:id(300+i),name:s.city,kind:'city',parent_id:null,latitude:6.4,longitude:2.4}))}}));
   await page.route('**/api/v1/places?type=department',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/api/v1/services?*',r=>r.fulfill({json:{data:[service]}}));
-  // The geography-backed journey planner answers with one feasible option;
-  // specs that need the empty-catalogue state override this route.
+  // The geography-backed journey planner answers with one real and one TEST
+  // feasible option; specs that need the empty-catalogue state override this.
   await page.route('**/api/v1/journey-plan*',r=>r.fulfill({json:{data:{
-    options:[JOURNEY_OPTION],
+    options:[JOURNEY_OPTION,TEST_JOURNEY_OPTION],
     originResolved:{id:id(200),name:'Gare démo',city:'Cotonou',distanceM:600},
     destinationResolved:null,generatedAt:'2026-09-17T00:00:00Z'}}}));
+  // The checkout flow: hold, then the simulated TEST payment path (no real
+  // provider), then confirmation. The booking id routes to the tickets mock.
+  await page.route('**/api/v1/bookings',r=>r.fulfill({json:{data:{id:id(40),status:'held',amount_minor:7500,currency:'XOF',
+    service_id:id(31),origin_sequence:0,destination_sequence:3,expires_at:new Date(Date.now()+600_000).toISOString()}}}));
+  await page.route('**/api/v1/bookings/*/payments/test',r=>r.fulfill({json:{data:{id:id(90),bookingId:id(40),provider:'demo',
+    provider_reference:'TEST-SIM-00000000',status:'succeeded',amount_minor:7500,currency:'XOF'}}}));
+  await page.route('**/api/v1/bookings/*/confirm',r=>r.fulfill({json:{data:{id:id(40),status:'confirmed'}}}));
   await page.route('**/api/v1/me/bookings',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/api/v1/driver/service',r=>r.fulfill({json:{data:service}}));
   await page.route('**/api/v1/services/*/manifest',r=>r.fulfill({json:{data:[]}}));
