@@ -55,7 +55,6 @@ gate('Live journeys', 'test:live:local', { needs: databaseReady });
 gate('Load, profile and restore drill', 'test:operations', { needs: databaseReady });
 gate('Dependency audit', 'security:audit');
 gate('Secret scan', 'secrets:check');
-gate('Documentation consistency', 'docs:check');
 
 // Production is read-only here and never part of the default gate: a release
 // check must be runnable before the thing it checks has been released.

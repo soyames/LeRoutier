@@ -82,7 +82,7 @@ export function serverConfig(env = process.env) {
       webPushPublicKey: env.WEB_PUSH_PUBLIC_KEY, webPushPrivateKey: env.WEB_PUSH_PRIVATE_KEY,
     },
     // First-mile timing policy: one configurable default, documented in
-    // docs/product/FIRST_LAST_MILE.md, instead of buffers invented per screen.
+    // Keep these defaults centralized instead of inventing buffers per screen.
     firstMile: firstMilePolicy(env),
     // How long a collectable parcel may wait before the receiver is reminded,
     // and then before the station is asked to act. Operators differ; neither
@@ -110,7 +110,7 @@ export function serverConfig(env = process.env) {
       // Whether an MSISDN from a verified callback may be treated as the
       // caller's identity. Opt-in, because only the gateway's own terms can
       // justify it — and even then, USSD reuses an existing account and never
-      // creates one. See docs/architecture/USSD.md.
+      // creates one.
       trustProviderMsisdn: env.USSD_TRUST_PROVIDER_MSISDN === 'true',
     },
     // Road routing engine. Unset means routes simply have no road geometry and

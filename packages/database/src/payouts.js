@@ -10,7 +10,7 @@ const emit = (tx, type, id, payload = {}) => tx.query(
 // ---------------------------------------------------------------------------
 // Driver earnings ledger. Provider-independent; deliberately contains NO
 // commission/revenue split: credits are only created through credit() and
-// the business formula is configured later (see docs/product/DRIVER_EARNINGS.md).
+// the business formula is configured later.
 // ---------------------------------------------------------------------------
 export function earnings(db) {
   async function driverActor(tx, actor) {

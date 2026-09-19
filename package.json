@@ -40,7 +40,6 @@
     "test:operations": "node --env-file=docker/postgres.env scripts/operational-drill.mjs",
     "security:audit": "pnpm audit --prod --audit-level high",
     "test:routing:local": "node --env-file=docker/postgres.env scripts/routing-drill.mjs",
-    "docs:check": "node scripts/check-docs.mjs",
     "ussd:dev": "node --env-file=docker/postgres.env services/ussd/src/simulator.js",
     "auth:verify": "node scripts/verify-auth.mjs",
     "model:verify": "node scripts/verify-model.mjs"

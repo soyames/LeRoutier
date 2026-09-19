@@ -68,6 +68,4 @@ Testing within these limits, reported privately, will not be pursued.
 
 ## Supporting documents
 
-- [`docs/security/SECURITY_MODEL.md`](docs/security/SECURITY_MODEL.md) — controls in place
-- [`docs/security/THREAT_MODEL.md`](docs/security/THREAT_MODEL.md) — actors, assets and threats
-- [`docs/security/PRIVACY_AND_RETENTION.md`](docs/security/PRIVACY_AND_RETENTION.md) — what is stored and for how long
+- Security controls, threat analysis and retention details are maintained privately.
