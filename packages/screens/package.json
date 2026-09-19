@@ -10,7 +10,9 @@
     "./journey": "./src/journey.jsx",
     "./notifications": "./src/notifications.jsx",
     "./map": "./src/map.jsx",
-    "./tracking": "./src/tracking.jsx"
+    "./tracking": "./src/tracking.jsx",
+    "./checkout": "./src/checkout.jsx",
+    "./journey-results": "./src/journey-results.jsx"
   },
   "peerDependencies": {
     "react": "^19.1.1",

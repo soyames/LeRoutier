@@ -48,9 +48,12 @@ test('failed booking never displays success',async({page})=>{
   await page.getByLabel('Ville de départ').fill('Cotonou');await page.getByLabel('Ville de départ').press('Enter');
   await page.getByLabel('Destination').fill('Parakou');await page.getByLabel('Destination').press('Enter');
   await page.getByRole('button',{name:'Rechercher un trajet'}).click();
-  await page.getByRole('button',{name:'Choisir ce trajet'}).click();
+  await page.getByRole('button',{name:'Choisir'}).first().click();
+  await expect(page).toHaveURL(/\/checkout/);
+  // The booking is created only at the payment gate.
+  await page.getByRole('button',{name:'Continuer vers le paiement'}).click();
   await expect(page.getByRole('alert')).toHaveText('No seat is available on every requested segment.');
-  await expect(page).toHaveURL(/\/\?.*from=place/);
+  await expect(page).toHaveURL(/\/checkout/);
 });
 
 test('offline state disables booking actions',async({page,context})=>{
@@ -59,9 +62,10 @@ test('offline state disables booking actions',async({page,context})=>{
   await page.getByLabel('Ville de départ').fill('Cotonou');await page.getByLabel('Ville de départ').press('Enter');
   await page.getByLabel('Destination').fill('Parakou');await page.getByLabel('Destination').press('Enter');
   await page.getByRole('button',{name:'Rechercher un trajet'}).click();
-  await expect(page.getByRole('button',{name:'Choisir ce trajet'})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'Choisir'}).first()).toBeEnabled();
+  await page.getByRole('button',{name:'Choisir'}).first().click();
+  await expect(page.getByRole('button',{name:'Continuer vers le paiement'})).toBeEnabled();
   await context.setOffline(true);
   await expect(page.getByText('Hors ligne — les actions nécessitent une connexion.')).toBeVisible();
-  // The search form itself survives going offline.
-  await expect(page.getByRole('button',{name:'Rechercher un trajet'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Continuer vers le paiement'})).toBeDisabled();
 });

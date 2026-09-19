@@ -85,6 +85,21 @@ async function operatorOf(tx, event) {
   return null;
 }
 
+// TEST inventory must never notify real people on external channels. An event
+// linked to a demo/test service (through the payload or its aggregate id) is
+// confined to the in-app inbox; SMS/WhatsApp/e-mail/push are never attempted.
+async function testService(tx, event, payload) {
+  const ids = [event.aggregate_id, payload.serviceId, payload.bookingId, payload.parcelId,
+    payload.data?.serviceId, payload.data?.bookingId].filter(Boolean);
+  if (!ids.length) return false;
+  const row = await one(tx, `SELECT EXISTS(SELECT 1 FROM services s WHERE s.is_demo AND (
+    s.id=ANY($1::uuid[]) OR s.id IN (SELECT service_id FROM bookings WHERE id=ANY($1::uuid[])) OR
+    s.id IN (SELECT b.service_id FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE p.id=ANY($1::uuid[])) OR
+    s.id IN (SELECT service_id FROM parcel_service_assignments WHERE parcel_id=ANY($1::uuid[])) OR
+    s.id IN (SELECT service_id FROM incidents WHERE id=ANY($1::uuid[])))) AS synthetic`, [ids]);
+  return row?.synthetic === true;
+}
+
 // Content carried to the recipient. Deliberately narrow: identifiers and
 // scheduling facts only. Pickup codes, ticket tokens and another party's
 // contact details are never copied into a notification.
@@ -98,6 +113,9 @@ export function notificationPolicies(db, config = {}) {
   async function dispatchEvent(tx, event) {
     const payload = typeof event.payload === 'string' ? JSON.parse(event.payload) : (event.payload ?? {});
     const normalized = { ...event, payload };
+    const synthetic = await testService(tx, event, payload);
+    const deliveryState = channel => synthetic && channel.channel !== 'in_app'
+      ? { ...channel, status: 'suppressed', detail: 'TEST transport: external delivery suppressed' } : channel;
     // Existing agent/direct sends enter the same inbox and delivery tables.
     if(event.event_type==='notification.send') {
       let recipients=[],template=payload.template??'parcel_update',channels=['in_app'];
@@ -107,6 +125,8 @@ export function notificationPolicies(db, config = {}) {
       } else if(payload.kind==='parcel' && ['sender','receiver'].includes(payload.party)) {
         recipients=await parcelParty(tx,{...event,aggregate_id:payload.parcelId},payload.party);channels=['sms','whatsapp'];
       }
+      // Test-linked events never leave the in-app inbox.
+      if(synthetic) channels=[...new Set(['in_app', ...channels])];
       let created=0;
       for(const recipient of recipients) {
         const inserted=await one(tx,`INSERT INTO notifications(user_id,contact,event_type,category,template,data,source_event_id)
@@ -114,7 +134,7 @@ export function notificationPolicies(db, config = {}) {
         [recipient.userId??null,recipient.contact??null,event.event_type,template,JSON.stringify(safeData(payload.data)),event.id]);
         if(!inserted)continue;created++;
         const preferences=recipient.userId?await rows(tx,'SELECT category,channel,enabled FROM notification_preferences WHERE user_id=$1',[recipient.userId]):[];
-        for(const channel of resolveChannels({policyChannels:channels,availability,category:'operational',preferences})) {
+        for(const channel of resolveChannels({policyChannels:channels,availability,category:'operational',preferences}).map(deliveryState)) {
           if(channel.channel==='in_app' && !recipient.userId)continue;
           await tx.query('INSERT INTO notification_deliveries(notification_id,channel,status,detail) VALUES($1,$2,$3,$4)',[inserted.id,channel.channel,channel.status,channel.detail]);
         }
@@ -137,7 +157,9 @@ export function notificationPolicies(db, config = {}) {
           policy.template, JSON.stringify(safeData(payload)), policy.entity_type, recipient.entityId ?? null, event.id]);
         if (!inserted) continue;
         created++;
-        for (const channel of resolveChannels({ policyChannels: policy.channels, availability, mandatory: policy.mandatory, category: policy.category, preferences })) {
+        // Test-linked events are confined to the in-app inbox.
+        const policyChannels = synthetic ? [...new Set(['in_app', ...policy.channels])] : policy.channels;
+        for (const channel of resolveChannels({ policyChannels, availability, mandatory: policy.mandatory, category: policy.category, preferences }).map(deliveryState)) {
           // A contact without an account has no in-app inbox to read.
           if (channel.channel === 'in_app' && !recipient.userId) continue;
           await tx.query(`INSERT INTO notification_deliveries(notification_id,channel,status,detail) VALUES($1,$2,$3,$4)

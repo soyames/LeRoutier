@@ -5,17 +5,11 @@ import { Card, Badge, SectionTitle, ApiState, ProfileForm, ErrorState, SkeletonC
 import { status, fcfa, time, dayShort, dayLong, dateTime, duration, reference, mapLink, placeLabel } from '@leroutier/ui';
 import { QRCodeSVG } from 'qrcode.react';
 import { Armchair, Ticket, Building2, Navigation, UserRound, ArrowLeftRight, CreditCard, Package, Store, MapPin, QrCode, Search, Lock } from 'lucide-react';
+import { JourneySearchResults } from './journey-results.jsx';
+import { rememberCheckout } from './checkout.jsx';
 
 const isoDay = value => new Date(value).toISOString().slice(0, 10);
 const sameDay = (value, day) => isoDay(value) === day;
-
-// A trip the passenger selected but could not book yet because they were not
-// signed in. Kept for the round trip through the identity provider so they come
-// back to the same trip instead of a generic list.
-const INTENT = 'leroutier:booking-intent';
-const rememberIntent = intent => { try { window.sessionStorage.setItem(INTENT, JSON.stringify(intent)); } catch { /* private mode */ } };
-const readIntent = () => { try { return JSON.parse(window.sessionStorage.getItem(INTENT) || 'null'); } catch { return null; } };
-const clearIntent = () => { try { window.sessionStorage.removeItem(INTENT); } catch { /* private mode */ } };
 
 // Accent-insensitive folding, shared by every geography lookup in this file.
 const foldText = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -158,69 +152,13 @@ function Leg({ city, point, landmark, end = false }) {
   </div>;
 }
 
-// Door-to-destination planning over canonical geography. The passenger's
-// coordinates stay on the device except for one transient request: the API
-// resolves the first mile and never stores or shares the position with
-// operators. A requested destination that is not a LeRoutier stop gets a
-// last mile around the nearest practical drop-off. No model, no Google,
-// no second journey engine.
-function JourneyPlanner({ originMode, originPlace, destinationPlace, destinationStopId = null, day, choose, onEditDate, onEditOrigin, onEditDestination, user, online }) {
-  const [position, setPosition] = useState(null), [geoState, setGeoState] = useState('idle'), [geoError, setGeoError] = useState('');
-  function locate() {
-    setGeoState('asking'); setGeoError('');
-    if (!navigator.geolocation) { setGeoState('denied'); setGeoError('La géolocalisation n’est pas disponible sur cet appareil. Choisissez votre ville de départ.'); return; }
-    navigator.geolocation.getCurrentPosition(
-      pos => { setPosition({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }); setGeoState('granted'); },
-      () => { setGeoState('denied'); setGeoError('Position non disponible. Choisissez votre ville de départ.'); },
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
-  }
-  // `destinationStopId` only serves legacy stop-id deep links; new searches
-  // carry geography place ids.
-  const destinationKey = destinationStopId ? `destinationStopId=${destinationStopId}` : `destinationPlaceId=${destinationPlace}`;
-  const planUrl = position
-    ? `/journey-plan?lat=${position.latitude}&lon=${position.longitude}&${destinationKey}`
-    : originMode === 'place' && originPlace
-      ? `/journey-plan?originPlaceId=${originPlace}&${destinationKey}`
-      : null;
-  const plan = useApi(planUrl);
-  const options = (plan.data?.options || []).filter(o => !day || sameDay(o.departureAt, day));
-  const feasible = options.filter(o => o.feasible);
-  return <div className="stack">
-    {originMode === 'current' && position === null && <div className="controls">
-      <button className="btn btn-primary" disabled={geoState === 'asking'} onClick={locate}>
-        {geoState === 'asking' ? 'Localisation en cours…' : 'Utiliser ma position actuelle'}</button>
-      {geoError && <p className="small muted" role="status">{geoError}</p>}
-    </div>}
-    {planUrl && (plan.loading ? <p role="status">Recherche des départs accessibles…</p>
-      : plan.error ? <ErrorState text="Impossible de calculer votre trajet pour le moment." onRetry={plan.reload}/>
-        : !feasible.length ? <Card className="stack"><strong>Aucun départ disponible pour cet itinéraire pour le moment.</strong>
-          <p className="small muted">Ce trajet n’est pas encore desservi. Vous pouvez modifier la date, le départ ou la destination — votre recherche reste affichée.</p>
-          <div className="controls">
-            <button className="btn btn-soft" onClick={onEditDate}>Modifier la date</button>
-            <button className="btn btn-soft" onClick={onEditOrigin}>Modifier le départ</button>
-            <button className="btn btn-soft" onClick={onEditDestination}>Modifier la destination</button>
-          </div>
-        </Card>
-          : feasible.map(o => <Card key={o.serviceId + o.originSequence} className="trip-card">
-            <div className="between wrap"><div><strong>{o.operatorName}</strong><span className="small muted"> · {o.routeName}</span></div>
-              <Badge tone={o.available > 2 ? 'success' : o.available ? 'warning' : 'danger'}>
-                <Armchair size={13}/>{o.available ? `${o.available} place${o.available > 1 ? 's' : ''}` : 'Complet'}</Badge></div>
-            <div className="stack">
-              {o.firstMile && <Leg city={o.pickupStop.city} point={`${Math.round(o.firstMile.distanceM / 1000 * 10) / 10} km à pied jusqu’à ${o.pickupStop.name}`} landmark="Premier kilomètre — transport local non inclus"/>}
-              <Leg city={`${time(o.departureAt)} · ${o.pickupStop.city} → ${o.dropoffStop.city}`} point="Trajet LeRoutier" landmark={`Arrivée estimée ${time(o.etaAt)} · ${fcfa(o.fare.amountMinor)}`} end={!o.lastMile}/>
-              {o.lastMile && <Leg city={o.dropoffStop.city} point={`${Math.round(o.lastMile.distanceM / 1000 * 10) / 10} km à pied`} landmark="Dernier kilomètre — transport local non inclus" end/>}
-            </div>
-            <div className="trip-foot"><div><span className="trip-price">{fcfa(o.fare.amountMinor)}</span><span className="small muted"> · prix final, transport local non inclus</span></div>
-              <button className="btn btn-primary" disabled={!o.available || user?.needs_profile || !online} onClick={() => choose(o)}>
-                {!user ? 'Se connecter pour réserver' : user.needs_profile ? 'Complétez votre profil' : 'Choisir ce trajet'}</button></div>
-          </Card>))}
-  </div>;
-}
+// The results experience (offer comparison, detail and map) lives in
+// journey-results.jsx; the geolocation state stays here so the map can draw
+// the requested origin for both current-position and place searches.
 
 const IS_UUID = v => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v ?? '');
 
 export function Trips() {
-  const { user, request, online, login, canSignin } = useSession();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   // A search started on the home page continues here unchanged. New links
@@ -232,10 +170,26 @@ export function Trips() {
   const [destinationPlace, setDestinationPlace] = useState(() => toParam.startsWith('place:') ? toParam.slice(6) : null);
   const [day, setDay] = useState(() => { const p = params.get('date') || ''; return p >= isoDay(Date.now()) ? p : isoDay(Date.now()); });
   const [searched, setSearched] = useState(() => Boolean(toParam));
-  const [error, setError] = useState('');
-  const keys = useRef(new Map());
   const legacyStops = IS_UUID(fromParam) && IS_UUID(toParam);
   const legacyStopDest = IS_UUID(toParam);
+  // Geolocation is requested only when the search needs it; the position is
+  // transient and never stored. The canonical geography supplies place names
+  // and coordinates for the summary and the map.
+  const [position, setPosition] = useState(null), [geoState, setGeoState] = useState('idle'), [geoError, setGeoError] = useState('');
+  const places = useApi('/places?type=commune');
+  function locate() {
+    setGeoState('asking'); setGeoError('');
+    if (!navigator.geolocation) { setGeoState('denied'); setGeoError('La géolocalisation n’est pas disponible sur cet appareil. Choisissez votre ville de départ.'); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => { setPosition({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }); setGeoState('granted'); },
+      () => { setGeoState('denied'); setGeoError('Position non disponible. Choisissez votre ville de départ.'); },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
+  }
+  const placeById = id => (places.data || []).find(p => p.id === id) ?? null;
+  const originPlaceRow = placeById(originPlace);
+  const destinationPlaceRow = placeById(destinationPlace);
+  const originPoint = (originMode === 'current' ? position : null) ?? (originPlaceRow ? { latitude: Number(originPlaceRow.latitude), longitude: Number(originPlaceRow.longitude), label: originPlaceRow.name } : null);
+  const destinationPoint = destinationPlaceRow ? { latitude: Number(destinationPlaceRow.latitude), longitude: Number(destinationPlaceRow.longitude), label: destinationPlaceRow.name } : null;
 
   function swap() {
     if (originMode === 'place' && originPlace) { setOriginPlace(destinationPlace); setDestinationPlace(originPlace); }
@@ -244,6 +198,7 @@ export function Trips() {
   function search(e) {
     e.preventDefault();
     const next = new URLSearchParams({ date: day });
+    if (params.get('testMode') === '1') next.set('testMode', '1');
     next.set('from', originMode === 'current' ? 'my-location' : `place:${originPlace}`);
     next.set('to', `place:${destinationPlace}`);
     setParams(next);
@@ -265,43 +220,38 @@ export function Trips() {
     requestAnimationFrame(() => focusField('trip-destination'));
   };
 
-  // Sign-in appears exactly when the action needs an account, and the chosen
-  // trip is preserved across it.
-  async function chooseOption(option) {
-    if (!user) {
-      rememberIntent({ serviceId: option.serviceId, origin: option.originSequence, destination: option.destinationSequence });
-      if (!canSignin) { setError('La connexion sécurisée n’est pas encore configurée. Réessayez plus tard.'); return; }
-      setError('');
-      try { await login(); } catch (e) { setError(e.message); }
-      return;
-    }
-    if (user.needs_profile) { setError('Complétez votre profil avant de réserver.'); return; }
-    await hold(option.serviceId, option.originSequence, option.destinationSequence);
+  // Selecting an offer does NOT authenticate. It creates an anonymous
+  // checkout intent and moves to /checkout; authentication begins only on
+  // "Continuer vers le paiement".
+  function choose(option) {
+    rememberCheckout({
+      serviceId: option.serviceId, originSequence: option.originSequence, destinationSequence: option.destinationSequence,
+      option,
+      originLabel: originPlaceRow?.name ?? option.pickupStop?.city ?? null,
+      destinationLabel: destinationPlaceRow?.name ?? option.dropoffStop?.city ?? null,
+      search: { from: fromParam, to: toParam, date: day, testMode: params.get('testMode') === '1' },
+    });
+    navigate('/checkout');
   }
-
-  async function hold(serviceId, from_, to_) {
-    const identity = [serviceId, from_, to_].join(':');
-    if (!keys.current.has(identity)) keys.current.set(identity, crypto.randomUUID());
-    setError('');
-    try {
-      const booking = await request('/bookings', { method: 'POST', key: keys.current.get(identity), body: { serviceId, origin: from_, destination: to_ } });
-      keys.current.delete(identity); clearIntent();
-      navigate(`/tickets/${booking.id}`);
-    } catch (e) { setError(e.message); }
-  }
-
-  // Resume the trip the passenger picked before signing in.
-  const resumed = useRef(false);
-  useEffect(() => {
-    if (!user || user.needs_profile || resumed.current) return;
-    const intent = readIntent();
-    if (!intent?.serviceId) return;
-    resumed.current = true; clearIntent();
-    hold(intent.serviceId, intent.origin, intent.destination);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
-
-  const pending = !!readIntent() && !user;
+  // The legacy stop-id list speaks service rows; its offers are shaped into
+  // the same option form the checkout understands.
+  const legacyOption = s => {
+    const a = s.availability, seats = a.available;
+    return {
+      serviceId: s.id, originSequence: a.origin, destinationSequence: a.destination,
+      operatorName: s.operator_name, operatorType: s.operator_type ?? 'company', routeName: s.route_name,
+      departureAt: s.departure_at, serviceStatus: s.status,
+      pickupStop: { name: s.departure_point_name ?? 'Point de prise en charge', city: a.stops[a.origin]?.city },
+      dropoffStop: { name: s.arrival_point_name ?? 'Point de descente', city: a.stops[a.destination]?.city },
+      vehicle: { registration: s.registration ?? null, model: null },
+      intermediateStops: (a.stops ?? []).slice(a.origin, a.destination + 1).map((st, i) => ({ sequence: a.origin + i, city: st.city })),
+      routeGeometry: null, livePosition: null,
+      fare: { amountMinor: a.fare.amountMinor, currency: a.fare.currency },
+      available: seats, capacity: a.capacity ?? seats, feasible: seats > 0,
+      firstMile: null, waitingS: 0, intercity: { durationS: null, etaAt: s.arrival_at }, lastMile: null,
+      totalDurationS: null, etaAt: s.arrival_at, isTest: s.is_demo === true,
+    };
+  };
 
   return <>
     <Card className="hero stack">
@@ -322,23 +272,21 @@ export function Trips() {
 
     {searched && (destinationPlace || legacyStopDest) && (legacyStops
       ? <LegacyServiceList originStopId={fromParam} destinationStopId={toParam} day={day}
-          choose={s => chooseOption({ serviceId: s.id, originSequence: s.availability.origin, destinationSequence: s.availability.destination })}/>
-      : <JourneyPlanner originMode={originMode} originPlace={originPlace}
+          choose={s => choose(legacyOption(s))}/>
+      : <JourneySearchResults originMode={originMode} originPlace={originPlace}
           destinationPlace={destinationPlace} destinationStopId={legacyStopDest ? toParam : null}
-          day={day} choose={o => chooseOption(o)} user={user} online={online}
-          onEditDate={editDate} onEditOrigin={editOrigin} onEditDestination={editDestination}/>)}
-
-    {pending && <Card className="stack"><strong>Connectez-vous pour continuer votre réservation</strong>
-      <p className="small muted">Votre trajet est conservé — vous reviendrez directement ici.</p></Card>}
-    {error && <ErrorState title="Réservation impossible" text={error}/>}
+          day={day} choose={choose}
+          onEditDate={editDate} onEditOrigin={editOrigin} onEditDestination={editDestination}
+          originPoint={originPoint} destinationPoint={destinationPoint}
+          position={position} geoState={geoState} geoError={geoError} onLocate={locate}/>)}
   </>;
 }
 
 // Legacy renderer for stop-id deep links: the service list of the previous
-// search model, kept for links already in circulation.
+// search model, kept for links already in circulation. Selection leads to
+// the anonymous checkout like every other offer.
 function LegacyServiceList({ originStopId, destinationStopId, day, choose }) {
-  const { user, online } = useSession();
-  const [busy, setBusy] = useState('');
+  const { online } = useSession();
   const [anyDay, setAnyDay] = useState(false);
   const services = useApi(`/services?originStopId=${originStopId}&destinationStopId=${destinationStopId}`);
   const all = services.data || [];
@@ -378,9 +326,9 @@ function LegacyServiceList({ originStopId, destinationStopId, day, choose }) {
                 </div>
                 <div className="end">
                   <span className="trip-price">{fcfa(a.fare.amountMinor)}</span>
-                  <button className="btn btn-primary" disabled={user?.needs_profile || !online || !!busy || !seats} onClick={async () => { setBusy(service.id); await choose(service); setBusy(''); }}>
-                    {busy === service.id ? 'Réservation…' : !user ? 'Se connecter pour réserver' : user.needs_profile ? 'Complétez votre profil' : 'Choisir ce trajet'}
-                  </button>
+                  {service.is_demo && <Badge tone="danger">TEST</Badge>}
+                  {/* No login at selection: choosing opens the anonymous checkout. */}
+                  <button className="btn btn-primary" disabled={!online || !seats} onClick={() => choose(service)}>Choisir</button>
                 </div>
               </div>
             </Card>;

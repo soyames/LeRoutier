@@ -11,7 +11,7 @@ test('anonymous passenger searches without login and never sees cash',async({pag
   await mockApi(page);
   await page.goto(STOP_LINK);
   await expect(page.getByText('Opérateur démo')).toBeVisible();
-  await expect(page.getByRole('button',{name:'Se connecter pour réserver'})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'Choisir'}).first()).toBeEnabled();
   await expect(page.getByText(/espèces/i)).toHaveCount(0);
 });
 
@@ -36,7 +36,7 @@ test('a date with no departure falls forward instead of dead-ending',async({page
   // The fixture departs tomorrow, so today's default finds nothing and the
   // screen offers the next departures rather than an empty list.
   await expect(page.getByText(/voici les prochains départs/i)).toBeVisible();
-  await expect(page.getByRole('button',{name:'Choisir ce trajet'}).or(page.getByRole('button',{name:'Se connecter pour réserver'})).first()).toBeVisible();
+  await expect(page.getByRole('button',{name:'Choisir'}).first()).toBeVisible();
 });
 
 test('search can be swapped and dated',async({page})=>{

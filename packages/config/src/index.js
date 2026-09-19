@@ -48,6 +48,10 @@ export function serverConfig(env = process.env) {
     production: env.NODE_ENV === 'production' || env.VERCEL === '1',
     // Destructive retention execution is opt-in; the default scan is a dry run.
     retentionExecute: env.RETENTION_EXECUTE === 'true',
+    // Synthetic TEST transport inventory. When false (production default),
+    // test offers are only reachable by designated is_demo test identities.
+    // Local development, CI and previews may set ALLOW_TEST_INVENTORY=true.
+    allowTestInventory: env.ALLOW_TEST_INVENTORY === 'true' && env.NODE_ENV !== 'production' && env.VERCEL !== '1' && env.VERCEL_ENV !== 'production',
     ...authConfig(env),
     corsOrigins: (env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
     // Server-only payment configuration. FEDAPAY_ENVIRONMENT must be 'sandbox' or 'live';

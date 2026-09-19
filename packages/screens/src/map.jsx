@@ -105,3 +105,85 @@ export default function TransportMap({
     </MapContainer>
   </div>;
 }
+
+// ---------------------------------------------------------------------------
+// The journey-plan map: a complete door-to-destination offer on one map.
+//
+//   requested origin ──· · · · ──▶ pickup stop ───▶ intercity (road geometry)
+//   ───▶ drop-off stop ──· · · · ──▶ requested destination
+//
+// First and last mile are walking estimates (dashed, labelled); the intercity
+// line is real road geometry from the routing engine — a straight line is
+// never drawn as if it were a road. A vehicle position appears only when GPS
+// data exists, labelled live or "last known" exactly as the API reports it.
+
+const MILE_DONE = '#059669', MILE_AHEAD = '#d97706', INTERCITY = '#0f172a', ORIGIN = '#d97706', DESTINATION = '#059669';
+
+/** A passenger's requested origin/destination (place or current position). */
+const pin = label => L.divIcon({ className: 'lr-vehicle-marker', html: `<span role="img" aria-label="${escapeHtml(label)}"></span>`,
+  iconSize: [22, 22], iconAnchor: [11, 11] });
+
+/**
+ * @param {{
+ *  option: any,
+ *  originPoint?: { latitude: number, longitude: number, label?: string } | null,
+ *  destinationPoint?: { latitude: number, longitude: number, label?: string } | null,
+ *  height?: number, ariaLabel?: string,
+ * }} props
+ */
+export function JourneyPlanMap({ option = null, originPoint = null, destinationPoint = null, height = 380, ariaLabel = 'Carte du trajet complet' }) {
+  const tiles = tileLayer(false);
+  const miles = [];
+  let intercity = [];
+  const markers = [];
+  if (option?.firstMile && originPoint && option.pickupStop && Number.isFinite(option.pickupStop.latitude)) {
+    miles.push({ key: 'first', points: [[originPoint.latitude, originPoint.longitude], [option.pickupStop.latitude, option.pickupStop.longitude]] });
+  }
+  if (option?.lastMile && destinationPoint && option.dropoffStop && Number.isFinite(option.dropoffStop.latitude)) {
+    miles.push({ key: 'last', points: [[option.dropoffStop.latitude, option.dropoffStop.longitude], [destinationPoint.latitude, destinationPoint.longitude]] });
+  }
+  if (Array.isArray(option?.routeGeometry) && option.routeGeometry.length >= 2) {
+    intercity = option.routeGeometry.map(([lon, lat]) => [lat, lon]);
+  }
+  for (const stop of (option?.intermediateStops ?? [])) {
+    if (Number.isFinite(stop.latitude)) markers.push({ ...stop, kind: 'stop' });
+  }
+  if (option?.pickupStop && Number.isFinite(option.pickupStop.latitude)) markers.push({ ...option.pickupStop, kind: 'pickup', latitude: option.pickupStop.latitude });
+  if (option?.dropoffStop && Number.isFinite(option.dropoffStop.latitude)) markers.push({ ...option.dropoffStop, kind: 'dropoff', latitude: option.dropoffStop.latitude });
+  if (option?.livePosition && Number.isFinite(option.livePosition.latitude)) markers.push({ ...option.livePosition, kind: 'vehicle' });
+
+  const all = [...intercity, ...miles.flatMap(m => m.points), ...markers.map(m => [m.latitude, m.longitude])];
+  const bounds = all.length >= 2 ? /** @type {[number, number][]} */ (all) : null;
+  const centre = option?.livePosition ? /** @type {[number, number]} */ ([option.livePosition.latitude, option.livePosition.longitude]) : null;
+
+  return <div className="lr-map" style={{ height }} role="region" aria-label={ariaLabel}>
+    <MapContainer center={/** @type {[number, number]} */ (centre ?? BENIN_CENTRE)} zoom={centre ? 11 : BENIN_DEFAULT_ZOOM}
+      scrollWheelZoom={false} style={{ height: '100%', width: '100%' }}>
+      {tiles.url && <TileLayer url={tiles.url} attribution={tiles.attribution} maxZoom={tiles.maxZoom}/>}
+      <Frame bounds={bounds} centre={centre}/>
+
+      {miles.map(m => <Polyline key={m.key} positions={m.points} dashArray="6 8"
+        pathOptions={{ color: m.key === 'first' ? MILE_DONE : MILE_AHEAD, weight: 3, opacity: 0.9 }}/>)}
+      {intercity.length >= 2 && <Polyline positions={intercity} pathOptions={{ color: INTERCITY, weight: 5, opacity: 0.85 }}/>}
+
+      {originPoint && Number.isFinite(originPoint.latitude) &&
+        <Marker keyboard={false} position={[originPoint.latitude, originPoint.longitude]} icon={pin(originPoint.label ?? 'Départ')}>
+          <Tooltip direction="top">{originPoint.label ?? 'Départ'}</Tooltip></Marker>}
+      {destinationPoint && Number.isFinite(destinationPoint.latitude) &&
+        <Marker keyboard={false} position={[destinationPoint.latitude, destinationPoint.longitude]} icon={pin(destinationPoint.label ?? 'Destination')}>
+          <Tooltip direction="top">{destinationPoint.label ?? 'Destination'}</Tooltip></Marker>}
+
+      {markers.map((m, i) => <CircleMarker key={m.kind + '-' + i} center={[m.latitude, m.longitude]}
+        radius={m.kind === 'vehicle' ? 8 : m.kind === 'pickup' || m.kind === 'dropoff' ? 7 : 5}
+        pathOptions={{ color: '#fff', weight: 2,
+          fillColor: m.kind === 'vehicle' ? ORIGIN : m.kind === 'pickup' ? '#0f172a' : m.kind === 'dropoff' ? DESTINATION : '#64748b', fillOpacity: 1 }}>
+        <Tooltip direction="top">
+          {option.isTest && <strong>TEST ? </strong>}
+          {m.kind === 'vehicle'
+            ? (m.signal === 'live' ? 'En direct' : 'Dernière position connue')
+            : m.kind === 'pickup' ? `Montée · ${m.name ?? m.city}` : m.kind === 'dropoff' ? `Descente · ${m.name ?? m.city}` : (m.city ?? m.name)}
+        </Tooltip>
+      </CircleMarker>)}
+    </MapContainer>
+  </div>;
+}

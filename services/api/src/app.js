@@ -194,6 +194,11 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     // Authenticated traffic is metered per identity further down.
     const meterAnonymous=()=>limited('public-catalogue:'+((req.headers.get('x-forwarded-for')||'').split(',')[0].trim()||'local'));
     if(method==='GET' && ['/stops','/places','/routes','/services'].includes(path)) await meterAnonymous();
+    const testInventoryVisible = async () => {
+      if (url.searchParams.get('testMode') !== '1') return false;
+      const tester = await auth.authenticate(req).catch(() => null);
+      return (config.allowTestInventory === true && !config.production) || tester?.is_demo === true;
+    };
     // Door-to-destination journey planning over the existing service domain.
     // The passenger's exact current coordinates are transient: used only to
     // resolve the first mile, never stored and never exposed to operators.
@@ -212,17 +217,24 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       // "no origin/destination" — the caller must know the id was wrong.
       invariant(!originPlaceId || originPlace, 'INVALID_JOURNEY', 'Origin place is unknown.', 404);
       invariant(!destinationPlaceId || destinationPlace, 'INVALID_JOURNEY', 'Destination place is unknown.', 404);
+      // Test mode: the synthetic TEST inventory is opt-in and authorized. A
+      // query parameter alone never exposes it — the session must also be a
+      // designated test identity, or the deployment must allow test
+      // inventory explicitly (local, CI, preview).
+      const includeDemo = await testInventoryVisible();
       return planner.plan({
         originStopId: originPlace ? null : q.get('originStopId'), origin: origin ?? (originPlace ? { latitude: Number(originPlace.latitude), longitude: Number(originPlace.longitude) } : null),
         destinationStopId: destinationPlace ? null : q.get('destinationStopId'),
         destination: q.has('destLat') && q.has('destLon') ? { latitude: Number(q.get('destLat')), longitude: Number(q.get('destLon')) } : (destinationPlace ? { latitude: Number(destinationPlace.latitude), longitude: Number(destinationPlace.longitude) } : null),
         departureAt: q.get('departureAt'),
+        includeDemo,
       });
     }
     if(method==='GET' && path==='/stops') {
       const search=(url.searchParams.get('q') || '').slice(0,100);
       return list(`SELECT s.*,p.name AS city FROM stops s JOIN places p ON p.id=s.place_id
-        WHERE s.name ILIKE $1 OR p.name ILIKE $1 ORDER BY p.name,s.name LIMIT 100`,['%'+search+'%']);
+        WHERE (s.name ILIKE $1 OR p.name ILIKE $1) AND (NOT s.is_demo OR $2)
+        ORDER BY p.name,s.name LIMIT 100`,['%'+search+'%', await testInventoryVisible()]);
     }
     // Canonical Benin geography: search across names, normalized names and
     // common spelling aliases; `type` filters (department, commune rows —
@@ -243,11 +255,14 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
         WHERE ${kindFilter} ORDER BY name LIMIT 200`);
     }
     if(method==='GET' && path==='/routes') return list(`SELECT r.*,coalesce((SELECT json_agg(json_build_object('sequence',rs.sequence,'stopId',s.id,'name',s.name,'city',p.name) ORDER BY rs.sequence)
-      FROM route_stops rs JOIN stops s ON s.id=rs.stop_id JOIN places p ON p.id=s.place_id WHERE rs.route_id=r.id),'[]') AS stops FROM routes r WHERE active=true ORDER BY name`);
+      FROM route_stops rs JOIN stops s ON s.id=rs.stop_id JOIN places p ON p.id=s.place_id
+      WHERE rs.route_id=r.id AND (NOT s.is_demo OR $1)),'[]') AS stops
+      FROM routes r WHERE active=true AND (NOT r.is_demo OR $1) ORDER BY name`, [await testInventoryVisible()]);
     // The same search the USSD channel runs. One query, one answer to
     // "is there a seat?", whichever client is asking.
     if(method==='GET' && path==='/services') {
-      return domain.search({originStopId:url.searchParams.get('originStopId'),destinationStopId:url.searchParams.get('destinationStopId')});
+      const includeDemo = await testInventoryVisible();
+      return domain.search({originStopId:url.searchParams.get('originStopId'),destinationStopId:url.searchParams.get('destinationStopId'),includeDemo});
     }
     const available=path.match(/^\/services\/([^/]+)\/availability$/);
     // Metered after validation: rejecting a malformed identifier must stay free,
@@ -255,6 +270,11 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='GET' && available) {
       const serviceId=uuid(available[1]);
       await meterAnonymous();
+      const testService = (await list('SELECT is_demo FROM services WHERE id=$1', [serviceId]))[0];
+      if (testService?.is_demo) {
+        const tester = await auth.authenticate(req).catch(()=>null);
+        invariant(url.searchParams.get('testMode') === '1' && ((config.allowTestInventory === true && !config.production) || tester?.is_demo === true), 'NOT_FOUND', 'Service not found.', 404);
+      }
       return domain.availability(serviceId,Number(url.searchParams.get('origin')),Number(url.searchParams.get('destination')));
     }
     // The Assistant is role-aware: anonymous callers get the public surface
@@ -450,6 +470,18 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     }
     const reconcile=path.match(/^\/payments\/([^/]+)\/reconcile$/);
     if(method==='POST' && reconcile)return pay.reconcile(actor,uuid(reconcile[1]));
+    // Simulated payment for TEST bookings. The bypass is strictly tied to
+    // authorized test inventory: the deployment must allow test inventory or
+    // the session must be a designated test identity. No real provider is
+    // contacted and no settlement is credited.
+    const testPayment=path.match(/^\/bookings\/([^/]+)\/payments\/test$/);
+    if(method==='POST' && testPayment) {
+      const id=uuid(testPayment[1]);
+      invariant((config.allowTestInventory===true && !config.production) || actor?.is_demo===true,
+        'FORBIDDEN','Test payment is only available in test mode.',403);
+      await limited('test-payment:'+actor.id);
+      return domain.simulatedTestPayment(actor,id,req.headers.get('idempotency-key'), { allowTestInventory: config.allowTestInventory === true && !config.production });
+    }
     if(method==='PATCH' && path==='/me') return updateProfile(db,actor,await body());
     // ---- privacy, consent, data rights --------------------------------------
     if(method==='GET' && path==='/me/privacy') return privacy.summary(actor);

@@ -87,6 +87,25 @@ test('journey-plan resolves place ids to coordinates and answers honestly on an 
   assert.equal(missing.status,404);
 });
 
+test('a query parameter alone never exposes test inventory; an authorized deployment may',async()=>{
+  const pid=nodeCrypto.randomUUID();
+  const stub={transaction:async fn=>fn({query:async(sql,params)=>{
+    if(/FROM places WHERE id=\$1 AND latitude IS NOT NULL/.test(sql)) return {rows:[{id:params[0],name:'Cotonou',kind:'city',latitude:'6.37',longitude:'2.39'}]};
+    return {rows:[]};
+  }})};
+  const api=createApi(stub,config);
+  const r=await api(new Request(`http://localhost/api/v1/journey-plan?originPlaceId=${pid}&destinationPlaceId=${pid}&testMode=1`));
+  assert.equal(r.status,200);
+  assert.equal((await r.json()).data.includeDemo,false,'an anonymous query parameter must not expose TEST inventory');
+  // An explicitly authorized deployment (local, CI, preview) may.
+  const open=createApi(stub,{...config,allowTestInventory:true});
+  const r2=await open(new Request(`http://localhost/api/v1/journey-plan?originPlaceId=${pid}&destinationPlaceId=${pid}&testMode=1`));
+  assert.equal((await r2.json()).data.includeDemo,true,'the authorized deployment sees TEST inventory on request');
+  // And without testMode, even the authorized deployment stays honest.
+  const r3=await open(new Request(`http://localhost/api/v1/journey-plan?originPlaceId=${pid}&destinationPlaceId=${pid}`));
+  assert.equal((await r3.json()).data.includeDemo,false);
+});
+
 // ------------------------------------------------------------------ USSD ----
 // The gateway callback is the one public endpoint that mutates. These tests
 // guard the door; the journeys behind it live in the database suite.

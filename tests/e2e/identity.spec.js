@@ -45,15 +45,19 @@ test('a new passenger is asked to complete their profile before booking', async 
   await mockApi(page);
   await signInAs(me({ role: 'passenger', needs_profile: true, display_name: '' }))(page);
   await page.goto(APP + '/trips');
-  await login(page);
+  // Search and selection are anonymous-safe: no sign-in anywhere first.
+  await expect(page.getByText('Bienvenue sur LeRoutier')).toHaveCount(0);
   await page.getByLabel('Départ', { exact: true }).selectOption('place');
   await page.getByLabel('Ville de départ').click(); await page.getByLabel('Ville de départ').fill('Cotonou'); await page.getByLabel('Ville de départ').press('Enter');
   await page.getByLabel('Destination').click(); await page.getByLabel('Destination').fill('Parakou'); await page.getByLabel('Destination').press('Enter');
   await page.getByRole('button', { name: 'Rechercher un trajet' }).click();
-  // The trip cannot be taken until the profile exists, and the button says why.
-  await expect(page.getByRole('button', { name: 'Complétez votre profil' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Complétez votre profil' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Choisir' }).first().click();
+  await expect(page).toHaveURL(/\/checkout/);
+  await page.getByRole('button', { name: 'Continuer vers le paiement' }).click();
+  // The one authentication gate, then the inline profile step.
+  await login(page);
   await expect(page.getByRole('heading', { name: 'Complétez votre profil' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Enregistrer mon profil' })).toBeVisible();
 });
 
 test('a disabled account is explained in product language, not API language', async ({ page }) => {

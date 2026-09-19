@@ -43,16 +43,20 @@ export function payments(db,adapter=null){
         // The customer paid the final price: the operator settlement credits
         // gross minus commission, and the transaction becomes market evidence.
         // Both are idempotent per payment, so a replayed webhook changes nothing.
-        const split=splitCommission(event.amountMinor);
-        await settlements.credit(tx,{operatorId:s.operator_id,source:'ticket_online',reference:'payment:'+p.id,
-          grossMinor:split.grossMinor,deductionMinor:split.commissionMinor});
-        const od=await one(tx,`SELECT o.stop_id AS origin_stop_id,d.stop_id AS destination_stop_id,op.type AS operator_type
-          FROM service_stops o JOIN service_stops d ON d.service_id=o.service_id AND d.sequence=$3
-          JOIN operators op ON op.id=$2
-          WHERE o.service_id=$1 AND o.sequence=$4`, [b.service_id,s.operator_id,b.destination_sequence,b.origin_sequence]);
-        if(od) await fares.recordTransaction(tx,{operatorId:s.operator_id,originStopId:od.origin_stop_id,destinationStopId:od.destination_stop_id,
-          routeId:s.route_id,fareType:'passenger',priceMinor:event.amountMinor,operatorType:od.operator_type,
-          sourceReference:'payment:'+p.id,observedAt:new Date().toISOString()});
+        // TEST/demo services never enter real financial settlement or market
+        // observations: synthetic money must not move real ledgers.
+        if(!s.is_demo) {
+          const split=splitCommission(event.amountMinor);
+          await settlements.credit(tx,{operatorId:s.operator_id,source:'ticket_online',reference:'payment:'+p.id,
+            grossMinor:split.grossMinor,deductionMinor:split.commissionMinor});
+          const od=await one(tx,`SELECT o.stop_id AS origin_stop_id,d.stop_id AS destination_stop_id,op.type AS operator_type
+            FROM service_stops o JOIN service_stops d ON d.service_id=o.service_id AND d.sequence=$3
+            JOIN operators op ON op.id=$2
+            WHERE o.service_id=$1 AND o.sequence=$4`, [b.service_id,s.operator_id,b.destination_sequence,b.origin_sequence]);
+          if(od) await fares.recordTransaction(tx,{operatorId:s.operator_id,originStopId:od.origin_stop_id,destinationStopId:od.destination_stop_id,
+            routeId:s.route_id,fareType:'passenger',priceMinor:event.amountMinor,operatorType:od.operator_type,
+            sourceReference:'payment:'+p.id,observedAt:new Date().toISOString()});
+        }
       }
       if(event.status==='refunded'){
         if(['held','confirmed'].includes(b.status))await transport(nested(tx)).transition({id:b.passenger_id,role:'passenger'},b.id,'cancel');
@@ -75,6 +79,7 @@ export function payments(db,adapter=null){
       const p=await db.transaction(async tx=>{
         await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',['intent:'+actor.id+key]);
         const b=await transport(nested(tx)).booking(actor,id),s=await one(tx,'SELECT * FROM services WHERE id=$1',[b.service_id]);
+        invariant(s.is_demo === false, 'FORBIDDEN', 'Les trajets TEST utilisent uniquement le paiement simulé.', 403);
         const storedKey='intent:'+actor.id+':'+key,prior=await one(tx,'SELECT * FROM payments WHERE idempotency_key=$1',[storedKey]);
         if(prior){invariant(prior.booking_id===id,'IDEMPOTENCY_CONFLICT','Key belongs to another booking.',409);return prior;}
         invariant(b.status==='held' && ['scheduled','active'].includes(s.status) && b.origin_sequence>=s.current_sequence && (s.status==='active' || new Date(s.departure_at)>new Date()),'INVALID_PAYMENT','An active payable hold is required.',409);
