@@ -44,24 +44,26 @@ function arrivalLine(eta) {
 }
 
 /**
- * @param {{ bookingId: string, pollMs?: number }} props
+ * @param {{ bookingId?: string, serviceId?: string, pollMs?: number }} props
  * Polling, not sockets: the API runs as serverless functions on Vercel, where a
  * long-lived connection per passenger has no natural home. A short interval
  * while the screen is open is sufficient for a bus and costs far less. The
  * transport is isolated here, so a streaming upgrade later touches this file.
  */
-export function JourneyTracking({ bookingId, pollMs = 20_000 }) {
+export function JourneyTracking({ bookingId, serviceId, pollMs = 20_000 }) {
   const { request } = useSession();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!bookingId) return;
+    if (!bookingId && !serviceId) return;
     let cancelled = false, timer = null;
     async function load() {
       try {
-        const result = await request(`/journeys/${bookingId}/tracking`);
+        const result = await request(bookingId
+          ? `/journeys/${bookingId}/tracking`
+          : `/services/${serviceId}/tracking`);
         if (!cancelled) { setData(result); setError(''); }
       } catch (e) {
         if (!cancelled) setError(e.message);
@@ -75,9 +77,9 @@ export function JourneyTracking({ bookingId, pollMs = 20_000 }) {
     const onVisibility = () => { if (document.visibilityState === 'visible' && !timer) load(); };
     document.addEventListener('visibilitychange', onVisibility);
     return () => { cancelled = true; if (timer) clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); };
-  }, [bookingId, request, pollMs]);
+  }, [bookingId, serviceId, request, pollMs]);
 
-  if (!bookingId) return null;
+  if (!bookingId && !serviceId) return null;
   if (loading) return <SkeletonCards count={1} lines={5}/>;
   if (error) return <ErrorState title="Suivi indisponible" text={error}/>;
   if (!data) return null;
@@ -87,7 +89,7 @@ export function JourneyTracking({ bookingId, pollMs = 20_000 }) {
   const mapStops = (data.stops ?? []).map(stop => ({ ...stop }));
 
   return <div className="stack">
-    <SectionTitle icon={Navigation} title="Où est mon véhicule"/>
+    <SectionTitle icon={Navigation} title={serviceId ? 'Progression du service' : 'Où est mon véhicule'}/>
 
     <Card className="stack">
       <div className="between wrap">
@@ -116,7 +118,8 @@ export function JourneyTracking({ bookingId, pollMs = 20_000 }) {
           <div className="row"><span>Distance parcourue</span><span>{km(data.progress.distanceAlongM)}</span></div>
           <div className="row"><span>Distance restante</span><span>{km(data.progress.remainingM)}</span></div>
         </>}
-        <div className="row"><span>Arrivée</span><span>{arrivalLine(data.eta)}</span></div>
+        {data.nextStop && <div className="row"><span>Prochain arrêt</span><span>{data.nextStop.city}{data.nextEta?.at ? ` · ${clock(data.nextEta.at)}` : ''}</span></div>}
+        <div className="row"><span>{serviceId ? 'Arrivée prévue' : 'Votre arrivée'}</span><span>{arrivalLine(data.eta)}</span></div>
       </div>
       {data.eta?.confidence === 'scheduled' && <p className="small muted">
         Sans signal GPS récent, cette heure vient de l’horaire de l’opérateur, pas de la position du véhicule.</p>}
@@ -139,4 +142,10 @@ export function JourneyTracking({ bookingId, pollMs = 20_000 }) {
       })}
     </Card>
   </div>;
+}
+
+// The crew sees the same route truth as passengers, but the service endpoint
+// authorizes it by assignment and does not expose a passenger's destination.
+export function ServiceTracking({ serviceId, pollMs = 20_000 }) {
+  return <JourneyTracking serviceId={serviceId} pollMs={pollMs}/>;
 }

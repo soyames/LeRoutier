@@ -50,6 +50,7 @@ export const trackingFixture=(overrides={})=>({
   signal:'live',signalAgeSeconds:30,
   progress:{distanceAlongM:130_000,remainingM:230_000,totalM:360_000,fraction:0.36},
   stops:TRACKED_STOPS,nextStop:{sequence:2,name:'Gare de Dassa-Zoumè',city:'Dassa-Zoumè'},
+  nextEta:{at:'2026-09-16T11:00:00Z',confidence:'live',speedMps:19.4,roundedToMinutes:5},
   offRoute:false,offRouteM:null,
   eta:{at:'2026-09-16T13:40:00Z',confidence:'live',speedMps:19.4,roundedToMinutes:5},
   ...overrides});

@@ -7,6 +7,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Armchair, Ticket, Building2, Navigation, UserRound, ArrowLeftRight, CreditCard, Package, Store, MapPin, QrCode, Search, Lock } from 'lucide-react';
 import { JourneySearchResults } from './journey-results.jsx';
 import { rememberCheckout } from './checkout.jsx';
+import { JourneyTimeline } from './journey.jsx';
+import { JourneyTracking } from './tracking.jsx';
 
 const isoDay = value => new Date(value).toISOString().slice(0, 10);
 const sameDay = (value, day) => isoDay(value) === day;
@@ -494,7 +496,6 @@ export function Tracking() {
   const navigate = useNavigate();
   const bookings = useApi(user ? '/me/bookings' : null);
   const booking = bookings.data?.find(b => ['confirmed', 'boarded'].includes(b.status));
-  const position = useApi(booking ? `/services/${booking.service_id}/positions` : null);
   return <>
     <SectionTitle icon={Navigation} title="Suivi de mon trajet"/>
     {!user ? <ApiState resource={{ loading: false, error: null }} emptyTitle="Connectez-vous"
@@ -505,21 +506,17 @@ export function Tracking() {
           <p className="small muted">Le suivi du véhicule s’active une fois votre réservation confirmée.</p>
           <div className="controls"><button className="btn btn-primary" onClick={() => navigate('/trips')}>Rechercher un trajet</button></div>
         </Card>
-          : <Card className="stack">
-            <div className="between wrap">
-              <div><h2>{booking.departure_city} → {booking.arrival_city}</h2><span className="small muted">{dateTime(booking.departure_at)}</span></div>
-              <Badge tone={status('booking', booking.status).tone}>{status('booking', booking.status).label}</Badge>
-            </div>
-            {position.data
-              ? <>
-                <p className="small">Dernier signal du véhicule à {time(position.data.observed_at)}.</p>
-                {mapLink(position.data.latitude, position.data.longitude, 13) &&
-                  <a className="btn btn-soft" href={mapLink(position.data.latitude, position.data.longitude, 13)} target="_blank" rel="noreferrer"><MapPin size={15}/>Voir la position sur la carte</a>}
-                <button className="btn btn-soft" onClick={position.reload}>Actualiser</button>
-              </>
-              : <p className="small muted" role="status">Le véhicule n’a pas encore partagé sa position. Le suivi démarre généralement peu avant le départ.</p>}
-            <button className="btn btn-soft" onClick={() => navigate(`/tickets/${booking.id}`)}>Voir mon trajet complet</button>
-          </Card>}
+          : <div className="stack">
+            <Card className="stack">
+              <div className="between wrap">
+                <div><h2>{booking.departure_city} → {booking.arrival_city}</h2><span className="small muted">{dateTime(booking.departure_at)}</span></div>
+                <Badge tone={status('booking', booking.status).tone}>{status('booking', booking.status).label}</Badge>
+              </div>
+              <button className="btn btn-soft" onClick={() => navigate(`/tickets/${booking.id}`)}>Ouvrir mon trajet complet</button>
+            </Card>
+            <JourneyTracking bookingId={booking.id}/>
+            <JourneyTimeline bookingId={booking.id}/>
+          </div>}
   </>;
 }
 
