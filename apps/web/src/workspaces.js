@@ -3,7 +3,7 @@
 // Workspaces are derived from the identity the API returns, never from a
 // frontend flag. The database stays authoritative: this only decides what to
 // show. Every protected action is authorized again server-side, so typing a
-// URL grants nothing — see docs/architecture/UNIFIED_PWA.md.
+// URL grants nothing; the API identity remains authoritative.
 export const PASSENGER = 'passenger', WORK = 'work', OPS = 'ops';
 
 export function workspacesFor(user) {

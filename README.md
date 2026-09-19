@@ -22,7 +22,8 @@ cases *inside* LeRoutier — a user never meets our deployment architecture.
 `apps/web` is that application. `apps/passenger-web`, `apps/driver-web` and
 `apps/ops-web` are the **legacy** single-role apps: still deployed and still
 tested so consolidation cannot silently regress, but no longer the product.
-See [`docs/architecture/UNIFIED_PWA.md`](docs/architecture/UNIFIED_PWA.md).
+The unified app is the only canonical frontend and all role workspaces are
+reachable from it.
 
 ## The rule that shapes everything
 
@@ -105,16 +106,9 @@ Real operators, real vehicles, real money — nothing is mocked into existence.
 - **Maps and tracking** — real OpenStreetMap geography, real road geometry,
   real GPS. A straight line between two cities is never drawn as a road, and
   "live" is never claimed without a recent fix.
-  See [`docs/architecture/MAPS_ROUTING_AND_TRACKING.md`](docs/architecture/MAPS_ROUTING_AND_TRACKING.md).
 - **Identity** — Firebase Authentication with Google Sign-In. Google says who
   you are; the database says what you may do, and a token claim grants nothing.
-  See [`docs/operations/AUTH_PRODUCTION_SETUP.md`](docs/operations/AUTH_PRODUCTION_SETUP.md).
 - **Agentic operations** — domain events drive typed, scoped, audited agent
   actions. Money and privileged changes always wait for a human.
-  See [`docs/architecture/AGENTIC_WORKFLOWS.md`](docs/architecture/AGENTIC_WORKFLOWS.md).
-
-## Documentation
-
-[`docs/README.md`](docs/README.md) is the index. Start there.
 
 Security reports: [`SECURITY.md`](SECURITY.md) — privately, never a public issue.

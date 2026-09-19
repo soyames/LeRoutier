@@ -5,10 +5,8 @@
 // carried below. The OSM raster is the standard basemap; CARTO's free dark
 // raster keeps a map readable inside a dark UI.
 //
-// Scale note: public OSM tile infrastructure is fine for a controlled pilot but
-// must not be leaned on at production volume. See
-// docs/architecture/MAPS_ROUTING_AND_TRACKING.md — moving to a hosted or
-// self-run tile service is a change to TILE_STYLES alone.
+// Scale note: public OSM tile infrastructure is fine for a controlled pilot;
+// moving to a hosted or self-run tile service is a change to TILE_STYLES alone.
 
 const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 // OpenStreetMap is the canonical basemap for LeRoutier. A hosted tile service
