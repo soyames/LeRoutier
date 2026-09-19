@@ -163,6 +163,7 @@ function CheckoutFlow({ intent }) {
   return <div className="stack">
     <SectionTitle icon={CreditCard} title="Récapitulatif avant paiement"/>
     <Card className="stack">
+      {!online && <p role="status">Hors ligne — les actions nécessitent une connexion.</p>}
       <JourneySummary intent={intent} fare={fare ?? (booking?.amount_minor ?? null)}/>
       {option.isTest && <ModeTestBanner/>}
       {/* A changed fare is stated plainly, never silently applied. */}

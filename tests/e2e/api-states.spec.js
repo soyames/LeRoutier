@@ -43,7 +43,7 @@ test('empty search is rendered honestly with a way forward',async({page})=>{
 
 test('failed booking never displays success',async({page})=>{
   await page.route('**/api/v1/bookings',r=>r.fulfill({status:409,json:{error:{message:'No seat is available on every requested segment.'}}}));
-  await page.goto('/');await page.getByRole('button',{name:'Connexion de développement'}).click();
+  await page.goto('/account');await page.getByRole('button',{name:'Connexion de développement'}).click();await page.getByRole('button',{name:'Accueil LeRoutier'}).click();
   await page.getByLabel('Départ',{exact:true}).selectOption('place');
   await page.getByLabel('Ville de départ').fill('Cotonou');await page.getByLabel('Ville de départ').press('Enter');
   await page.getByLabel('Destination').fill('Parakou');await page.getByLabel('Destination').press('Enter');
@@ -57,7 +57,7 @@ test('failed booking never displays success',async({page})=>{
 });
 
 test('offline state disables booking actions',async({page,context})=>{
-  await page.goto('/');await page.getByRole('button',{name:'Connexion de développement'}).click();
+  await page.goto('/account');await page.getByRole('button',{name:'Connexion de développement'}).click();await page.getByRole('button',{name:'Accueil LeRoutier'}).click();
   await page.getByLabel('Départ',{exact:true}).selectOption('place');
   await page.getByLabel('Ville de départ').fill('Cotonou');await page.getByLabel('Ville de départ').press('Enter');
   await page.getByLabel('Destination').fill('Parakou');await page.getByLabel('Destination').press('Enter');
