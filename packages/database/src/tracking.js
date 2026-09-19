@@ -101,6 +101,17 @@ export function tracking(db, config = {}) {
       routeDistanceM:stored?.distance_m, routeDurationS:stored?.duration_s,
       disrupted:service.status==='disrupted' || offRoute.offRoute,
     });
+    const nextTarget = next && projected.find(s => s.sequence === next.sequence);
+    const nextRemainingM = !hasRoad || !progress || !nextTarget ? null
+      : Math.max(0, nextTarget.distanceAlongM - progress.distanceAlongM);
+    const nextEta = next
+      ? estimateArrival({
+        remainingM: nextRemainingM, observations, observedAt: latest?.observedAt ?? null,
+        now, speedMps: latest?.speedMps ?? null, thresholds,
+        routeDistanceM: stored?.distance_m, routeDurationS: stored?.duration_s,
+        disrupted: service.status === 'disrupted' || offRoute.offRoute,
+      })
+      : null;
 
     return {
       serviceId: service.id,
@@ -122,6 +133,7 @@ export function tracking(db, config = {}) {
       stops: states.map(s => ({ sequence: s.sequence, name: s.name, city: s.city, state: s.state,
         latitude: s.latitude ?? null, longitude: s.longitude ?? null })),
       nextStop: next ? { sequence: next.sequence, name: next.name, city: next.city } : null,
+      nextEta,
       currentSegment: next ? {fromSequence:Math.max(0,next.sequence-1),toSequence:next.sequence} : null,
       // Deviation is an operational signal; it is not surfaced to passengers.
       offRoute: offRoute.offRoute,

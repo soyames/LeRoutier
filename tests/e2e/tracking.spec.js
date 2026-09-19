@@ -57,18 +57,20 @@ test('live GPS shows the vehicle on the real road with progress and next stop', 
   await expect(page.getByText(/Arrivée estimée vers/)).toBeVisible();
 });
 
-test('map tiles are provider-configured: no external tile claim without configuration', async ({ page }) => {
-  // The tile provider is build-time configuration (VITE_MAP_TILE_URL +
-  // attribution). With none configured — the production default — the map
-  // draws LeRoutier's own geometry without claiming or loading external
-  // tiles. No shared community tile infrastructure is silently used.
+test('maps use the configured OpenStreetMap basemap without Google Maps', async ({ page }) => {
+  // The pilot basemap is OpenStreetMap. Geometry remains useful even if tile
+  // requests are blocked, so this test never depends on a tile server.
+  const tileRequests = [];
+  page.on('request', request => {
+    if (request.url().includes('tile.openstreetmap.org')) tileRequests.push(request.url());
+  });
   await openTracking(page, trackingFixture());
   const map = page.getByRole('region', { name: 'Carte du véhicule sur son itinéraire' });
   await expect(map.locator('.leaflet-container')).toBeVisible();
   // The road geometry is still drawn, so tracking works without a provider.
   await expect(map.locator('path.leaflet-interactive').first()).toBeVisible();
-  const attribution = map.locator('.leaflet-control-attribution');
-  if (await attribution.count()) await expect(attribution).not.toContainText('OpenStreetMap');
+  await expect.poll(() => tileRequests.length).toBeGreaterThan(0);
+  await expect(page.locator('body')).not.toContainText('Google Maps');
 });
 
 test('a stale fix is never presented as live, and the ETA says it came from the timetable', async ({ page }) => {
@@ -132,6 +134,18 @@ test('vehicle tracking is off until the crew turn it on', async ({ page }) => {
   await expect(page.getByText('Suivi du véhicule', { exact: true })).toBeVisible();
   await expect(page.getByText('Suivi désactivé')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Activer le suivi du véhicule' })).toBeVisible();
+});
+
+test('crew sees the authorized service progress and next-stop ETA', async ({ page }) => {
+  await mockApi(page);
+  await signInAs(COMPANY_DRIVER)(page);
+  await page.goto(APP + '/work/today');
+  await page.getByRole('button', { name: 'Connexion de développement' }).click();
+
+  await expect(page.getByText('Progression du service')).toBeVisible();
+  await expect(page.getByText('Prochain arrêt').last()).toBeVisible();
+  await expect(page.getByText(/Dassa-Zoumè · 11:00/)).toBeVisible();
+  await expect(page.getByText(/Arrivée prévue/)).toBeVisible();
 });
 
 test.describe('with location granted', () => {

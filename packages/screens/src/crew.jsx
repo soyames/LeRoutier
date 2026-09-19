@@ -5,6 +5,7 @@ import { Card, Badge, StatCard, SectionTitle, ApiState, ErrorState, SkeletonCard
 import { status, fcfa, time, untilLabel } from '@leroutier/ui';
 import { createSyncQueue } from '@leroutier/config/offline';
 import { useVehicleTracking } from './vehicle-gps.js';
+import { ServiceTracking } from './tracking.jsx';
 import QrScanner from 'qr-scanner';
 import { Users, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw, Package, MapPin, Navigation } from 'lucide-react';
 
@@ -202,6 +203,7 @@ export function Today(){
 
     {/* Live vehicle tracking, for this service only. */}
     <VehicleTracking serviceId={s.id} serviceStatus={s.status}/>
+    <ServiceTracking serviceId={s.id}/>
 
     {/* Reporting is deliberately behind one tap: it is a stopped-vehicle task. */}
     <Card className="stack">
