@@ -37,7 +37,10 @@ async function webhook(event){const raw=JSON.stringify({...event,kind:'payment'}
 async function paid(){const {b,p}=await intent();await webhook({...results.get(p.id),status:'succeeded'});return {b,p};}
 async function issued(){const {b,p}=await paid();return {b,p,t:await ticket.issue(passenger,b.id)};}
 const verify=t=>ticket.verify(driver,{serviceId:demo.service,stopSequence:0,code:t.token});
-before(async()=>{await migrate(db);await seed(db);api=createApi(db,config,undefined,/** @type {any} */(adapter));sessions={};for(const role of ['passenger','driver','ops']){const r=await api(new Request('http://localhost/api/v1/auth/demo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({role})}));sessions[role]=(await r.json()).data.token;}});
+before(async()=>{await migrate(db);await seed(db);await db.transaction(async tx => {
+  await tx.query('UPDATE routes SET active=true, is_demo=false WHERE id=$1', [demo.route]);
+  await tx.query('UPDATE services SET is_demo=false WHERE id=$1', [demo.service]);
+});api=createApi(db,config,undefined,/** @type {any} */(adapter));sessions={};for(const role of ['passenger','driver','ops']){const r=await api(new Request('http://localhost/api/v1/auth/demo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({role})}));sessions[role]=(await r.json()).data.token;}});
 beforeEach(async()=>{await db.transaction(async tx=>{await tx.query('DELETE FROM booking_segments');await tx.query("UPDATE bookings SET status='cancelled'");await tx.query("UPDATE services SET current_sequence=0,status='active'");});});
 after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}});
 

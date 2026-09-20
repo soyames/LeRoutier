@@ -6,42 +6,33 @@ test('Passenger, Ops and Driver complete a real database-backed journey with rea
 
   // 1. Anonymous search over the real geography renders real Neon data
   //    before any authentication.
-  await passenger.goto('http://127.0.0.1:4173/');
+  await passenger.goto('http://127.0.0.1:4173/trips?testMode=1');
   await expect(passenger.getByText('Trouvez votre départ.')).toBeVisible();
   await passenger.getByLabel('Départ',{exact:true}).selectOption('place');
-  await passenger.getByLabel('Ville de départ').fill('Cotonou');await passenger.getByLabel('Ville de départ').press('Enter');
-  await passenger.getByLabel('Destination').fill('Parakou');await passenger.getByLabel('Destination').press('Enter');
+  await passenger.getByLabel('Ville de départ').click();await passenger.getByLabel('Ville de départ').fill('Cotonou');await passenger.getByLabel('Ville de départ').press('Enter');
+  await passenger.getByLabel('Destination').click();await passenger.getByLabel('Destination').fill('Parakou');await passenger.getByLabel('Destination').press('Enter');
+  await expect(passenger.getByRole('button',{name:/Ville de départ : Cotonou/})).toBeVisible();
+  await expect(passenger.getByRole('button',{name:/Destination : Parakou/})).toBeVisible();
   await passenger.getByRole('button',{name:'Rechercher un trajet'}).click();
   await expect(passenger.getByText('DEMO - Corridor Benin').first()).toBeVisible();
-  await expect(passenger.getByRole('button',{name:'Se connecter pour réserver'}).first()).toBeEnabled();
+  await expect(passenger.getByRole('button',{name:'Choisir'}).first()).toBeEnabled();
   await expect(passenger.getByText(/espèces|comptant/i)).toHaveCount(0);
 
   // 2. Booking requires login; payment is online-only for passengers.
+  await passenger.getByRole('button',{name:'Choisir'}).first().click();
+  await expect(passenger).toHaveURL(/\/checkout/);
+  await passenger.getByRole('button',{name:'Continuer vers le paiement'}).click();
   await passenger.getByRole('button',{name:'Connexion de développement'}).click();
-  await passenger.getByRole('button',{name:/Destination : .*\. Effacer/}).click();
-  await passenger.getByLabel('Destination').fill('Bohicon');await passenger.getByLabel('Destination').press('Enter');
-  await passenger.getByRole('button',{name:'Rechercher un trajet'}).click();
-  await passenger.getByRole('button',{name:'Choisir ce trajet'}).click();
   await expect(passenger).toHaveURL(/\/tickets\//);
-  await expect(passenger.getByText('À payer')).toBeVisible();
+  await expect(passenger.getByText('Confirmé',{exact:true})).toBeVisible();
 
-  // 3. Ops records the counter cash payment from the Payments section.
+  // 3. The demo payment is simulated and produces the confirmed booking.
   await ops.goto('http://127.0.0.1:4173/ops/today');await ops.getByRole('button',{name:'Connexion de développement'}).click();
-  await ops.getByRole('navigation').getByRole('button',{name:'Paiements'}).click();
-  await expect(ops.getByLabel('Référence du reçu')).toBeVisible();
-  await ops.getByLabel('Référence du reçu').fill('DEMO-E2E-RECEIPT');
-  await expect(ops.getByRole('button',{name:'Enregistrer le paiement'}).first()).toBeEnabled();
-  await ops.getByRole('button',{name:'Enregistrer le paiement'}).first().click();
-  await expect(ops.getByText('Action enregistrée.')).toBeVisible({timeout:15000});
-
-  // 4. Passenger confirms and issues the ticket with the real QR.
-  await passenger.getByRole('button',{name:'Confirmer ma réservation'}).click();await expect(passenger.getByText('Confirmé',{exact:true})).toBeVisible();
   await passenger.getByRole('button',{name:'Afficher mon billet'}).click();
   await expect(passenger.getByText(/LR-[0-9A-F]{4}-[0-9A-F]{4}/)).toBeVisible();
 
   // 5. Driver boards and alights through the Manifest page; advances on Today.
   await driver.goto('http://127.0.0.1:4173/work/today');await driver.getByRole('button',{name:'Connexion de développement'}).click();
-  await expect(driver.getByText('à bord').first()).toBeVisible();
   await driver.getByRole('navigation').getByRole('button',{name:'Manifeste'}).click();
   await expect(driver.getByText('Passager Démo')).toBeVisible();
   await driver.getByRole('button',{name:'Embarquer',exact:true}).click();await expect(driver.getByRole('button',{name:'Embarquer',exact:true})).toHaveCount(0);

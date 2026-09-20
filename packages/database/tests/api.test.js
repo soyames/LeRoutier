@@ -16,6 +16,10 @@ async function call(path,method='GET',body=undefined,role='passenger',key=random
 }
 before(async()=>{
   await migrate(db);await seed(db);
+  await db.transaction(async tx => {
+    await tx.query('UPDATE routes SET active=true, is_demo=false WHERE id=$1', [demo.route]);
+    await tx.query('UPDATE services SET is_demo=false WHERE id=$1', [demo.service]);
+  });
   for(const role of ['passenger','driver','ops']) sessions[role]=(await call('/api/v1/auth/demo','POST',{role})).data.token;
 });
 after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}});
@@ -32,7 +36,7 @@ test('authenticated passenger creates and retrieves a hold',async()=>{
 });
 test('ops records payment and passenger confirms without client-supplied fare',async()=>{
   assert.equal((await call(`/api/v1/bookings/${booking.id}/confirm`,'POST')).status,409);
-  assert.equal((await call(`/api/v1/bookings/${booking.id}/payments`,'POST',{provider:'demo',reference:randomUUID(),amountMinor:2500,currency:'XOF'},'ops')).status,200);
+  assert.equal((await call(`/api/v1/bookings/${booking.id}/payments`,'POST',{provider:'cash',reference:'OPS-CASH-'+randomUUID().slice(0,8),amountMinor:2500,currency:'XOF'},'ops')).status,200);
   assert.equal((await call(`/api/v1/bookings/${booking.id}/confirm`,'POST')).data.status,'confirmed');
 });
 test('driver reads assignment and manifest then boards/alights',async()=>{

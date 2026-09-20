@@ -105,6 +105,8 @@ test('the map renders with Leaflet and never touches Google Maps', async ({ page
   page.on('request', r => { if (/maps\.googleapis\.com|maps\.google\.com/.test(r.url())) google.push(r.url()); });
   await mockApi(page);
   await searchTrips(page);
+  const mapToggle = page.getByRole('button', { name: /Carte/ });
+  if (await mapToggle.isVisible()) await mapToggle.click();
   await expect(page.locator('.leaflet-container').first()).toBeVisible();
   // The map is supplemental: every journey fact is also readable text.
   await expect(page.getByText('Opérateur démo')).toBeVisible();

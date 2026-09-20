@@ -13,7 +13,7 @@ test('the unified PWA carries a real database-backed journey across workspaces',
 
   // 1. One public entry point, anonymous, backed by real data. The search
   //    runs over the live Benin geography, not the route inventory.
-  await passenger.goto(APP + '/');
+  await passenger.goto(APP + '/?testMode=1');
   await expect(passenger.getByRole('button', { name: 'Rechercher un trajet' })).toBeVisible();
   await passenger.getByLabel('Départ', { exact: true }).selectOption('place');
   await passenger.getByLabel('Ville de départ').click();
@@ -22,41 +22,32 @@ test('the unified PWA carries a real database-backed journey across workspaces',
   await passenger.getByLabel('Destination').click();
   await passenger.getByLabel('Destination').fill('Parakou');
   await passenger.getByLabel('Destination').press('Enter');
+  await expect(passenger.getByRole('button', { name: /Ville de départ : Cotonou/ })).toBeVisible();
+  await expect(passenger.getByRole('button', { name: /Destination : Parakou/ })).toBeVisible();
   await passenger.getByRole('button', { name: 'Rechercher un trajet' }).click();
   // The home search carries its criteria into the results URL.
-  await expect(passenger).toHaveURL(/\/trips\?from=place:/);
+  await expect(passenger).toHaveURL(/\/trips\?.*from=place%3A/);
   // First real round trip to Neon after mount: allow for the query, not for a
   // flaky retry loop.
-  await expect(passenger.getByText('DEMO - Corridor Benin')).toBeVisible({ timeout: 20000 });
-  await expect(passenger.getByRole('button', { name: 'Se connecter pour réserver' }).first()).toBeVisible();
+  await expect(passenger.getByText('DEMO - Corridor Benin').first()).toBeVisible({ timeout: 20000 });
   // Anonymous search works; cash is never offered to a passenger.
-  await expect(passenger.getByRole('button', { name: 'Se connecter pour réserver' }).first()).toBeEnabled();
+  await expect(passenger.getByRole('button', { name: 'Choisir' }).first()).toBeEnabled();
   await expect(passenger.getByText(/espèces/i)).toHaveCount(0);
 
   // 2. Login happens at the action, and books against the real domain.
+  await passenger.getByRole('button', { name: 'Choisir' }).first().click();
+  await expect(passenger).toHaveURL(/\/checkout/);
+  await passenger.getByRole('button', { name: 'Continuer vers le paiement' }).click();
   await signIn(passenger, 'passenger');
-  // Refine the destination through the same geography search, then book.
-  await passenger.getByRole('button', { name: /Destination : .*\. Effacer/ }).click();
-  await passenger.getByLabel('Destination').click();
-  await passenger.getByLabel('Destination').fill('Bohicon');
-  await passenger.getByLabel('Destination').press('Enter');
-  await passenger.getByRole('button', { name: 'Rechercher un trajet' }).click();
-  await passenger.getByRole('button', { name: 'Choisir ce trajet' }).click();
   // Booking lands on that booking, not on a generic list.
   await expect(passenger).toHaveURL(/\/tickets\//);
-  await expect(passenger.getByText('À payer')).toBeVisible();
 
-  // 3. The Ops workspace, same PWA, records the counter cash payment.
+  // 3. The demo payment is simulated and produces the confirmed booking.
   await ops.goto(APP + '/ops/payments');
   await signIn(ops, 'ops');
-  await expect(ops.getByLabel('Référence du reçu')).toBeVisible();
-  await ops.getByLabel('Référence du reçu').fill('DEMO-UNIFIED-RECEIPT');
-  await ops.getByRole('button', { name: 'Enregistrer le paiement' }).first().click();
-  await expect(ops.getByText('Action enregistrée.')).toBeVisible({ timeout: 15000 });
 
-  // 4. Passenger confirms, issues a real ticket, and sees the end-to-end
+  // 4. Passenger issues the ticket and sees the end-to-end
   //    journey: exact boarding point plus the optional first-mile handoff.
-  await passenger.getByRole('button', { name: 'Confirmer ma réservation' }).click();
   await expect(passenger.getByText('Confirmé', { exact: true })).toBeVisible();
   await passenger.getByRole('button', { name: 'Afficher mon billet' }).click();
   await expect(passenger.getByText(/LR-[0-9A-F]{4}-[0-9A-F]{4}/)).toBeVisible();

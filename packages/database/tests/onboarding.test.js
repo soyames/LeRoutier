@@ -51,6 +51,10 @@ async function companyFixtures(operatorId){
 }
 before(async()=>{
   await migrate(db);await seed(db);
+  await db.transaction(async tx => {
+    await tx.query('UPDATE routes SET active=true, is_demo=false WHERE id=$1', [demo.route]);
+    await tx.query('UPDATE services SET is_demo=false WHERE id=$1', [demo.service]);
+  });
   api=createApi(db,config);
   sessions={};
   for(const role of ['passenger','driver','ops']){const r=await api(new Request('http://localhost/api/v1/auth/demo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({role})}));sessions[role]=(await r.json()).data.token;}

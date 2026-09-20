@@ -28,6 +28,10 @@ const days=n=>new Date(now-n*86_400_000).toISOString();
 
 before(async()=>{
   await migrate(db);await seed(db);
+  await db.transaction(async tx => {
+    await tx.query('UPDATE routes SET active=true, is_demo=false WHERE id=$1', [demo.route]);
+    await tx.query('UPDATE services SET is_demo=false WHERE id=$1', [demo.service]);
+  });
   const secondOpsUser=demoId(41);
   await sql(`INSERT INTO users(id,display_name,role) VALUES($1,'Régulation Opérateur B','ops') ON CONFLICT DO NOTHING`,[secondOpsUser]);
   await sql(`INSERT INTO operators(id,name,type,verification_status,owner_user_id) VALUES($1,'Second Opérateur','independent','verified',$2) ON CONFLICT DO NOTHING`,[SECOND_OPERATOR,secondOpsUser]);
