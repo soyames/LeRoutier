@@ -129,6 +129,7 @@ export function TripSearchHero() {
     const params = new URLSearchParams({ date: day });
     params.set('from', originMode === 'current' ? 'my-location' : `place:${originPlace}`);
     params.set('to', `place:${destinationPlace}`);
+    if (new URLSearchParams(window.location.search).get('testMode') === '1') params.set('testMode', '1');
     navigate(`/trips?${params}`);
   }
   return <Card className="hero stack">

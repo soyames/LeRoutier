@@ -65,7 +65,7 @@ try {
  const req=(path,method='GET',body=undefined,token=undefined)=>api(new Request('http://localhost/api/v1'+path,{method,headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{}),'idempotency-key':randomUUID()},...(body===undefined?{}:{body:JSON.stringify(body)})}));
  const sessions={};for(const role of ['passenger','driver','ops']){sessions[role]=(await (await req('/auth/demo','POST',{role})).json()).data.token;}
  await bench('trip search',()=>req(`/services?originStopId=${demoId(200)}&destinationStopId=${demoId(201)}`));
- await bench('availability',()=>req(`/services/${demo.service}/availability?origin=0&destination=1`));
+ await bench('availability',()=>req(`/services/${demo.service}/availability?origin=0&destination=1&testMode=1`,'GET',undefined,sessions.passenger));
  await bench('booking create',()=>req('/bookings','POST',{serviceId:demo.service,origin:0,destination:1},sessions.passenger),{n:20});
  await bench('ticket lookup',()=>req('/tickets/verify','POST',{serviceId:demo.service,stopSequence:0,code:ticket.manualCode},sessions.driver),{n:20});
  await bench('parcel tracking',()=>req('/public/parcel-tracking/'+p.trackingNumber));

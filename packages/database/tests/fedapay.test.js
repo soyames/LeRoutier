@@ -59,7 +59,10 @@ async function paid(){const {b,p}=await intent();await webhook(txEvent('transact
 function payoutEvent(requestId,status,amount=3000,reference='P-71'){
   return {id:randomUUID().slice(0,8),type:'payout.'+status,entity:{id:71,reference,status,amount,currency:{iso:'XOF'},custom_metadata:{app:'leroutier',payout_request_id:requestId}}};
 }
-before(async()=>{await migrate(db);await seed(db);api=createApi(db,config,undefined,adapter);});
+before(async()=>{await migrate(db);await seed(db);await db.transaction(async tx => {
+  await tx.query('UPDATE routes SET active=true, is_demo=false WHERE id=$1', [demo.route]);
+  await tx.query('UPDATE services SET is_demo=false WHERE id=$1', [demo.service]);
+});api=createApi(db,config,undefined,adapter);});
 beforeEach(async()=>{failPayouts=false;transactions.clear();payoutsStore.clear();currentTx=null;nextTx=39;nextPayout=70;
   await db.transaction(async tx=>{await tx.query('DELETE FROM booking_segments');await tx.query("UPDATE bookings SET status='cancelled'");await tx.query('DELETE FROM payment_events');await tx.query('DELETE FROM payments');await tx.query('DELETE FROM payout_events');await tx.query('DELETE FROM driver_earnings');await tx.query('DELETE FROM payout_requests');await tx.query('DELETE FROM payout_destinations');await tx.query('DELETE FROM outbox');await tx.query("UPDATE services SET current_sequence=0,status='active'");});});
 after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}});
