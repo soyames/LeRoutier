@@ -154,7 +154,7 @@ test('ticket shows the exact boarding point, a short reference and a map afforda
   await page.route('**/api/v1/me/bookings',r=>r.fulfill({json:{data:[{id:'00000000-0000-4000-8000-000000000050',route_name:'DEMO Cotonou → Parakou',status:'confirmed',departure_at:'2026-09-16T08:00:00Z',seat_number:3,amount_minor:2500,departure_city:'Cotonou',departure_point_name:'Godomey – Carrefour',departure_point_landmark:'Au carrefour principal',departure_point_latitude:6.37,departure_point_longitude:2.39,arrival_city:'Parakou',arrival_point_name:'Gare de Parakou',arrival_point_landmark:null,arrival_point_latitude:null,arrival_point_longitude:null,service_id:'00000000-0000-4000-8000-000000000030'}]}}));
   await page.goto('http://127.0.0.1:4173/tickets');
   await page.getByRole('button',{name:'Connexion de développement'}).click();
-  await expect(page.getByText('Cotonou → Parakou')).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Cotonou → Parakou',exact:true})).toBeVisible();
   await expect(page.getByText(/Godomey – Carrefour/)).toBeVisible();
   await expect(page.getByRole('link',{name:/Voir le point d’embarquement/})).toBeVisible();
   // A quotable reference, never a raw identifier.

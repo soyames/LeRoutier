@@ -60,7 +60,7 @@ export function PlaceCombobox({ label, placeholder, value, onSelect, onClear, in
           aria-controls={open ? listboxId : undefined} aria-activedescendant={open ? `${listboxId}-opt-${highlight}` : undefined}
           aria-label={label} aria-autocomplete="list" placeholder={placeholder} value={query}
           onChange={e => { setQuery(e.target.value); setHighlight(0); setOpen(true); }}
-          onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} onKeyDown={onKey}/>}
+          onFocus={() => setOpen(true)} onBlur={() => setOpen(false)} onKeyDown={onKey}/>}
       <span className="small muted" role="status" aria-live="polite">
         {places.loading ? 'Chargement des villes…'
           : places.error ? 'Impossible de charger les villes pour le moment.'
@@ -424,6 +424,7 @@ export function Tickets({ focusId = null }) {
                 <div className="ticket-head between wrap">
                   <div>
                     <h2>{b.departure_city} → {b.arrival_city}</h2>
+                    <div className="small">{b.route_name}</div>
                     <span className="small">{dateTime(b.departure_at)}</span>
                   </div>
                   <Badge tone={state.tone}>{state.label}</Badge>
@@ -788,8 +789,8 @@ function CityPicker({ label, selected, onPick, stops }) {
 
 export function Parcels() {
   const { user, request, online } = useSession();
-  const routes = useApi('/routes'), mine = useApi(user ? '/me/parcels' : null);
-  const stops = routes.data?.[0]?.stops || [];
+  const routes = useApi(user?.is_demo ? '/routes?testMode=1' : '/routes'), mine = useApi(user ? '/me/parcels' : null);
+  const stops = [...new Map((routes.data || []).flatMap(r=>r.stops || []).map(s=>[s.stop_id || s.id,s])).values()];
   const [originPick, setOriginPick] = useState(null), [destinationPick, setDestinationPick] = useState(null);
   const [step, setStep] = useState(0);
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
@@ -885,6 +886,11 @@ export function Parcels() {
             <div><h3>{p.trackingNumber}</h3>
               <span className="small muted">{categoryLabels[p.category]} · {fcfa(p.priceMinor)} · {dayShort(p.createdAt)}</span></div>
             <Badge tone={status('parcel', p.status).tone}>{status('parcel', p.status).label}</Badge>
+            <button className="btn btn-soft" disabled={busy || !online} onClick={async()=>{
+              setBusy(true);setError('');
+              try{setLabel(await request(`/parcels/${p.id}/label`));window.scrollTo({top:0,behavior:'smooth'});}
+              catch(e){setError(e.message);}finally{setBusy(false);}
+            }}>Afficher le reçu et le QR</button>
           </Card>)}
 
     {/* Tracking sits with sending: it is the same errand for the same person. */}

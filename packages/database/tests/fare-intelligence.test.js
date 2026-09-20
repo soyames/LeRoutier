@@ -31,6 +31,7 @@ before(async()=>{
   await db.transaction(async tx => {
     await tx.query('UPDATE routes SET active=true, is_demo=false WHERE id=$1', [demo.route]);
     await tx.query('UPDATE services SET is_demo=false WHERE id=$1', [demo.service]);
+    await tx.query('UPDATE operators SET is_demo=false WHERE id=$1', [demo.operator]);
   });
   const secondOpsUser=demoId(41);
   await sql(`INSERT INTO users(id,display_name,role) VALUES($1,'Régulation Opérateur B','ops') ON CONFLICT DO NOTHING`,[secondOpsUser]);
@@ -113,8 +114,12 @@ test('online ticket payment credits the ledger once and records one transaction 
 
 test('parcel cash payment credits parcel_cash with commission; bank transfer credits parcel_online',async()=>{
   const parcel=parcels(db);
+  // This test measures real accounting. A structurally TEST sender must never
+  // create settlement or market evidence, even with a cash payment recorded.
+  const sender=randomUUID();
+  await sql("INSERT INTO users(id,display_name,role) VALUES($1,'Accounting fixture sender','passenger')",[sender]);
   const before=(await sql("SELECT count(*)::integer AS n FROM operator_settlements WHERE source IN ('parcel_cash','parcel_online')")).rows[0].n;
-  const created=await parcel.create({id:demo.passenger,role:'passenger'},{
+  const created=await parcel.create({id:sender,role:'passenger'},{
     senderName:'Sender Fi',senderPhone:'+229 97 000002',receiverName:'Receiver Fi',receiverPhone:'+229 97 000003',
     originStopId:demoId(200),destinationStopId:demoId(201),category:'documents',paymentResponsibility:'cash'},'fi-parcel-'+randomUUID().slice(0,8));
   assert.equal(created.priceMinor,1000,'seeded rate rule applies');

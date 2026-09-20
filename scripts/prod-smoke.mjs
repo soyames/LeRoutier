@@ -50,6 +50,29 @@ for (const path of ['/privacy','/terms','/legal','/cancellations','/cookies']) {
 {
   const {response,body}=await get('/api/v1/services');
   response.status===200 && Array.isArray(body?.data) ? ok('Public trip search') : fail('Public trip search',`status ${response.status}`);
+  if(Array.isArray(body?.data)) {
+    body.data.every(s=>!s.is_demo && !/TEST|DEMO/i.test(`${s.route_name} ${s.operator_name}`)) ? ok('No TEST inventory in public discovery',`${body.data.length} public services`) : fail('TEST isolation','synthetic service visible');
+    if(!body.data.length) console.log('  INFO  Real booking/payment journeys unavailable: no production services. No inventory created.');
+  }
+}
+{
+  const {response,body}=await get('/api/v1/services?testMode=1');
+  response.status===200 && Array.isArray(body?.data) && body.data.every(s=>!s.is_demo)
+    ? ok('Anonymous testMode cannot expose TEST services') : fail('TEST query isolation',`status ${response.status}`);
+}
+{
+  const {response,body}=await get('/api/v1/places?q=Cotonou');
+  response.status===200 && Array.isArray(body?.data) && body.data.some(p=>p.name==='Cotonou')
+    ? ok('Geography search') : fail('Geography search',`status ${response.status}`);
+}
+{
+  const {response,body}=await get('/api/v1/journey-plan?originPlaceId=00000000-0000-4000-b000-000000000181&destinationPlaceId=00000000-0000-4000-b000-000000000145');
+  response.status===200 && body?.data ? ok('Valid journey planning') : fail('Journey planning',`status ${response.status}`);
+}
+for(const path of ['/me','/driver/service','/ops/fleet','/ops/health','/me/bookings']) {
+  const {response,body}=await get('/api/v1'+path);
+  response.status===401 && body?.error?.code==='UNAUTHORIZED' ? ok('Anonymous rejected: '+path) : fail('Protected '+path,`status ${response.status}`);
+  !/postgres|DATABASE_URL|stack|node_modules|Bearer /i.test(JSON.stringify(body)) ? ok('Sanitized response: '+path) : fail('Error privacy',path);
 }
 {
   const { response, body } = await get('/api/v1/payments/config');

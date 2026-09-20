@@ -53,7 +53,8 @@ export function Today(){
   const today=new Date();
   const todayServices=(fleet.data?.services||[]).filter(s=>new Date(s.departure_at).toDateString()===today.toDateString());
   const data=catalog.data;
-  const configured=user?.verification_status==='verified';
+  const platform=user?.role==='ops' && !user.operator_id;
+  const configured=platform || user?.verification_status==='verified';
   const hasOperations=(data?.vehicles?.length>0 || data?.routes?.length>0 || fleet.data?.services?.length>0);
   const go=useOpsLink();
   const checklist=[
@@ -81,13 +82,13 @@ export function Today(){
       </> : <p>Contrôle en cours…</p>}
     </Card>}
     <SectionTitle icon={Home} title="Aujourd’hui"/>
-    <Card className="hero stack"><span className="eyebrow">{user?.verification_status==='verified'?'Centre opérationnel':'Compte en attente de vérification'}</span>
-      <h1>{user?.operator_type==='independent'?'Votre activité indépendante':`Votre compagnie${user?.display_name?` — ${user.display_name}`:''}`}</h1>
+    <Card className="hero stack"><span className="eyebrow">{configured?'Centre opérationnel':'Compte en attente de vérification'}</span>
+      <h1>{platform?'Vue de la plateforme':user?.operator_type==='independent'?'Votre activité indépendante':user?.operator_name || 'Votre compagnie'}</h1>
       <p>{configured?'Supervision en temps réel : services, équipage, colis, paiements et incidents.':'Votre compte doit être vérifié par LeRoutier avant de créer des services ou de retirer des fonds. Préparez votre réseau en attendant.'}</p></Card>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {/* A verified company with nothing running gets a guided setup, not an
         empty dashboard. Each step opens the form that completes it. */}
-    {configured && !hasOperations && catalog.data && <Card className="stack">
+    {configured && !platform && !hasOperations && catalog.data && <Card className="stack">
       <div className="between wrap"><h3>Mettons votre compagnie en route</h3>
         <Badge tone={remaining?'warning':'success'}>{remaining?`${remaining} étape${remaining>1?'s':''} restante${remaining>1?'s':''}`:'Terminé'}</Badge></div>
       <div className="checklist">
@@ -121,7 +122,7 @@ export function Today(){
     </>}
     {user && !user.operator_id && operatorsList.data && <>
       <SectionTitle icon={ShieldCheck} title="Vérification des opérateurs"/>
-      {operatorsList.data.map(o=><Card key={o.id} className="between wrap"><div className="stack"><h3>{o.name}</h3><span className="small muted">{o.type==='independent'?'Indépendant':'Compagnie'} · {o.verification_status} · {new Date(o.created_at).toLocaleDateString('fr-FR')}</span></div>
+      {operatorsList.data.map(o=><Card key={o.id} className="between wrap"><div className="stack"><h3>{o.name}</h3><span className="small muted">{o.type==='independent'?'Indépendant':'Compagnie'} · {status('verification',o.verification_status).label} · {new Date(o.created_at).toLocaleDateString('fr-FR')}</span></div>
         <div className="controls">{o.verification_status!=='verified' && <button className="btn btn-primary" disabled={!online} onClick={async()=>{const r=await act(`/operators/${o.id}/verification`,{decision:'verified'});r.ok?setNotice('Opérateur vérifié.'):setError(r.error);operatorsList.reload();}}>Vérifier</button>}
         {['pending_verification','verified'].includes(o.verification_status) && <button className="btn btn-soft" disabled={!online} onClick={async()=>{const r=await act(`/operators/${o.id}/verification`,{decision:'suspended'});r.ok?setNotice('Opérateur suspendu.'):setError(r.error);operatorsList.reload();}}>Suspendre</button>}
         {o.verification_status==='pending_verification' && <button className="btn btn-soft" disabled={!online} onClick={async()=>{const r=await act(`/operators/${o.id}/verification`,{decision:'rejected'});r.ok?setNotice('Opérateur refusé.'):setError(r.error);operatorsList.reload();}}>Refuser</button>}</div></Card>)}

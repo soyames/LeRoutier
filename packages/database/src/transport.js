@@ -179,7 +179,8 @@ export function transport(db) {
         return (await tx.query(`SELECT b.*,r.name AS route_name,s.departure_at,s.departure_point_id,s.arrival_point_id,
           bdp.name AS departure_point_name,bdp.description AS departure_point_landmark,bdp.latitude AS departure_point_latitude,bdp.longitude AS departure_point_longitude,
           bap.name AS arrival_point_name,bap.description AS arrival_point_landmark,bap.latitude AS arrival_point_latitude,bap.longitude AS arrival_point_longitude,
-          op.name AS departure_city,ap.name AS arrival_city
+          coalesce(op.name,(SELECT p.name FROM service_stops ss JOIN stops st ON st.id=ss.stop_id JOIN places p ON p.id=st.place_id WHERE ss.service_id=s.id AND ss.sequence=b.origin_sequence)) AS departure_city,
+          coalesce(ap.name,(SELECT p.name FROM service_stops ss JOIN stops st ON st.id=ss.stop_id JOIN places p ON p.id=st.place_id WHERE ss.service_id=s.id AND ss.sequence=b.destination_sequence)) AS arrival_city
           FROM bookings b JOIN services s ON s.id=b.service_id JOIN routes r ON r.id=s.route_id
           LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN places op ON op.id=bdp.place_id
           LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id LEFT JOIN places ap ON ap.id=bap.place_id
@@ -247,6 +248,7 @@ export function transport(db) {
       });
     },
     async advance(actor, serviceId, sequence) {
+      invariant(actor?.role==='driver' || actor?.role==='ops','FORBIDDEN','Driver or operations access required.',403);
       return db.transaction(async tx => {
         const service = await serviceLock(tx, serviceId);
         await crew(tx, actor, service);

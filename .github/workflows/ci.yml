@@ -45,8 +45,6 @@ jobs:
         run: pnpm build
       - name: Unit tests
         run: pnpm test:unit
-      - name: API tests
-        run: pnpm test:api
       - name: Secret scan
         # Runs in pattern-only mode here: the owner's credential reference is
         # deliberately not available to CI. Every pattern check still runs, and
@@ -115,6 +113,10 @@ jobs:
         run: pnpm test:migrate:fresh
       - name: Database tests
         run: pnpm test:database:local
+      # API security and assistant tests migrate disposable schemas and need
+      # this job's PostgreSQL service just like the database suites.
+      - name: API tests
+        run: pnpm test:api
       - name: Load, query profiling and disposable restore drill
         run: pnpm test:operations
       - name: Build

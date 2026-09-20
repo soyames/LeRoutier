@@ -96,7 +96,9 @@ async function testService(tx, event, payload) {
     s.id=ANY($1::uuid[]) OR s.id IN (SELECT service_id FROM bookings WHERE id=ANY($1::uuid[])) OR
     s.id IN (SELECT b.service_id FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE p.id=ANY($1::uuid[])) OR
     s.id IN (SELECT service_id FROM parcel_service_assignments WHERE parcel_id=ANY($1::uuid[])) OR
-    s.id IN (SELECT service_id FROM incidents WHERE id=ANY($1::uuid[])))) AS synthetic`, [ids]);
+    s.id IN (SELECT service_id FROM incidents WHERE id=ANY($1::uuid[]))))
+    OR EXISTS(SELECT 1 FROM parcels p JOIN operators o ON o.id=p.operator_id LEFT JOIN users u ON u.id=p.created_by
+      WHERE p.id=ANY($1::uuid[]) AND (o.is_demo OR u.is_demo)) AS synthetic`, [ids]);
   return row?.synthetic === true;
 }
 
