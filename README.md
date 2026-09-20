@@ -107,6 +107,7 @@ Real operators, real vehicles, real money — nothing is mocked into existence.
   "live" is never claimed without a recent fix.
 - **Identity** — Firebase Authentication with Google Sign-In. Google says who
   you are; the database says what you may do, and a token claim grants nothing.
+  [Production Google sign-in configuration](packages/config/README.md#production-google-authentication).
 - **Agentic operations** — domain events drive typed, scoped, audited agent
   actions. Money and privileged changes always wait for a human.
 
