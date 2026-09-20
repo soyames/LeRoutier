@@ -186,7 +186,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       // uses. RawResponse carries it out without losing the security headers.
       return new RawResponse(rendered.body,rendered.contentType);
     }
-    if(method==='POST' && path==='/auth/demo') {invariant(config.demoLogin,'NOT_FOUND','Endpoint not found.',404);await limited('demo-login');return auth.demoSession((await body()).role);}
+    if(method==='POST' && path==='/auth/demo') {invariant(config.demoLogin,'NOT_FOUND','Endpoint not found.',404);await limited('demo-login');const input=await body();return auth.demoSession(input.role,input.profile);}
     // The public catalogue is the one authenticated-free read surface with real
     // breadth: every stop, every place, every route, every departure. Without a
     // limit it is a free scraping and enumeration endpoint, so anonymous reads
@@ -585,6 +585,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
         return (await tx.query('SELECT latitude,longitude,observed_at FROM vehicle_positions WHERE service_id=$1 ORDER BY observed_at DESC LIMIT 1',[id])).rows[0] || null;
       });
       if(method==='POST' && action==='positions') {
+        invariant(actor.role==='driver','FORBIDDEN','Driver access required.',403);
         const input=validateVehiclePosition(await body());
         return db.transaction(async tx=>{
           const service=await domain.authorizeService(tx,actor,id);
@@ -623,12 +624,19 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       if(method==='POST' && action==='status') {
         const input=await body();
         return db.transaction(async tx=>{
-          const s=await domain.authorizeService(tx,actor,id,true);
+          invariant(actor.role==='driver' || actor.role==='ops','FORBIDDEN','Driver or operations access required.',403);
+          const s=await domain.authorizeService(tx,actor,id,actor.role==='ops');
+          if(actor.role==='driver') {
+            invariant(['active','completed'].includes(input.status),'FORBIDDEN','Drivers may start or complete their assigned service.',403);
+            if(input.status==='completed') invariant(!(await tx.query('SELECT 1 FROM service_stops WHERE service_id=$1 AND sequence>$2',[id,s.current_sequence])).rowCount,
+              'INVALID_STOP','Reach the final stop before completing the service.',409);
+          }
           invariant(['active','disrupted','completed','cancelled'].includes(input.status),'INVALID_STATUS','Invalid service status.');
           const allowed={scheduled:['active','cancelled'],active:['disrupted','completed'],disrupted:['active','cancelled'],completed:[],cancelled:[]};
           invariant(allowed[s.status].includes(input.status),'INVALID_TRANSITION','Service transition is invalid.',409);
           if(['completed','cancelled'].includes(input.status)) {
             invariant(!(await tx.query("SELECT id FROM bookings WHERE service_id=$1 AND status IN ('held','confirmed','boarded')",[id])).rowCount,'ACTIVE_BOOKINGS','Resolve active bookings before closing this service.',409);
+            invariant(!(await tx.query("SELECT id FROM parcel_service_assignments WHERE service_id=$1 AND status IN ('assigned','loaded','in_transit')",[id])).rowCount,'ACTIVE_PARCELS','Resolve parcel custody before closing this service.',409);
             await tx.query('UPDATE service_assignments SET ended_at=now() WHERE service_id=$1 AND ended_at IS NULL',[id]);
           }
           const result=(await tx.query('UPDATE services SET status=$2,updated_at=now() WHERE id=$1 RETURNING *',[id,input.status])).rows[0];

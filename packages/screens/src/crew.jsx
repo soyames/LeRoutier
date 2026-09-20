@@ -12,18 +12,17 @@ import { Users, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw, Package, Map
 // Board/alight/incident actions flow through the offline queue: the server
 // deduplicates by Idempotency-Key, so retries are always safe.
 function useDriverQueue(userId, request) {
-  const queue=useRef(null),running=useRef(false);
+  const queue=useRef(null);
   const [rows,setRows]=useState([]);
   const refresh=()=>queue.current && setRows(queue.current.read());
   const sync=useCallback(async()=>{
-    if(!queue.current || running.current) return;
-    running.current=true;
+    if(!queue.current) return;
     try {
-      await queue.current.sync(row=>row.type==='parcel'
+      return await queue.current.sync(row=>row.type==='parcel'
         ? request(`/parcels/${row.payload.parcelId}/scan`,{method:'POST',key:row.id,body:{kind:row.payload.kind}})
         : request('/driver/actions',{method:'POST',key:row.id,body:{type:row.type,payload:row.payload}}));
     }
-    finally { running.current=false;refresh(); }
+    finally { refresh(); }
   },[request]);
   useEffect(()=>{
     if(!userId) return;
@@ -33,10 +32,15 @@ function useDriverQueue(userId, request) {
     window.addEventListener('online',kick);
     return()=>window.removeEventListener('online',kick);
   },[userId,sync]);
-  const enqueue=useCallback((type,payload)=>{queue.current?.enqueue(type,payload);refresh();if(navigator.onLine)sync();},[sync]);
-  const retry=useCallback(id=>{queue.current?.retry(id);refresh();},[]);
+  const enqueue=useCallback((type,payload)=>{const row=queue.current?.enqueue(type,payload);refresh();if(navigator.onLine)sync();return row;},[sync]);
+  const retry=useCallback(id=>{queue.current?.retry(id);refresh();if(navigator.onLine)sync();},[sync]);
   const discard=useCallback(id=>{queue.current?.discard(id);refresh();},[]);
-  return {rows,sync,enqueue,retry,discard};
+  const send=async(type,payload)=>{
+    const row=enqueue(type,payload);
+    if(navigator.onLine)await sync();
+    return queue.current?.read().find(r=>r.id===row?.id);
+  };
+  return {rows,sync,enqueue,retry,discard,send};
 }
 
 const parcelLabels={created:'Créé',accepted:'Accepté',manifested:'Affecté',loaded:'Chargé',in_transit:'En transit',arrived:'Arrivé',
@@ -86,7 +90,7 @@ function QueueStatus({queue}){
     {!online && <p className="small" role="status">Vos scans sont enregistrés sur l’appareil et partiront automatiquement dès le retour du réseau.</p>}
     {conflicts.length>0 && <p className="small" role="status">{conflicts.length} action{conflicts.length>1?'s demandent':' demande'} votre attention : la situation a changé entre-temps.</p>}
     {[...failed,...conflicts].map(row=><div className="between wrap" key={row.id}>
-      <span className="small">{ACTION_LABELS[row.type]||'Action'} · {row.state==='failed'?'non envoyé':'à vérifier'}</span>
+      <span className="small">{ACTION_LABELS[row.type]||'Action'} · {row.error || (row.state==='failed'?'non envoyé':'à vérifier')}</span>
       <button className="btn btn-soft" onClick={()=>row.state==='failed'?queue.retry(row.id):queue.discard(row.id)}>
         {row.state==='failed'?'Réessayer':'Ignorer'}</button>
     </div>)}
@@ -177,8 +181,9 @@ export function Today(){
         <div className="duty-metric"><strong>{parcels}</strong><span>colis</span></div>
       </div>
       <span className="small">
-        {stop?`Arrêt actuel : ${stop.city}`:''}{next?` · Prochain : ${next.city}`:''}{countdown?` · Départ ${countdown}`:''}
+        {stop?`Arrêt actuel : ${stop.city}`:''}{next?` · Prochain : ${next.city}`:''}{countdown && s.status==='scheduled'?` · Départ ${countdown}`:''}
       </span>
+      {user.operator_name && <span className="small">{user.operator_name} · {s.registration}</span>}
     </Card>
 
     <QueueStatus queue={queue}/>
@@ -193,7 +198,12 @@ export function Today(){
     </div>
 
     <Card className="stack">
-      {s.current_sequence<stops.length-1 && <button className="btn btn-primary" disabled={busy||!online} onClick={()=>{
+      {!convoyeur && (s.status==='scheduled' || (s.status==='active' && s.current_sequence===stops.length-1)) && <button className="btn btn-primary" disabled={busy||!online} onClick={async()=>{
+        setBusy(true);setError('');
+        try{await request(`/services/${s.id}/status`,{method:'POST',body:{status:s.status==='scheduled'?'active':'completed'}});service.reload();}
+        catch(e){setError(e.message);}finally{setBusy(false);}
+      }}>{s.status==='scheduled'?'Démarrer le service':'Terminer le service'}</button>}
+      {!convoyeur && s.status==='active' && s.current_sequence<stops.length-1 && <button className="btn btn-primary" disabled={busy||!online} onClick={()=>{
         setBusy(true);setError('');
         request(`/services/${s.id}/advance`,{method:'POST',body:{sequence:s.current_sequence+1}})
           .then(()=>{setNotice(`Arrivée à ${next?.city??'l’arrêt suivant'} enregistrée.`);service.reload();})
@@ -202,7 +212,7 @@ export function Today(){
     </Card>
 
     {/* Live vehicle tracking, for this service only. */}
-    <VehicleTracking serviceId={s.id} serviceStatus={s.status}/>
+    {!convoyeur && <VehicleTracking serviceId={s.id} serviceStatus={s.status}/>}
     <ServiceTracking serviceId={s.id}/>
 
     {/* Reporting is deliberately behind one tap: it is a stopped-vehicle task. */}
@@ -240,7 +250,8 @@ export function Manifest(){
           payload={bookingId:result.bookingId,serviceId:payload.serviceId,stopSequence:payload.stopSequence};
         }
       }
-      queue.enqueue(type,payload);setNotice('Action enregistrée et synchronisée.');
+      const result=await queue.send(type,payload);
+      setNotice(result?.state==='succeeded'?'Action confirmée par le serveur.':result?.state==='conflict'?'Action refusée. Vérifiez le manifeste.':'Action en attente de confirmation du serveur.');
     }catch(e){setError(e.message);}
     finally{setBusy(false);manifest.reload();service.reload();}
   }
@@ -250,7 +261,7 @@ export function Manifest(){
     <SectionTitle icon={Users} title="Manifeste passagers" trailing={<Badge>{stop?.city}</Badge>}/>
     <QueueStatus queue={queue}/>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    {manifest.loading || manifest.error || !manifest.data?.length ? <ApiState resource={manifest} empty="Aucun passager confirmé sur ce service pour le moment."/> : manifest.data.map(b=><div className="manifest-row" key={b.id}><div className="seat"><small>Siège</small><strong>{b.seat_number}</strong></div><div><h3>{b.passenger_name}</h3><span className="small muted">{b.id}</span><div><Badge tone={b.status==='boarded'?'success':'neutral'}>{b.status}</Badge></div></div>
+    {manifest.loading || manifest.error || !manifest.data?.length ? <ApiState resource={manifest} empty="Aucun passager confirmé sur ce service pour le moment."/> : manifest.data.map(b=><div className="manifest-row" key={b.id}><div className="seat"><small>Siège</small><strong>{b.seat_number}</strong></div><div><h3>{b.passenger_name}</h3><span className="small muted">{s.stops.find(p=>p.sequence===b.origin_sequence)?.city} → {s.stops.find(p=>p.sequence===b.destination_sequence)?.city}</span><div><Badge tone={status('booking',b.status).tone}>{status('booking',b.status).label}</Badge></div></div>
       {b.status==='confirmed' && b.origin_sequence===s.current_sequence && <button className="btn btn-primary" disabled={busy} onClick={()=>act('board',{bookingId:b.id,serviceId:s.id,stopSequence:s.current_sequence})}>Embarquer</button>}
       {b.status==='boarded' && b.destination_sequence===s.current_sequence && <button className="btn btn-soft" disabled={busy} onClick={()=>act('alight',{bookingId:b.id,serviceId:s.id,stopSequence:s.current_sequence})}>Débarquer</button>}
     </div>)}
@@ -263,44 +274,60 @@ export function Scanner(){
   const queue=useDriverQueue(user?.id,request);
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[code,setCode]=useState(''),[scanning,setScanning]=useState(false);
   const scanner=useRef(null);
+  const video=useRef(null),reading=useRef(false);
+  const [verified,setVerified]=useState(null),[queuedId,setQueuedId]=useState(null);
+  const queued=queue.rows.find(row=>row.id===queuedId);
   useEffect(()=>()=>{scanner.current?.stop();scanner.current?.destroy();},[]);
   async function act(type,payload){
     setBusy(true);setError('');setNotice('');
     try{
-      if(type==='board' && payload.code){
-        if(navigator.onLine){
-          const result=await request('/tickets/verify',{method:'POST',body:{code:payload.code,serviceId:payload.serviceId,stopSequence:payload.stopSequence}});
-          payload={bookingId:result.bookingId,serviceId:payload.serviceId,stopSequence:payload.stopSequence};
-        }
+      setQueuedId(null);setVerified(null);
+      if(navigator.onLine){
+        const result=await request('/tickets/verify',{method:'POST',body:{code:payload.code,serviceId:payload.serviceId,stopSequence:payload.stopSequence}});
+        setVerified({...result,code:payload.code});
+      }else{
+        const row=queue.enqueue(type,payload);setQueuedId(row?.id);
       }
-      queue.enqueue(type,payload);setNotice('Billet valide — embarquement enregistré.');
     }catch(e){setError(e.message);}
     finally{setBusy(false);manifest.reload();service.reload();}
   }
   async function scan(){
     setError('');setScanning(true);
     try{
-      scanner.current=new QrScanner(/** @type {HTMLVideoElement} */(document.getElementById('qr-video')),result=>{
+      scanner.current?.destroy();reading.current=false;
+      scanner.current=new QrScanner(video.current,result=>{
+        if(reading.current)return;
         const match=/^LRT1\.[A-Za-z0-9_-]+$/.test(result.data)?result.data:null;
-        if(match){scanner.current?.stop();setScanning(false);act('board',{code:match,serviceId:s.id,stopSequence:s.current_sequence});}
+        if(match){reading.current=true;scanner.current?.stop();setScanning(false);act('board',{code:match,serviceId:s.id,stopSequence:s.current_sequence});}
         else setError('QR inconnu — il ne s’agit pas d’un billet LeRoutier.');
-      },{highlightScanRegion:true});
+      },{highlightScanRegion:true,preferredCamera:'environment'});
       await scanner.current.start();
-    }catch{setScanning(false);setError('Caméra indisponible — saisissez le code du billet manuellement.');}
+    }catch{scanner.current?.destroy();setScanning(false);setError('Caméra indisponible — saisissez le code du billet manuellement.');}
   }
   if(!s) return <><SectionTitle icon={QrCode} title="Contrôle des billets"/><Card><p role="status">Aucun service affecté — le contrôle des billets n’est pas disponible.</p></Card></>;
   return <>
     <SectionTitle icon={QrCode} title="Contrôle des billets"/>
     <QueueStatus queue={queue}/>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    {queued && <p role="status">{queued.state==='succeeded'?'Embarquement confirmé.':queued.state==='conflict'?'Embarquement refusé. Vérifiez le manifeste.':'Embarquement en attente de vérification par le serveur. Ne considérez pas le billet comme validé.'}</p>}
+    {verified && <Card className="stack card-success">
+      <h3>Billet vérifié · siège {verified.seat}</h3>
+      <strong>{manifest.data?.find(b=>b.id===verified.bookingId)?.passenger_name || 'Voyageur'}</strong>
+      <p>{s.route_name} · {s.registration}</p>
+      <p>{s.stops.find(p=>p.sequence===verified.origin)?.name} → {s.stops.find(p=>p.sequence===verified.destination)?.name}</p>
+      <button className="btn btn-primary" onClick={()=>{
+        const row=queue.enqueue('board',{code:verified.code,serviceId:verified.serviceId,stopSequence:verified.origin});
+        setQueuedId(row?.id);setVerified(null);setCode('');
+      }}>Confirmer l’embarquement</button>
+    </Card>}
     <Card className="scanner stack">
       <p className="small">Scannez le QR du billet ou saisissez son code manuel. Les actions s’enregistrent même hors ligne et se synchronisent à la reconnexion.</p>
       <div className="between wrap">
         <label className="grow">Code du billet<input className="control" placeholder="LRT1.… ou LR-XXXX-XXXX" value={code} onChange={e=>setCode(e.target.value)}/></label>
         <button className="btn btn-primary" disabled={busy || !code.trim()} onClick={()=>act('board',{code:code.trim(),serviceId:s.id,stopSequence:s.current_sequence})}>Valider le billet</button>
-        {!scanning?<button className="btn btn-soft" onClick={scan}>Scanner le QR</button>:<button className="btn btn-soft" onClick={()=>{scanner.current?.stop();setScanning(false);}}>Arrêter la caméra</button>}
+        {!scanning?<button className="btn btn-soft" disabled={busy} onClick={scan}>Scanner le QR</button>:<button className="btn btn-soft" onClick={()=>{scanner.current?.stop();setScanning(false);}}>Arrêter la caméra</button>}
       </div>
-      {scanning && <video id="qr-video" className="qr-video" muted playsInline aria-label="Lecture caméra QR"/>}
+      <video ref={video} id="qr-video" className="qr-video" hidden={!scanning} muted playsInline aria-label="Lecture caméra QR"/>
     </Card>
   </>;
 }
@@ -377,6 +404,7 @@ export function Parcels(){
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
   const [lookupCode,setLookupCode]=useState(''),[scannedParcel,setScannedParcel]=useState(null),[scanning,setScanning]=useState(false);
   const parcelScanner=useRef(null);
+  const parcelVideo=useRef(null),parcelReading=useRef(false);
   useEffect(()=>()=>{parcelScanner.current?.stop();parcelScanner.current?.destroy();},[]);
   async function lookup(code){
     const value=String(code||'').trim();
@@ -389,20 +417,25 @@ export function Parcels(){
   async function startParcelScan(){
     setError('');setScanning(true);
     try{
-      parcelScanner.current=new QrScanner(/** @type {HTMLVideoElement} */(document.getElementById('parcel-qr-video')),result=>{
+      parcelScanner.current?.destroy();parcelReading.current=false;
+      parcelScanner.current=new QrScanner(parcelVideo.current,result=>{
+        if(parcelReading.current)return;
         const value=result.data.trim();
         if(/^LRP1\.[A-Za-z0-9_-]+$/.test(value)){
-          parcelScanner.current?.stop();setScanning(false);lookup(value);
+          parcelReading.current=true;parcelScanner.current?.stop();setScanning(false);lookup(value);
         }else setError('QR colis inconnu — utilisez le numéro LRP manuscrit en secours.');
-      },{highlightScanRegion:true});
+      },{highlightScanRegion:true,preferredCamera:'environment'});
       await parcelScanner.current.start();
-    }catch{setScanning(false);setError('Caméra indisponible — saisissez la référence LRP manuellement.');}
+    }catch{parcelScanner.current?.destroy();setScanning(false);setError('Caméra indisponible — saisissez la référence LRP manuellement.');}
   }
-  function queueParcel(kind, parcelId=scannedParcel?.id){
+  async function queueParcel(kind, parcelId=scannedParcel?.id){
     if(!parcelId || !s) return;
-    queue.enqueue('parcel',{serviceId:s.id,parcelId,kind});
-    setNotice(`${parcelLabels[kind==='loaded'?'loaded':kind==='departed'?'in_transit':'arrived']} enregistré${navigator.onLine?' et synchronisé.':' hors ligne — synchronisation en attente.'}`);
-    cargo.reload?.();setScannedParcel(null);setLookupCode('');
+    setBusy(true);setError('');
+    try{
+      const result=await queue.send('parcel',{serviceId:s.id,parcelId,kind});
+      setNotice(result?.state==='succeeded'?'Prise en charge confirmée.':result?.state==='conflict'?'Scan refusé. Vérifiez le statut du colis.':'Scan enregistré sur cet appareil — confirmation du serveur en attente.');
+      cargo.reload?.();setScannedParcel(null);setLookupCode('');
+    }catch(e){setError(e.message);}finally{setBusy(false);}
   }
   async function reportProblem(p){
     const description=window.prompt('Décrivez le problème constaté sur le colis :');
@@ -425,14 +458,14 @@ export function Parcels(){
         {!scanning?<button className="btn btn-soft" disabled={busy} onClick={startParcelScan}>Scanner le QR</button>
           :<button className="btn btn-soft" onClick={()=>{parcelScanner.current?.stop();setScanning(false);}}>Arrêter la caméra</button>}
       </div>
-      {scanning && <video id="parcel-qr-video" className="qr-video" muted playsInline aria-label="Lecture caméra QR du colis"/>}
+      <video ref={parcelVideo} id="parcel-qr-video" className="qr-video" hidden={!scanning} muted playsInline aria-label="Lecture caméra QR du colis"/>
       {scannedParcel && <div className="summary">
         <div className="row"><strong>{scannedParcel.trackingNumber}</strong><Badge tone={parcelTones[scannedParcel.status]}>{parcelLabels[scannedParcel.status]}</Badge></div>
         <div className="row"><span>{scannedParcel.category} · {scannedParcel.quantity} pièce(s)</span><span>{scannedParcel.originCity} → {scannedParcel.destinationCity}</span></div>
         <div className="controls">
-          {scannedParcel.status==='manifested' && <button className="btn btn-primary" onClick={()=>queueParcel('loaded')}>Accepter et charger</button>}
-          {scannedParcel.status==='loaded' && <button className="btn btn-primary" onClick={()=>queueParcel('departed')}>Déclarer le départ</button>}
-          {scannedParcel.status==='in_transit' && <button className="btn btn-primary" onClick={()=>queueParcel('arrived')}>Déclarer l’arrivée</button>}
+          {scannedParcel.status==='manifested' && <button className="btn btn-primary" disabled={busy} onClick={()=>queueParcel('loaded')}>Accepter et charger</button>}
+          {scannedParcel.status==='loaded' && <button className="btn btn-primary" disabled={busy} onClick={()=>queueParcel('departed')}>Déclarer le départ</button>}
+          {scannedParcel.status==='in_transit' && <button className="btn btn-primary" disabled={busy} onClick={()=>queueParcel('arrived')}>Déclarer l’arrivée</button>}
         </div>
       </div>}
     </Card>
@@ -443,6 +476,13 @@ export function Parcels(){
         {p.status==='loaded' && <button className="btn btn-primary" disabled={busy} onClick={()=>queueParcel('departed',p.id)}>Scanner le départ</button>}
         {p.status==='in_transit' && <button className="btn btn-primary" disabled={busy} onClick={()=>queueParcel('arrived',p.id)}>Scanner l’arrivée</button>}
         {(p.status==='loaded'||p.status==='in_transit') && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>reportProblem(p)}>Signaler un problème</button>}
+        {p.status==='arrived' && <p className="small muted">L’exploitation confirme le point de retrait et prépare le code du destinataire.</p>}
+        {p.status==='ready_for_pickup' && user.role==='driver' && <button className="btn btn-primary" disabled={busy || !online} onClick={async()=>{
+          const code=window.prompt('Code de retrait du destinataire (6 chiffres) :');if(!code)return;
+          setBusy(true);setError('');
+          try{await request(`/parcels/${p.id}/pickup`,{method:'POST',body:{code}});setNotice('Colis remis au destinataire.');cargo.reload();}
+          catch(e){setError(e.message);}finally{setBusy(false);}
+        }}>Remettre avec le code</button>}
       </div></Card>)}
   </>;
 }

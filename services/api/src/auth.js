@@ -39,12 +39,14 @@ export function authentication(db, config, keyResolver = undefined) {
       }
       return mapIdentity(db,await verify(token));
     },
-    async demoSession(role) {
+    async demoSession(role, profile) {
       invariant(config.demoLogin, 'NOT_FOUND', 'Endpoint not found.', 404);
-      invariant(['passenger','driver','ops'].includes(role),'INVALID_ROLE','Choose a development role.');
+      const profiles = { passenger: 2, 'owner-driver': 20, 'company-driver': 28, convoyeur: 3, 'company-ops': 11, 'platform-ops': 1 };
+      invariant(profile ? Object.hasOwn(profiles, profile) : ['passenger','driver','convoyeur','ops'].includes(role),'INVALID_ROLE','Choose a development role.');
+      const profileId = profile ? `00000000-0000-4000-b00b-${String(profiles[profile]).padStart(12,'0')}` : null;
       const token=randomBytes(32).toString('base64url');
       const user=await db.transaction(async tx=>{
-        const user=(await tx.query('SELECT id,role,operator_id,display_name FROM users WHERE is_demo=true AND role=$1 ORDER BY id LIMIT 1',[role])).rows[0];
+        const user=(await tx.query('SELECT id,role,operator_id,display_name FROM users WHERE is_demo=true AND (($2::uuid IS NOT NULL AND id=$2) OR ($2::uuid IS NULL AND role=$1)) ORDER BY id LIMIT 1',[role ?? null,profileId])).rows[0];
         invariant(user,'NOT_FOUND','Development seed is not available.',404);
         await tx.query('DELETE FROM api_sessions WHERE expires_at<=now()');
         await tx.query("INSERT INTO api_sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '1 hour')",[hash(token),user.id]);

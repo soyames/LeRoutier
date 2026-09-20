@@ -80,9 +80,12 @@ export function parcels(db) {
       invariant(!actor.operator_id || actor.operator_id === parcel.operator_id, 'FORBIDDEN', 'Operation is not permitted.', 403);
       return parcel;
     }
-    if (actor?.role === 'driver') {
-      const assignment = await one(tx, `SELECT * FROM parcel_service_assignments WHERE parcel_id=$1 AND status IN ('assigned','loaded','in_transit','arrived') ORDER BY created_at DESC LIMIT 1`, [parcel.id]);
-      invariant(assignment && assignment.driver_id === actor.id,
+    if (actor?.role === 'driver' || actor?.role === 'convoyeur') {
+      const assignment = await one(tx, `SELECT psa.id FROM parcel_service_assignments psa
+        JOIN service_assignments sa ON sa.service_id=psa.service_id AND sa.ended_at IS NULL
+        WHERE psa.parcel_id=$1 AND psa.status IN ('assigned','loaded','in_transit','arrived')
+        AND (($3='driver' AND sa.driver_id=$2) OR ($3='convoyeur' AND sa.convoyeur_id=$2))`, [parcel.id,actor.id,actor.role]);
+      invariant(assignment,
         'FORBIDDEN', 'Cette expédition n’est pas affectée à votre service.', 403);
       return parcel;
     }
@@ -141,6 +144,11 @@ export function parcels(db) {
   // minus commission) and records the transaction as market evidence.
   // Idempotent per parcel payment: replays never double-credit or double-count.
   async function settleParcelPayment(tx, parcel, payment) {
+    const synthetic = await one(tx, `SELECT EXISTS(SELECT 1 FROM operators WHERE id=$1 AND is_demo)
+      OR EXISTS(SELECT 1 FROM users WHERE id=$2 AND is_demo)
+      OR EXISTS(SELECT 1 FROM parcel_service_assignments a JOIN services s ON s.id=a.service_id WHERE a.parcel_id=$3 AND s.is_demo) AS test`,
+    [parcel.operator_id,parcel.created_by,parcel.id]);
+    if(synthetic.test) return;
     const operatorType = (await one(tx, 'SELECT type FROM operators WHERE id=$1', [parcel.operator_id]))?.type ?? null;
     const split = splitCommission(payment.amount_minor);
     await settlements.credit(tx, { operatorId: parcel.operator_id,
@@ -252,10 +260,10 @@ export function parcels(db) {
       [filter.status ?? null, (filter.q ?? '').slice(0, 40) || null, actor.operator_id])).rows.map(r => publicParcel(r)));
     },
     async listDriver(actor) {
-      invariant(actor?.role === 'driver', 'FORBIDDEN', 'Driver access required.', 403);
+      invariant(['driver','convoyeur'].includes(actor?.role), 'FORBIDDEN', 'Crew access required.', 403);
       return db.transaction(async tx => {
         const service = await one(tx, `SELECT s.id FROM service_assignments a JOIN services s ON s.id=a.service_id
-          WHERE a.driver_id=$1 AND a.ended_at IS NULL AND s.status IN ('scheduled','active','disrupted') ORDER BY s.departure_at LIMIT 1`, [actor.id]);
+          WHERE (($2='driver' AND a.driver_id=$1) OR ($2='convoyeur' AND a.convoyeur_id=$1)) AND a.ended_at IS NULL AND s.status IN ('scheduled','active','disrupted') ORDER BY s.departure_at LIMIT 1`, [actor.id,actor.role]);
         if (!service) return [];
         return (await tx.query(`SELECT p.*,o.name AS origin_city,d.name AS destination_city FROM parcels p
           JOIN parcel_service_assignments a ON a.parcel_id=p.id AND a.status IN ('assigned','loaded','in_transit','arrived')
@@ -265,7 +273,7 @@ export function parcels(db) {
       });
     },
     async lookupDriver(actor, code) {
-      invariant(actor?.role === 'driver', 'FORBIDDEN', 'Driver access required.', 403);
+      invariant(['driver','convoyeur'].includes(actor?.role), 'FORBIDDEN', 'Crew access required.', 403);
       invariant(typeof code === 'string' && code.trim().length > 0 && code.trim().length <= 200,
         'INVALID_REFERENCE', 'Saisissez le QR ou la référence LRP du colis.', 400);
       const value = code.trim();
@@ -275,11 +283,11 @@ export function parcels(db) {
           FROM parcels p
           JOIN parcel_service_assignments psa ON psa.parcel_id=p.id
             AND psa.status IN ('assigned','loaded','in_transit','arrived')
-          JOIN service_assignments sa ON sa.service_id=psa.service_id AND sa.driver_id=$1 AND sa.ended_at IS NULL
+          JOIN service_assignments sa ON sa.service_id=psa.service_id AND (($4='driver' AND sa.driver_id=$1) OR ($4='convoyeur' AND sa.convoyeur_id=$1)) AND sa.ended_at IS NULL
           JOIN stops o ON o.id=p.origin_stop_id JOIN stops d ON d.id=p.destination_stop_id
           LEFT JOIN parcel_labels pl ON pl.parcel_id=p.id
           WHERE p.tracking_number=$2 OR ($3::text IS NOT NULL AND pl.token_hash=$3)
-          ORDER BY psa.created_at DESC LIMIT 1`, [actor.id, value.toUpperCase(), tokenHash]);
+          ORDER BY psa.created_at DESC LIMIT 1`, [actor.id, value.toUpperCase(), tokenHash,actor.role]);
         invariant(row, 'NOT_FOUND', 'Ce colis n’est pas affecté à votre service.', 404);
         return driverParcel({ ...row, pickup_required: row.status === 'ready_for_pickup' });
       });
@@ -357,6 +365,7 @@ export function parcels(db) {
       });
     },
     async scan(actor, id, input, key) {
+      invariant(['ops','driver','convoyeur'].includes(actor?.role),'FORBIDDEN','Crew or operations access required.',403);
       idempotencyKey(key);
       invariant(input && Object.keys(input).every(k => ['kind'].includes(k)) && ['loaded', 'departed', 'arrived'].includes(input.kind),
         'INVALID_SCAN', 'Scan kind must be loaded, departed or arrived.');
@@ -453,7 +462,7 @@ export function parcels(db) {
       });
     },
     async exception(actor, id, input) {
-      invariant(actor?.role === 'ops' || actor?.role === 'driver', 'FORBIDDEN', 'Crew access required.', 403);
+      invariant(['ops','driver','convoyeur'].includes(actor?.role), 'FORBIDDEN', 'Crew access required.', 403);
       invariant(input && Object.keys(input).every(k => ['kind', 'description'].includes(k)), 'INVALID_EXCEPTION', 'Unexpected exception fields.');
       invariant(['damaged', 'lost', 'rejected', 'held', 'return_requested', 'other'].includes(input.kind) &&
         typeof input.description === 'string' && input.description.trim().length > 0 && input.description.length <= 2000,

@@ -113,7 +113,6 @@ export function JourneyTracking({ bookingId, serviceId, pollMs = 20_000 }) {
 
       {/* Everything on the map is also stated in words. */}
       <div className="summary">
-        {data.nextStop && <div className="row"><span>Prochain arrêt</span><span>{data.nextStop.city}</span></div>}
         {data.progress && <>
           <div className="row"><span>Distance parcourue</span><span>{km(data.progress.distanceAlongM)}</span></div>
           <div className="row"><span>Distance restante</span><span>{km(data.progress.remainingM)}</span></div>

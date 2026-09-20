@@ -65,6 +65,9 @@ Then run the API and the unified PWA against it:
 pnpm dev:local
 ```
 
+For all six role logins with meaningful local TEST journeys, see
+[TEST profiles and inspection guide](tests/TEST-PROFILES.md).
+
 `pnpm docker:reset` rebuilds it from empty. `pnpm docker:down` stops it.
 `pnpm dev` runs every app including the legacy ones, against whatever
 `.env.local` points at.

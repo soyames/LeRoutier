@@ -47,12 +47,13 @@ function NotAuthorized({ workspace }) {
 // One LeRoutier sign-in, reusing the shared session panel so the experience is
 // identical everywhere. The user stays on the route they asked for.
 function SignInRequired() {
+  const navigate = useNavigate();
   return <div className="stack">
     <Card className="stack">
       <SectionTitle title="Connexion requise"/>
       <p className="small muted">Une seule identité LeRoutier donne accès à tous vos espaces autorisés. Vous reviendrez ici après la connexion.</p>
     </Card>
-    <SessionPanel/>
+    <SessionPanel onWorkspace={navigate}/>
   </div>;
 }
 
@@ -193,7 +194,11 @@ export default function App() {
     if (authLoading) return shell(<Card><p role="status">Vérification de votre identité…</p></Card>);
     if (!user) return shell(<SignInRequired/>);
     if (!isAuthorized(workspace, user)) return shell(<NotAuthorized workspace={workspace}/>);
-    if (workspace === OPS && !can.verified) {
+    if (workspace === WORK && ((page === 'boarding-points' && !can.independent) || (page === 'vehicle' && can.convoyeur))) {
+      return shell(<EmptyState icon={Lock} title="Action réservée" text="Cette fonction n’est pas disponible pour votre mission."
+        action={<button className="btn btn-primary" onClick={()=>navigate('/work/today')}>Revenir à mon service</button>}/>);
+    }
+    if (workspace === OPS && !can.platformOps && !can.verified) {
       return shell(<div className="stack">
         <Card><div className="between wrap"><span className="small">Compagnie en cours de vérification.</span><Badge tone="warning">en attente</Badge></div></Card>
         {scoped.screens[page]}
@@ -208,5 +213,5 @@ export default function App() {
   // fully public too — no sign-in card merely because offers exist.
   const fullyPublic = workspace === PASSENGER && (page === '' || page === 'trips' ||
     (page === 'parcels' && segments[1] === 'track') || page === 'checkout');
-  return shell(<>{!fullyPublic && <SessionPanel/>}{privacySub ? <PrivacyCenter/> : scoped.screens[page]}</>);
+  return shell(<>{user?.is_demo && <div className="notice" role="status">Espace TEST · données de démonstration · aucun paiement réel</div>}{!fullyPublic && <SessionPanel onWorkspace={navigate}/>}{privacySub ? <PrivacyCenter/> : scoped.screens[page]}</>);
 }

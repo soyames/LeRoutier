@@ -8,7 +8,7 @@ function isDriverApp(role){return Array.isArray(role)?role.includes('driver')||r
 // One authentication entry for every workspace: Google or email/password,
 // both converging on the same LeRoutier identity. Passwords live in Firebase
 // only — the LeRoutier API never sees them.
-export function SessionPanel() {
+export function SessionPanel({onWorkspace=undefined}) {
   const {user,identity,role,login,loginDemo,logout,demoLogin,configured,online,authLoading,authError,canSignin,
     createAccount,loginEmail,resetPassword}=useSession();
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
@@ -46,6 +46,15 @@ export function SessionPanel() {
           {role.map(r=><button key={r} className="control" disabled={busy || !online}
             onClick={()=>run(()=>loginDemo(r))}>Développement : {r}</button>)}
         </div>}
+        {demoLogin && <details className="stack"><summary>Profils TEST — tous les espaces</summary>
+          <p className="small muted">Données de démonstration locales. Aucun paiement réel.</p>
+          <div className="demo-profiles">{[
+            ['passenger','Voyageur','/tickets'],['owner-driver','Chauffeur indépendant','/work/today'],
+            ['company-driver','Conducteur de compagnie','/work/today'],['convoyeur','Convoyeur','/work/today'],
+            ['company-ops','Exploitation compagnie','/ops/today'],['platform-ops','Exploitation plateforme','/ops/today'],
+          ].map(([profile,label,path])=><button key={profile} className="btn btn-soft" disabled={busy || !online}
+            onClick={()=>run(async()=>{await loginDemo({profile});onWorkspace?.(path);})}>TEST : {label}</button>)}</div>
+        </details>}
         {canSignin && mode==='signin' && <form className="stack" onSubmit={submitSignin}>
           <p className="small muted">ou</p>
           <label>Adresse e-mail<input className="control" type="email" autoComplete="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>

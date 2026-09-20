@@ -168,9 +168,13 @@ test('ops receives exception alerts and the boarding-point moderation queue',asy
 });
 
 test('parcel notifications reach the right party and never carry the pickup code',async()=>{
+  // Exercise unavailable delivery for real inventory. TEST operators suppress
+  // external delivery even before a parcel is assigned to a service.
+  const operator=randomUUID();
+  await one("INSERT INTO operators(id,name) VALUES($1,'Notification fixture operator') RETURNING id",[operator]);
   const parcel=await one(`INSERT INTO parcels(tracking_number,operator_id,origin_stop_id,destination_stop_id,category,price_minor,status,idempotency_key,request_fingerprint)
     VALUES($1,$2,$3,$4,'documents',1500,'accepted',$5,$5) RETURNING *`,
-  ['LRP-'+randomUUID().slice(0,8).toUpperCase(),demo.operator,demoId(200),demoId(201),'test-'+randomUUID()]);
+  ['LRP-'+randomUUID().slice(0,8).toUpperCase(),operator,demoId(200),demoId(201),'test-'+randomUUID()]);
   await db.transaction(async tx=>{
     await tx.query("INSERT INTO parcel_parties(parcel_id,role,name,phone) VALUES($1,'sender','Expéditeur','+22961000007')",[parcel.id]);
     await tx.query("INSERT INTO parcel_parties(parcel_id,role,name,phone) VALUES($1,'receiver','Destinataire','+22961000008')",[parcel.id]);

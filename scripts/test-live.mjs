@@ -5,6 +5,7 @@ import { serverConfig } from '../packages/config/src/index.js';
 import { createDatabase } from '../packages/database/src/index.js';
 import { migrate } from '../packages/database/src/migrations.js';
 import { seed } from '../packages/database/src/seed.js';
+import { seedTestProfiles } from '../packages/database/src/test-profiles.js';
 import { assertDisposableSchema, dropDisposableSchema, environmentLabel } from '../packages/database/src/guards.js';
 import { createApi } from '../services/api/src/app.js';
 import { nodeHandler } from '../services/api/src/node-handler.js';
@@ -19,7 +20,7 @@ const PREVIEW_ORIGINS = [4173].flatMap(port => [`http://127.0.0.1:${port}`, `htt
 // developer's local CORS_ORIGINS. Production CORS is unaffected: this config
 // exists only for these throwaway schemas and this in-process server.
 const base = serverConfig();
-const SPECS = ['tests/e2e/unified.live.spec.js'];
+const SPECS = ['tests/e2e/unified.live.spec.js','tests/e2e/roles.live.spec.js'];
 
 function reclaimPorts() {
   if (process.platform !== 'win32') return;
@@ -37,7 +38,8 @@ async function runSpec(spec) {
     // environment label only — never a host or a connection string.
     assertDisposableSchema(db, { purpose: 'The live integration suite' });
     console.log(`Live suite target: schema=${db.schema} environment=${environmentLabel(db.schema)}`);
-    await migrate(db); await seed(db);
+    await migrate(db);
+    if(spec.endsWith('/roles.live.spec.js')) await seedTestProfiles(db); else await seed(db);
     await db.transaction(tx => tx.query("UPDATE services SET departure_at=now()+interval '1 hour' WHERE is_demo=true"));
     reclaimPorts();
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(4000, resolve); });

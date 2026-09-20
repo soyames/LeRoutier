@@ -223,6 +223,18 @@ button:disabled{opacity:.55;cursor:not-allowed}
 }
 
 .offer-card{display:flex;flex-direction:column;gap:12px;min-width:0}
+.demo-profiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
+.demo-profiles .btn{justify-content:flex-start;text-align:left;min-height:48px}
+.lr-bottom-nav{justify-content:safe center;overflow-x:auto}
+summary{cursor:pointer;min-height:44px;padding-block:10px}
+.avatar-btn,.avatar{width:44px;height:44px}
+.icon-btn,.chip,.combobox-chip,.account-menu button,.workspace-menu button{min-height:44px}
+.offer-pager-dot{width:32px;height:32px;border-width:10px;background-clip:padding-box}
+.qr-video[hidden]{display:none}
+.qr-video{width:100%;max-height:55dvh;object-fit:cover;border-radius:16px}
+.manifest-row>div{min-width:0;overflow-wrap:anywhere}
+@media(max-width:640px){.workspace-switch{max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lr-header-main{gap:8px}.big-actions{grid-template-columns:1fr}.controls>.btn{min-height:48px}}
+@media(max-width:640px){.lr-header-actions>.badge{display:none}.lr-logo{width:100px}.lr-brand-wrap{flex-shrink:0}.lr-header-actions{min-width:0;gap:6px}.workspace-switch{max-width:120px;min-height:44px}.lr-header-main{padding-inline:12px}.lr-role-strip small{display:none}}
 .offer-details{border:0;width:100%;max-width:none;max-height:100%;margin:0;color:var(--navy)}
 .offer-details[open]{display:flex;flex-direction:column;gap:16px}
 .offer-details::backdrop{background:rgba(15,23,42,.5)}

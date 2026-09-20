@@ -16,6 +16,13 @@ const ERROR_COPY={
   PROFILE_REQUIRED:'Complétez votre profil avant de réserver.',
   RATE_LIMITED:'Trop de tentatives. Patientez un instant avant de réessayer.',
   FORBIDDEN:'Vous n’avez pas accès à cette action avec ce compte.',
+  TICKET_INVALID:'Ce billet est invalide, expiré ou remplacé. Demandez au voyageur d’afficher son billet actuel.',
+  WRONG_SERVICE:'Ce billet correspond à un autre service. Vérifiez le départ avec le voyageur.',
+  WRONG_STOP:'L’embarquement doit se faire à l’arrêt réservé, sur un service démarré.',
+  ALREADY_BOARDED:'Ce billet a déjà été utilisé pour embarquer.',
+  ACTION_CONFLICT:'Cette action a déjà été enregistrée ou n’est plus possible. Vérifiez le manifeste.',
+  ACTIVE_BOOKINGS:'Terminez les débarquements et résolvez les réservations en cours avant de fermer le service.',
+  ACTIVE_PARCELS:'Confirmez l’arrivée des colis et résolvez leur prise en charge avant de fermer le service.',
 };
 
 export function ApiProvider({baseUrl='',role,children}) {
@@ -115,7 +122,7 @@ export function ApiProvider({baseUrl='',role,children}) {
   // accepts the role to impersonate; single-role apps keep their first role.
   const demoLogin=useCallback(async(as=undefined)=>{
     if(!auth.demoLogin)throw new Error('Connexion de développement indisponible.');
-    setSession(await request('/auth/demo',{method:'POST',body:{role:as ?? (Array.isArray(role)?role[0]:role)}}));
+    setSession(await request('/auth/demo',{method:'POST',body:typeof as==='object'?as:{role:as ?? (Array.isArray(role)?role[0]:role)}}));
   },[request,role,auth.demoLogin]);
 
   const logout=useCallback(async()=>{
@@ -176,6 +183,10 @@ export function useApi(path) {
   const [version,setVersion]=useState(0),[state,setState]=useState({path:null,request:null,version:0,data:null,error:null,code:null,loading:true});
   useEffect(()=>{
     if(!path) return;
+    // Keep the already-loaded assignment available for offline crew actions.
+    // Never carry data across a path or identity change; authorization is
+    // rechecked by the API when queued actions synchronize.
+    if(!online) return;
     const controller=new AbortController();
     request(path,{signal:controller.signal}).then(data=>{if(!controller.signal.aborted)setState({path,request,version,data,error:null,code:null,loading:false});})
       // The code travels with the message: a screen must be able to tell an
@@ -183,7 +194,9 @@ export function useApi(path) {
       .catch(error=>{if(!controller.signal.aborted)setState({path,request,version,data:null,error:error.message,code:error.code ?? null,loading:false});});
     return()=>controller.abort();
   },[path,request,version,online]);
-  return {...(state.path===path && state.request===request && state.version===version?state:{data:null,error:null,code:null,loading:!!path}),reload:()=>setVersion(v=>v+1)};
+  const cached=state.path===path && state.request===request?state.data:null;
+  const offline={data:cached,error:cached?null:'Hors ligne. Réessayez après reconnexion.',code:null,loading:false};
+  return {...(!online?offline:state.path===path && state.request===request && state.version===version?state:{data:null,error:null,code:null,loading:!!path}),reload:()=>setVersion(v=>v+1)};
 }
 
 // Failures the user must act on themselves: show what actually happened rather
