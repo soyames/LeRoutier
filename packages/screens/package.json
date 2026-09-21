@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./passenger": "./src/passenger.jsx",
+    "./passenger": "./src/passenger-entry.jsx",
     "./crew": "./src/crew.jsx",
     "./ops": "./src/ops.jsx",
     "./journey": "./src/journey.jsx",
