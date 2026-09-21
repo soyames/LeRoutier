@@ -135,17 +135,33 @@ export function transport(db) {
     async search({ originStopId = null, destinationStopId = null, limit = 50, includeDemo = false } = {}) {
       invariant(!originStopId === !destinationStopId, 'INVALID_JOURNEY', 'Both origin and destination are required.');
       if (originStopId) { uuid(originStopId); uuid(destinationStopId); }
-      const rows = await db.transaction(async tx => (await tx.query(`SELECT s.*,r.name AS route_name,o.name AS operator_name,v.registration,
+      // This is the anonymous public catalogue, and it answers the same
+      // question as /journey-plan, so it applies the same two rules:
+      //
+      //  - Only VERIFIED operators are offered. An operator suspended or
+      //    rejected after its services were scheduled must stop being
+      //    bookable on the decision, not when its last departure expires.
+      //  - An INDEPENDENT owner-driver IS the operator, so a passenger
+      //    boarding a private vehicle sees the person and the car. A COMPANY
+      //    driver is an employee; publishing which named employee drives
+      //    which bus at which hour, to anonymous visitors, is staff
+      //    surveillance and is not needed to book a seat.
+      const rows = await db.transaction(async tx => (await tx.query(`SELECT s.*,r.name AS route_name,o.name AS operator_name,
+        o.type AS operator_type,o.verification_status AS operator_verification_status,v.registration,
+        v.make AS vehicle_make,v.model AS vehicle_model,v.color AS vehicle_color,v.model_year AS vehicle_year,
+        CASE WHEN o.type='independent' THEN v.photo_url END AS vehicle_photo_url,
         bdp.name AS departure_point_name,bdp.description AS departure_point_landmark,bdp.latitude AS departure_point_latitude,bdp.longitude AS departure_point_longitude,
         bap.name AS arrival_point_name,bap.description AS arrival_point_landmark,bap.latitude AS arrival_point_latitude,bap.longitude AS arrival_point_longitude,
-        u.display_name AS driver_name,
+        CASE WHEN o.type='independent' THEN u.display_name END AS driver_name,
+        CASE WHEN o.type='independent' THEN dp.photo_url END AS driver_photo_url,
         (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$1) AS origin,
         (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$2) AS destination
         FROM services s JOIN routes r ON r.id=s.route_id JOIN operators o ON o.id=s.operator_id
         JOIN service_assignments a ON a.service_id=s.id AND a.ended_at IS NULL JOIN vehicles v ON v.id=a.vehicle_id
-        LEFT JOIN users u ON u.id=a.driver_id
+        LEFT JOIN users u ON u.id=a.driver_id LEFT JOIN driver_profiles dp ON dp.user_id=a.driver_id
         LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id
         WHERE s.status IN ('scheduled','active') AND (s.departure_at>now() OR s.status='active') AND (NOT s.is_demo OR $4)
+          AND (s.is_demo OR o.verification_status='verified')
         ORDER BY s.departure_at LIMIT $3`, [originStopId, destinationStopId, limit, includeDemo === true])).rows);
       const result = [];
       for (const service of rows) {

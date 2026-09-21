@@ -1,4 +1,5 @@
 import { invariant } from '@leroutier/domain';
+import { assertRegistrationOpen } from './registration.js';
 
 export async function audit(tx,actorId,action,entityId,operatorId=null,details={}) {
   await tx.query('INSERT INTO audit_events(actor_id,action,entity_id,operator_id,details) VALUES($1,$2,$3,$4,$5)',
@@ -26,6 +27,13 @@ export async function activeIdentity(tx,id) {
 export async function mapIdentity(db,{subject,issuer,notificationEmail=null}) {
   invariant(typeof subject==='string' && subject.length>0 && subject.length<=255,'UNAUTHORIZED','Invalid identity.',401);
   return db.transaction(async tx=>{
+    // An identity that already exists always signs in: registration capacity
+    // never locks anybody out of an account they already have. Only the
+    // creation of a NEW identity is gated, and the gate is measured inside
+    // this transaction under an advisory lock so concurrent first sign-ins
+    // cannot each read the same "still under threshold" and overshoot it.
+    const known=(await tx.query('SELECT id FROM users WHERE auth_subject=$1',[subject])).rows[0];
+    if(!known) await assertRegistrationOpen(tx);
     const inserted=(await tx.query(`INSERT INTO users(auth_subject,auth_issuer,display_name,role)
       VALUES($1,$2,'','passenger') ON CONFLICT(auth_subject) DO NOTHING RETURNING id`,[subject,issuer])).rows[0];
     const user=(await tx.query('SELECT id,auth_issuer FROM users WHERE auth_subject=$1',[subject])).rows[0];

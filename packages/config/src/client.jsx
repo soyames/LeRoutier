@@ -13,6 +13,9 @@ const ERROR_COPY={
   UNAUTHORIZED:'Connectez-vous pour continuer.',
   AUTH_UNAVAILABLE:'La connexion sécurisée n’est pas disponible pour le moment. Réessayez plus tard.',
   ACCOUNT_DISABLED:'Ce compte est désactivé. Contactez votre exploitation ou LeRoutier.',
+  // Capacity protection. The visitor learns that registration is paused and
+  // that existing accounts still work — never how full the database is.
+  REGISTRATION_SUSPENDED:'Les inscriptions LeRoutier sont momentanément suspendues. Les comptes existants fonctionnent normalement ; réessayez plus tard.',
   PROFILE_REQUIRED:'Complétez votre profil avant de réserver.',
   RATE_LIMITED:'Trop de tentatives. Patientez un instant avant de réessayer.',
   FORBIDDEN:'Vous n’avez pas accès à cette action avec ce compte.',
@@ -100,6 +103,11 @@ export function ApiProvider({baseUrl='',role,children}) {
           // A verified Google identity that LeRoutier refuses is not a silent
           // failure: the user is told, and is not left looking signed in.
           if(!cancelled){setSession(null);setAuth(a=>({...a,error:error.message}));}
+          // Registration is closed and this Google identity has no LeRoutier
+          // account, so none was created. Leaving the Firebase session open
+          // would re-trigger this listener on every reload and leave the app
+          // looking half signed-in. Sign out of the provider too.
+          if(error?.code==='REGISTRATION_SUSPENDED')await signOutFirebase(auth.firebase).catch(()=>{});
         }
       });
     })();

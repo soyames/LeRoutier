@@ -43,6 +43,12 @@ export function takeReturnPath() {
  *
  * Local development keeps the configured Firebase domain because localhost
  * does not proxy /__/auth to the Firebase project.
+ *
+ * @param {{authDomain?: string}|null|undefined} config
+ * @param {{hostname?: string}|null|undefined} [location] only `hostname` is
+ *   read, so a caller (and a test) may pass that alone rather than a whole
+ *   `Location`.
+ * @returns {string|undefined}
  */
 export function browserAuthDomain(config, location = globalThis.window?.location) {
   const hostname = String(location?.hostname || '').toLowerCase();

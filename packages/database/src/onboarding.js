@@ -8,18 +8,58 @@ const optionalRef=(value,max=200)=>{
   invariant(text.length>=2&&text.length<=max,'INVALID_ONBOARDING','Reference is invalid.');
   return text;
 };
+// Hosts that are never a legitimate place to keep a carte grise, and are the
+// usual target when somebody wants another person's browser to reach an
+// internal service.
+const BLOCKED_HOSTS=['localhost','metadata','metadata.google.internal','instance-data'];
+const BLOCKED_SUFFIXES=['.localhost','.local','.internal','.intranet','.home.arpa','.lan'];
+/**
+ * Validate an operator-supplied document or photo reference.
+ *
+ * LeRoutier never fetches these URLs server-side, so this is not an SSRF
+ * sandbox — it protects the party that DOES load them: a Platform Ops
+ * reviewer opening a proof, and every passenger's browser rendering a
+ * verified driver's photo. Accordingly it accepts only a plain,
+ * credential-free, port-free https URL on a real named host.
+ *
+ * `https://` alone is not enough: `https://user:token@…`, `https://10.0.0.5/`,
+ * `https://169.254.169.254/latest/meta-data/` and `https://2130706433/` all
+ * satisfy "must use HTTPS" and none of them is a document.
+ */
 const httpsUrl=(value,required=false)=>{
   if(value===undefined||value===null||value===''){invariant(!required,'INVALID_ONBOARDING','A secure document link is required.');return null;}
   const text=String(value).trim();
   invariant(text.length<=2000,'INVALID_ONBOARDING','Document URL is too long.');
   let parsed;try{parsed=new URL(text);}catch{invariant(false,'INVALID_ONBOARDING','Document URL is invalid.');}
-  invariant(parsed.protocol==='https:','INVALID_ONBOARDING','Document URL must use HTTPS.');
-  return text;
+  const refuse=()=>invariant(false,'INVALID_ONBOARDING','Document URL must be a public HTTPS address, without credentials or an internal host.');
+  // https only: this is also what excludes javascript:, data:, blob: and file:.
+  if(parsed.protocol!=='https:')refuse();
+  // Embedded credentials become a leaked secret the moment the link is
+  // rendered, copied or logged.
+  if(parsed.username||parsed.password)refuse();
+  // An explicit port on a document link is either a mistake or a service that
+  // is not a document host.
+  if(parsed.port)refuse();
+  const host=parsed.hostname.toLowerCase();
+  if(!host||host.length>253)refuse();
+  // IPv6 literals ([::1], [fd00::1], …) are never a document host.
+  if(host.startsWith('[')||host.includes(':'))refuse();
+  if(BLOCKED_HOSTS.includes(host))refuse();
+  if(BLOCKED_SUFFIXES.some(suffix=>host.endsWith(suffix)))refuse();
+  // Any IP literal is refused, not merely the private ranges: a real document
+  // host has a name, and refusing the whole shape removes every decimal,
+  // octal and hexadecimal encoding trick at once.
+  if(/^\d{1,3}(\.\d{1,3}){3}$/.test(host))refuse();
+  // A dotted name with at least one label separator. This also rejects bare
+  // numbers (https://2130706433/) and single labels (https://intranet/).
+  if(!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host))refuse();
+  if(/^\d+$/.test(host.replaceAll('.','')))refuse();
+  return parsed.toString();
 };
 const addEvidence=(tx,operatorId,kind,{reference=null,fileUrl=null,subjectUserId=null,vehicleId=null}={})=>
   tx.query(`INSERT INTO verification_evidence(operator_id,subject_user_id,vehicle_id,kind,reference,file_url)
     VALUES($1,$2,$3,$4,$5,$6)`,[operatorId,subjectUserId,vehicleId,kind,reference,fileUrl]);
-const requiredEvidence=type=>type==='company'
+export const requiredEvidence=type=>type==='company'
   ? ['company_registration','tax_registration','legal_representative_identity','transport_authorization','registered_address']
   : ['identity','driving_license','vehicle_registration','insurance','roadworthiness','transport_authorization','driver_photo'];
 
@@ -194,7 +234,6 @@ export function onboarding(db){
     },
 
     async evidence(actor,operatorId){invariant(actor?.role==='ops'&&!actor.operator_id,'FORBIDDEN','Only platform operations can review verification evidence.',403);const id=uuid(operatorId);return db.transaction(async tx=>(await tx.query(`SELECT e.*,u.display_name AS subject_name,v.registration AS vehicle_registration FROM verification_evidence e LEFT JOIN users u ON u.id=e.subject_user_id LEFT JOIN vehicles v ON v.id=e.vehicle_id WHERE e.operator_id=$1 ORDER BY e.submitted_at,e.kind`,[id])).rows);},
-    async reviewEvidence(actor,evidenceId,decision,notes=null){invariant(actor?.role==='ops'&&!actor.operator_id,'FORBIDDEN','Only platform operations can review verification evidence.',403);invariant(['verified','rejected'].includes(decision),'INVALID_DECISION','Evidence must be verified or rejected.');return db.transaction(async tx=>{const evidence=await one(tx,'SELECT * FROM verification_evidence WHERE id=$1 FOR UPDATE',[uuid(evidenceId)]);invariant(evidence,'NOT_FOUND','Verification evidence not found.',404);const row=await one(tx,`UPDATE verification_evidence SET status=$2,reviewed_at=now(),reviewed_by=$3,notes=$4 WHERE id=$1 RETURNING *`,[evidence.id,decision,actor.id,notes]);await audit(tx,actor.id,'operator.evidence_reviewed',evidence.operator_id,null,{evidenceId:evidence.id,kind:evidence.kind,decision});return row;});},
 
     async members(actor,operatorId){const id=uuid(operatorId);return db.transaction(async tx=>{const user=await activeIdentity(tx,actor.id);if(user.operator_id)invariant(user.operator_id===id,'FORBIDDEN','Operation is not permitted.',403);return (await tx.query(`SELECT u.id,u.display_name,u.role,u.active,u.operator_id,d.license_reference,d.active AS driver_active,c.active AS convoyeur_active,o.type AS operator_type,o.verification_status,o.owner_user_id,o.admin_user_id FROM users u JOIN operators o ON o.id=u.operator_id LEFT JOIN driver_profiles d ON d.user_id=u.id LEFT JOIN convoyeur_profiles c ON c.user_id=u.id WHERE u.operator_id=$1 AND u.role IN ('ops','driver','convoyeur') ORDER BY u.display_name`,[id])).rows;});},
     async listOperators(actor){invariant(actor?.role==='ops'&&!actor.operator_id,'FORBIDDEN','Only platform operations can list operators.',403);return db.transaction(async tx=>(await tx.query(`SELECT id,name,legal_name,type,verification_status,contact_phone,country,active,owner_user_id,admin_user_id,registration_ref,tax_reference,representative_name,representative_id_reference,transport_authorization_reference,registered_address,verified_at,verified_by,created_at FROM operators ORDER BY created_at DESC LIMIT 200`)).rows);},

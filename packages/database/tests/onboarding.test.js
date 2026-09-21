@@ -37,6 +37,33 @@ async function newUser(role='passenger',overrides={}){
   });
   return id;
 }
+// Onboarding now collects a complete KYB/KYC dossier, so these fixtures carry
+// one. A partial payload is refused at the door, which is the point.
+const doc=name=>`https://documents.leroutier.app/${name}.pdf`;
+const companyDossier=(overrides={})=>({displayName:'Baobab Express',legalName:'Baobab Transport SARL',
+  contactPhone:'+229 61000000',country:'BJ',
+  registrationRef:'RCCM/BJ/2024/B/1234',registrationDocumentUrl:doc('rccm'),
+  taxReference:'3201900000001',taxDocumentUrl:doc('ifu'),
+  representativeName:'Adjo Hounkpatin',representativeIdReference:'CNI-REP-0001',representativeIdDocumentUrl:doc('rep-id'),
+  transportAuthorizationReference:'AT-BJ-2024-001',transportAuthorizationDocumentUrl:doc('autorisation'),
+  registeredAddress:'Carré 1234, Cotonou, Bénin',addressProofUrl:doc('adresse'),...overrides});
+const independentDossier=(overrides={})=>({displayName:'Chauffeur Indépendant',phone:'+229 61000001',country:'BJ',
+  idDocumentType:'national_id',idDocumentReference:'CNI-IND-0001',idDocumentUrl:doc('cni'),
+  licenseReference:'LIC-IND-1',licenseDocumentUrl:doc('permis'),
+  driverPhotoUrl:'https://photos.leroutier.app/chauffeur.jpg',
+  transportAuthorizationReference:'AT-BJ-2024-900',transportAuthorizationDocumentUrl:doc('autorisation-ind'),
+  insuranceReference:'ASS-2024-0001',insuranceDocumentUrl:doc('assurance'),
+  roadworthinessReference:'VT-2024-0001',roadworthinessDocumentUrl:doc('visite'),
+  vehicleRegistration:'IND-BUS-01',vehicleRegistrationDocumentUrl:doc('carte-grise'),
+  vehicleCapacity:12,vehicleMake:'Toyota',vehicleModel:'Hiace',vehicleColor:'Blanc',vehicleYear:2019,...overrides});
+// Verification is evidence-gated, so a test that needs a *verified* operator
+// goes through the same review a real one does: "verified" can no longer mean
+// "somebody clicked a button on an empty file".
+async function verifyOperator(operatorId){
+  const rows=await db.transaction(async tx=>(await tx.query('SELECT id FROM verification_evidence WHERE operator_id=$1',[operatorId])).rows);
+  for(const row of rows) await onboard.verification(platformOps,operatorId,{type:'evidence',evidenceId:row.id,status:'verified'});
+  return onboard.verification(platformOps,operatorId,'verified');
+}
 // Company operational fixtures: route + vehicle + driver for a company operator.
 async function companyFixtures(operatorId){
   const routeId=randomUUID(),vehicleId=randomUUID(),driverId=await newUser('driver');
@@ -83,7 +110,7 @@ after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}})
 
 test('company onboarding creates a company operator and promotes the representative to admin Ops',async()=>{
   const key=randomUUID();
-  const result=await onboard.startCompany({id:companyUser,role:'passenger'},{displayName:'Baobab Express',contactPhone:'+229 61000000',country:'BJ'},key);
+  const result=await onboard.startCompany({id:companyUser,role:'passenger'},companyDossier(),key);
   assert.equal(result.role,'ops');
   assert.equal(result.status,'pending_verification');
   const operator=await one('SELECT * FROM operators WHERE admin_user_id=$1',[companyUser]);
@@ -92,15 +119,17 @@ test('company onboarding creates a company operator and promotes the representat
   const user=await one('SELECT role,operator_id FROM users WHERE id=$1',[companyUser]);
   assert.equal(user.role,'ops');
   assert.equal(user.operator_id,operator.id);
-  const replay=await onboard.startCompany({id:companyUser,role:'passenger'},{displayName:'Baobab Express',contactPhone:'+229 61000000',country:'BJ'},key);
+  const replay=await onboard.startCompany({id:companyUser,role:'passenger'},companyDossier(),key);
   assert.equal(replay.alreadyOnboarded,true);
   assert.equal((await one('SELECT count(*)::integer AS n FROM operators WHERE admin_user_id=$1',[companyUser])).n,1);
   // Not yet verified: cannot run services, even with full fixtures.
   const fx=await companyFixtures(operator.id);
   const admin={id:companyUser,role:'ops',operator_id:operator.id};
   await assert.rejects(provision.service(admin,{routeId:fx.routeId,vehicleId:fx.vehicleId,driverId:fx.driverId,departureAt:new Date(Date.now()+3600_000).toISOString()},randomUUID()),{code:'OPERATOR_NOT_VERIFIED'});
-  // Platform verification unlocks provisioning.
-  await onboard.verification(platformOps,operator.id,'verified');
+  // An unreviewed dossier can never be verified, however senior the reviewer is.
+  await assert.rejects(onboard.verification(platformOps,operator.id,'verified'),{code:'VERIFICATION_INCOMPLETE'});
+  // Platform verification, on a fully reviewed dossier, unlocks provisioning.
+  await verifyOperator(operator.id);
   const verified=await one('SELECT verification_status FROM operators WHERE id=$1',[operator.id]);
   assert.equal(verified.verification_status,'verified');
   const service=await provision.service(admin,{routeId:fx.routeId,vehicleId:fx.vehicleId,driverId:fx.driverId,departureAt:new Date(Date.now()+3600_000).toISOString()},randomUUID());
@@ -110,7 +139,7 @@ test('company onboarding creates a company operator and promotes the representat
 
 test('independent onboarding maps ONE identity to owner operator and driver profile',async()=>{
   const result=await onboard.startIndependent({id:independentUser,role:'passenger'},
-    {displayName:'Chauffeur Indépendant',phone:'+229 61000001',country:'BJ',licenseReference:'LIC-IND-1',vehicleRegistration:'IND-BUS-01',vehicleCapacity:12},randomUUID());
+    independentDossier(),randomUUID());
   assert.equal(result.role,'driver');
   const operator=await one('SELECT * FROM operators WHERE owner_user_id=$1',[independentUser]);
   assert.equal(operator.type,'independent');
@@ -130,7 +159,7 @@ test('independent onboarding maps ONE identity to owner operator and driver prof
 
 test('staff provisioning binds unique identities to the right operator and rejects cross-operator assignment',async()=>{
   companyUser=await newUser('passenger',{displayName:'Rep Compagnie'});
-  await onboard.startCompany({id:companyUser,role:'passenger'},{displayName:'Baobab Express',contactPhone:'+229 61000000',country:'BJ'},randomUUID());
+  await onboard.startCompany({id:companyUser,role:'passenger'},companyDossier(),randomUUID());
   const operator=await one('SELECT * FROM operators WHERE admin_user_id=$1',[companyUser]);
   const admin={id:companyUser,role:'ops',operator_id:operator.id};
   const driverSubject='driver-'+randomUUID().slice(0,8);
@@ -146,7 +175,7 @@ test('staff provisioning binds unique identities to the right operator and rejec
   assert.equal(convoyeurProfile.operator_id,operator.id);
   // A second company cannot provision staff into the first operator.
   const otherAdminUser=await newUser('passenger',{displayName:'Autre Compagnie'});
-  await onboard.startCompany({id:otherAdminUser,role:'passenger'},{displayName:'Autre Compagnie',contactPhone:'+229 61000002',country:'BJ'},randomUUID());
+  await onboard.startCompany({id:otherAdminUser,role:'passenger'},companyDossier({displayName:'Autre Compagnie',contactPhone:'+229 61000002',registrationRef:'RCCM/BJ/2024/B/2222',taxReference:'3201900000002'}),randomUUID());
   const otherOp=await one('SELECT * FROM operators WHERE admin_user_id=$1',[otherAdminUser]);
   await assert.rejects(provision.driver({id:otherAdminUser,role:'ops',operator_id:otherOp.id},{subject:'intruder-'+randomUUID().slice(0,8),displayName:'Intruder',operatorId:operator.id,licenseReference:'X'},randomUUID()),{code:'FORBIDDEN'});
   // No self-promotion: a passenger cannot provision themselves.
@@ -188,9 +217,9 @@ test('walk-up cash sales confirm the booking, record cash and credit the operato
 test('only independent owner-drivers can withdraw operator revenue',async()=>{
   independentUser=await newUser('passenger',{displayName:'Chauffeur Indépendant'});
   await onboard.startIndependent({id:independentUser,role:'passenger'},
-    {displayName:'Chauffeur Indépendant',phone:'+229 61000001',country:'BJ',licenseReference:'LIC-IND-2'},randomUUID());
+    independentDossier({licenseReference:'LIC-IND-2',vehicleRegistration:'IND-BUS-02'}),randomUUID());
   const operator=await one('SELECT * FROM operators WHERE owner_user_id=$1',[independentUser]);
-  await onboard.verification(platformOps,operator.id,'verified');
+  await verifyOperator(operator.id);
   await db.transaction(async tx=>{await tx.query(`INSERT INTO operator_settlements(operator_id,source,reference,gross_minor) VALUES($1,'walk_up','fixture',5000)`,[operator.id]);});
   const owner={id:independentUser,role:'driver',operator_id:operator.id};
   const companyDriverId=await newUser('driver');
@@ -210,7 +239,7 @@ test('only independent owner-drivers can withdraw operator revenue',async()=>{
   assert.equal(status.status,'failed');
   // Unverified operators cannot withdraw at all.
   const unverified=await newUser('passenger');
-  await onboard.startIndependent({id:unverified,role:'passenger'},{displayName:'Non Vérifié',phone:'+229 61000003',country:'BJ',licenseReference:'L-UV'},randomUUID());
+  await onboard.startIndependent({id:unverified,role:'passenger'},independentDossier({displayName:'Non Vérifié',phone:'+229 61000003',licenseReference:'L-UV',vehicleRegistration:'IND-BUS-03'}),randomUUID());
   const uvOperator=await one('SELECT * FROM operators WHERE owner_user_id=$1',[unverified]);
   await db.transaction(async tx=>{await tx.query(`INSERT INTO operator_settlements(operator_id,source,reference,gross_minor) VALUES($1,'walk_up','fixture',1000)`,[uvOperator.id]);});
   await assert.rejects(settle.request({id:unverified,role:'driver',operator_id:uvOperator.id},{amountMinor:500,phoneNumber:'61234567',country:'BJ'},randomUUID()),{code:'OPERATOR_NOT_VERIFIED'});
@@ -231,7 +260,7 @@ test('location proposals are moderated and duplicates are rejected',async()=>{
 
 test('company stations bind to verified points and services require verified points',async()=>{
   companyUser=await newUser('passenger',{displayName:'Rep Compagnie'});
-  await onboard.startCompany({id:companyUser,role:'passenger'},{displayName:'Baobab Express',contactPhone:'+229 61000000',country:'BJ'},randomUUID());
+  await onboard.startCompany({id:companyUser,role:'passenger'},companyDossier(),randomUUID());
   const operator=await one('SELECT * FROM operators WHERE admin_user_id=$1',[companyUser]);
   const admin={id:companyUser,role:'ops',operator_id:operator.id};
   const point=await loc.propose({id:companyUser,role:'passenger'},{name:'Gare Bohicon',placeId:demoId(100),type:'company_station',description:'Gare centrale',purposes:['passenger_boarding','parcel_consignment']});
@@ -242,7 +271,7 @@ test('company stations bind to verified points and services require verified poi
   assert.equal(stations.length,1);
   // Cross-operator station creation is rejected.
   const otherUser=await newUser('passenger');
-  await onboard.startCompany({id:otherUser,role:'passenger'},{displayName:'Autre Cie',contactPhone:'+229 61000002',country:'BJ'},randomUUID());
+  await onboard.startCompany({id:otherUser,role:'passenger'},companyDossier({displayName:'Autre Cie',contactPhone:'+229 61000002',registrationRef:'RCCM/BJ/2024/B/3333',taxReference:'3201900000003'}),randomUUID());
   const otherOp=await one('SELECT * FROM operators WHERE admin_user_id=$1',[otherUser]);
   await assert.rejects(loc.stationCreate({id:otherUser,role:'ops',operator_id:otherOp.id},{operatorId:operator.id,boardingPointId:point.id,name:'Pirate Station',purposes:['passenger_boarding']}),{code:'FORBIDDEN'});
   // Services require verified points.
@@ -281,7 +310,7 @@ test('parcel public tracking exposes only safe point information',async()=>{
 
 test('agent actions observe onboarding and location state through scoped reads',async()=>{
   companyUser=await newUser('passenger',{displayName:'Rep Compagnie'});
-  await onboard.startCompany({id:companyUser,role:'passenger'},{displayName:'Baobab Express',contactPhone:'+229 61000000',country:'BJ'},randomUUID());
+  await onboard.startCompany({id:companyUser,role:'passenger'},companyDossier(),randomUUID());
   const run=await engine.runAction(agentPrincipal,'operator.unverified_detect',{});
   assert.equal(run.status,'completed');
   assert.ok(run.result.some(o=>o.name==='Baobab Express'));

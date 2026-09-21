@@ -349,6 +349,12 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='POST' && path==='/onboarding/independent') return onboard.startIndependent(actor,await body(),req.headers.get('idempotency-key'));
     if(method==='PATCH' && path==='/onboarding/operator') return onboard.updateProfile(actor,await body());
     if(method==='GET' && path==='/operators') return onboard.listOperators(actor);
+    // One operator's verification evidence, on demand. The review queue only
+    // carries operators awaiting a first decision, so without this a verified
+    // operator's dossier could never be re-read — and oversight that cannot
+    // re-open a file is not oversight. Platform Ops only; the module checks.
+    const operatorEvidence=path.match(/^\/ops\/operators\/([^/]+)\/evidence$/);
+    if(method==='GET' && operatorEvidence) return onboard.evidence(actor,uuid(operatorEvidence[1]));
     const operatorVerify=path.match(/^\/operators\/([^/]+)\/verification$/);
     if(method==='POST' && operatorVerify) return onboard.verification(actor,uuid(operatorVerify[1]),(await body()).decision);
     const operatorMembers=path.match(/^\/operators\/([^/]+)\/members$/);

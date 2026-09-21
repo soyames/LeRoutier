@@ -1,13 +1,13 @@
 import {readdir} from 'node:fs/promises';
 import {invariant} from '@leroutier/domain';
-
-function storagePolicy() {
-  const limitMb=Number(process.env.DATABASE_STORAGE_LIMIT_MB);
-  const stopPercent=Number(process.env.REGISTRATION_STORAGE_STOP_PERCENT);
-  const limitBytes=Number.isFinite(limitMb)&&limitMb>0?Math.round(limitMb*1024*1024):null;
-  const threshold=Number.isFinite(stopPercent)&&stopPercent>=50&&stopPercent<=99?stopPercent:85;
-  return {limitBytes,threshold,registrationEnabled:process.env.REGISTRATION_ENABLED!=='false'};
-}
+// One capacity measurement, shared with the gate that actually refuses new
+// accounts. Two implementations would eventually disagree, and Platform Ops
+// would be reading a number that is not the one enforcing anything.
+import {registrationCapacity} from './registration.js';
+// What a dossier must contain is a product rule, and it is decided in exactly
+// one place. The review queue reports completeness computed from THAT rule, so
+// a console can never enable "verify" for a dossier the server will refuse.
+import {requiredEvidence} from './onboarding.js';
 
 export function operationalHealth(db) {
   return {
@@ -21,7 +21,6 @@ export function operationalHealth(db) {
     async read(actor) {
       invariant(actor?.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
       const expected=(await readdir(new URL('../migrations/',import.meta.url))).filter(f=>/^\d+.*\.sql$/.test(f)).length;
-      const policy=storagePolicy();
       return db.transaction(async tx=>{
         const counts=(await tx.query(`SELECT
           (SELECT count(*) FROM schema_migrations)::integer AS migrations,
@@ -39,10 +38,7 @@ export function operationalHealth(db) {
           (SELECT count(*) FROM payout_requests WHERE status IN ('failed','reversed'))::integer AS payouts_failed_total,
           (SELECT count(*) FROM incidents WHERE status<>'resolved')::integer AS incidents_open`)).rows[0];
         const signals=(await tx.query("SELECT signal,sum(count)::integer AS count FROM operational_signals WHERE minute>now()-interval '15 minutes' GROUP BY signal")).rows;
-        const sizeRow=(await tx.query('SELECT pg_database_size(current_database())::bigint AS bytes')).rows[0];
-        const usedBytes=Number(sizeRow?.bytes??0);
-        const usedPercent=policy.limitBytes?Math.round((usedBytes/policy.limitBytes)*1000)/10:null;
-        const registrationsOpen=policy.registrationEnabled && (usedPercent===null || usedPercent<policy.threshold);
+        const capacity=await registrationCapacity(tx);
 
         const users=(await tx.query(`SELECT u.id,u.display_name,u.role,u.active,u.is_demo,u.operator_id,u.notification_email,
           u.auth_subject IS NOT NULL AS authenticated,u.auth_issuer,u.created_at,u.updated_at,u.profile_completed_at,
@@ -75,6 +71,18 @@ export function operationalHealth(db) {
           LEFT JOIN LATERAL (SELECT vv.* FROM vehicles vv WHERE vv.operator_id=o.id ORDER BY vv.created_at LIMIT 1) v ON true
           WHERE o.verification_status IN ('pending_verification','rejected','suspended')
           ORDER BY CASE o.verification_status WHEN 'pending_verification' THEN 0 ELSE 1 END,o.created_at DESC LIMIT 200`)).rows;
+        // Completeness is computed from requiredEvidence(), the same rule the
+        // verification transition enforces, so the console and the server
+        // cannot disagree about whether a dossier is ready.
+        for(const operator of kycQueue){
+          const approved=new Set((operator.evidence||[]).filter(e=>e.status==='verified').map(e=>e.kind));
+          const rejected=(operator.evidence||[]).filter(e=>e.status==='rejected').map(e=>e.kind);
+          const required=requiredEvidence(operator.type);
+          operator.evidenceRequired=required;
+          operator.evidenceMissing=required.filter(kind=>!approved.has(kind));
+          operator.evidenceRejected=rejected;
+          operator.evidenceComplete=operator.evidenceMissing.length===0 && rejected.length===0;
+        }
 
         const paymentAnomalies=(await tx.query(`SELECT p.id,p.status,p.amount_minor,p.currency,p.created_at,b.id AS booking_id,
           s.id AS service_id,o.id AS operator_id,o.name AS operator_name
@@ -92,8 +100,7 @@ export function operationalHealth(db) {
 
         return {database:'ok',migrations:{applied:counts.migrations,expected,matched:counts.migrations===expected},
           signals,counts,pool:db.poolStats?.()??null,alertTransport:'internal_ops_only',
-          storage:{usedBytes,limitBytes:policy.limitBytes,usedPercent,registrationStopPercent:policy.threshold,registrationsOpen,
-            registrationEnabled:policy.registrationEnabled},
+          storage:capacity,
           users,kycQueue,paymentAnomalies,payoutAnomalies,incidents};
       });
     },
