@@ -23,7 +23,15 @@ export function workspacesFor(user) {
       path: '/work/today',
     });
   }
-  if (user.role === 'ops') available.push({ id: OPS, label: `Exploitation${company}`, hint: 'Services, flotte, équipage', path: '/ops/today' });
+  if (user.role === 'ops') {
+    const platform = !user.operator_id;
+    available.push({
+      id: OPS,
+      label: platform ? 'Exploitation plateforme' : `Exploitation${company}`,
+      hint: platform ? 'Supervision LeRoutier, opérateurs, vérifications et système' : 'Services, flotte, équipage',
+      path: platform ? '/ops/platform' : '/ops/today',
+    });
+  }
   return available;
 }
 
