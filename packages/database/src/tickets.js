@@ -7,8 +7,11 @@ const one=async(tx,sql,args=[]) => (await tx.query(sql,args)).rows[0];
 const nested=tx=>({transaction:fn=>fn(tx)});
 export function tickets(db){
   async function payable(tx,b){
-    const p=await one(tx,"SELECT coalesce(sum(amount_minor),0)::integer AS paid FROM payments WHERE booking_id=$1 AND status='succeeded'",[b.id]);
-    invariant(p.paid===b.amount_minor && b.status==='confirmed','TICKET_INVALID','Ticket is not confirmed and paid for boarding.',409);
+    const p=await one(tx,`SELECT
+      coalesce(sum(amount_minor) FILTER (WHERE status='succeeded'),0)::integer AS paid,
+      coalesce(sum(amount_minor) FILTER (WHERE status='refunded'),0)::integer AS refunded
+      FROM payments WHERE booking_id=$1`,[b.id]);
+    invariant(p.paid-p.refunded===b.amount_minor && b.status==='confirmed','TICKET_INVALID','Ticket is not confirmed and paid for boarding.',409);
   }
   return {
     async issue(actor,id){
@@ -22,7 +25,9 @@ export function tickets(db){
           ['scheduled','active'].includes(s.status) && s.current_sequence<=b.origin_sequence;
         let ticket=await one(tx,'SELECT * FROM ticket_credentials WHERE booking_id=$1',[id]);
         // Viewing an archive must never depend on eligibility to board again.
-        // The service lock held above serializes concurrent issue requests.
+        // A previously issued credential remains visible on the passenger's
+        // own archived document, while verify() still rejects boarded,
+        // completed, cancelled, refunded and expired tickets.
         if(canBoard && (!ticket?.token || new Date(ticket.expires_at)<=new Date())) {
           const expires=new Date(new Date(s.departure_at).getTime()+24*3600_000);
           if(expires>new Date()) {
@@ -39,7 +44,7 @@ export function tickets(db){
         }
         const validForBoarding=!!(canBoard && ticket?.token && new Date(ticket.expires_at)>new Date());
         return {bookingId:b.id,serviceId:b.service_id,document,validForBoarding,
-          token:validForBoarding?ticket.token:null,manualCode:validForBoarding?ticket.manual_code:null,
+          token:ticket?.token??null,manualCode:ticket?.manual_code??null,
           version:ticket?.version??null,expiresAt:ticket?.expires_at??null,
           departure:{name:document.departure_point_name,city:document.departure_city,landmark:document.departure_point_landmark,
             latitude:document.departure_point_latitude,longitude:document.departure_point_longitude},
