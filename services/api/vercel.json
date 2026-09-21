@@ -5,5 +5,13 @@
   "buildCommand": "corepack pnpm build",
   "outputDirectory": "dist",
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    }
+  ],
   "functions": { "api/index.js": { "maxDuration": 30 } }
 }
