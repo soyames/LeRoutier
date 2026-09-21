@@ -676,6 +676,11 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       return reasoning.usage();
     }
     if(method==='GET' && path==='/ops/health') { const h=await health.read(actor); return { ...h, channels: channelAvailability(config) }; }
+    // The Platform Ops user register: searched and paginated server-side, so a
+    // console never ships the whole directory to filter it in the browser and
+    // never silently stops finding people past a fixed cap.
+    if(method==='GET' && path==='/ops/users') return health.users(actor,{q:url.searchParams.get('q'),
+      limit:url.searchParams.get('limit'),offset:url.searchParams.get('offset')});
     if(method==='POST' && path==='/ops/model-health') {
       // Platform Ops only: it spends quota, so an operator admin cannot drain
       // the shared budget by refreshing a dashboard.

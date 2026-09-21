@@ -1,4 +1,4 @@
-import { useMemo,useState } from 'react';
+import { useState } from 'react';
 import { useApi,useSession } from '@leroutier/config/client';
 import { Badge,Card,EmptyState,SectionTitle,SkeletonCards,status } from '@leroutier/ui';
 import { Building2,CircleUserRound,Database,ShieldCheck,TriangleAlert,WalletCards,CarFront,ExternalLink } from 'lucide-react';
@@ -13,7 +13,45 @@ function usePlatformHealth(){return useApi('/ops/health');}
 
 export function PlatformOverview(){const health=usePlatformHealth();return <PlatformOnly><div className="stack"><SectionTitle title="Vue plateforme" icon={ShieldCheck}/>{health.loading?<SkeletonCards count={3}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<><div className="stats-grid"><Card className="stat-card"><span>Utilisateurs</span><strong>{health.data.counts.users_total}</strong><small>{health.data.counts.users_authenticated} avec identité authentifiée</small></Card><Card className="stat-card"><span>Vérifications en attente</span><strong>{health.data.counts.kyc_pending}</strong><small>opérateurs à examiner</small></Card><Card className="stat-card"><span>Incidents ouverts</span><strong>{health.data.counts.incidents_open}</strong><small>toute la plateforme</small></Card><Card className="stat-card"><span>Anomalies financières</span><strong>{health.data.counts.payments_failed_total+health.data.counts.payouts_failed_total}</strong><small>paiements et versements</small></Card></div><Card className="stack"><div className="between wrap"><div><strong>Capacité système</strong><p className="small muted">La base reste prioritaire pour les opérations existantes.</p></div><Badge tone={health.data.storage.registrationsOpen?'success':'warning'}>{health.data.storage.registrationsOpen?'Inscriptions ouvertes':'Inscriptions suspendues'}</Badge></div><p>{fmtBytes(health.data.storage.usedBytes)} utilisés{health.data.storage.limitBytes?` sur ${fmtBytes(health.data.storage.limitBytes)}`:''}{health.data.storage.usedPercent!==null?` · ${health.data.storage.usedPercent} %`:''}</p><p className="small muted">Seuil d’arrêt des nouvelles inscriptions : {health.data.storage.registrationStopPercent} %.</p></Card></>}</div></PlatformOnly>;}
 
-export function PlatformUsers(){const health=usePlatformHealth();const [query,setQuery]=useState('');const users=useMemo(()=>{const q=query.trim().toLowerCase();return (health.data?.users||[]).filter(u=>!q||[u.display_name,u.notification_email,u.role,u.operator_name,u.id].some(v=>String(v||'').toLowerCase().includes(q)));},[health.data,query]);return <PlatformOnly><div className="stack"><SectionTitle title="Utilisateurs & authentifications" icon={CircleUserRound}/><Card className="stack"><p className="small muted">Vue administrative des comptes LeRoutier. Les mots de passe, jetons Firebase et secrets d’authentification ne sont jamais exposés.</p><label>Rechercher un utilisateur<input className="control" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Nom, e-mail, rôle, opérateur ou identifiant"/></label></Card>{health.loading?<SkeletonCards count={4}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:users.length?users.map(u=><Card key={u.id} className="stack"><div className="between wrap"><div><strong>{u.display_name||'Profil sans nom'}</strong><p className="small muted">{u.role} · {u.operator_name||'Aucun opérateur'}</p></div><div className="controls"><Badge tone={u.active?'success':'warning'}>{u.active?'Actif':'Inactif'}</Badge><Badge tone={u.authenticated?'success':'neutral'}>{u.authenticated?'Authentifié':'Sans identité externe'}</Badge>{u.is_demo&&<Badge tone="warning">TEST</Badge>}</div></div><div className="summary"><div className="row"><span>E-mail de notification</span><span>{u.notification_email||'—'}</span></div><div className="row"><span>Téléphone</span><span>{u.passenger_phone||'—'}</span></div><div className="row"><span>Fournisseur d’identité</span><span>{authProvider(u.auth_issuer)}</span></div><div className="row"><span>Compte créé</span><span>{fmtDate(u.created_at)}</span></div><div className="row"><span>Profil complété</span><span>{u.profile_completed_at?'Oui':'Non'}</span></div>{u.license_reference&&<div className="row"><span>Permis</span><span>{u.license_reference}</span></div>}<div className="row"><span>Identifiant interne</span><span className="mono">{u.id}</span></div></div></Card>):<EmptyState icon={CircleUserRound} title="Aucun utilisateur trouvé" text="Modifiez la recherche pour afficher d’autres comptes."/>}</div></PlatformOnly>;}
+// Search and paging are the server's. The console asks for a page and shows
+// exactly what came back, including how many matched in total — so an empty
+// result means "no such account", not "beyond the first 500".
+export function PlatformUsers(){
+  const [query,setQuery]=useState(''),[term,setTerm]=useState(''),[page,setPage]=useState(0);
+  const size=25;
+  const params=new URLSearchParams({limit:String(size),offset:String(page*size)});
+  if(term)params.set('q',term);
+  const result=useApi(`/ops/users?${params}`);
+  // Typing narrows a search; it must also return to the first page, or the
+  // new query is read from an offset that belongs to the previous one.
+  function submit(event){event.preventDefault();setPage(0);setTerm(query.trim());}
+  const data=result.data,users=data?.users||[],total=data?.total??0;
+  const shown=page*size+users.length,more=shown<total;
+  return <PlatformOnly><div className="stack"><SectionTitle title="Utilisateurs & authentifications" icon={CircleUserRound}/>
+    <Card className="stack"><p className="small muted">Vue administrative des comptes LeRoutier. Les mots de passe, jetons Firebase et secrets d’authentification ne sont jamais exposés.</p>
+      <form className="stack" onSubmit={submit}><label>Rechercher un utilisateur
+        <input className="control" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Nom, e-mail, rôle, opérateur ou identifiant"/></label>
+        <div className="controls"><button className="btn btn-primary">Rechercher</button>
+          {term&&<button type="button" className="btn btn-soft" onClick={()=>{setQuery('');setTerm('');setPage(0);}}>Effacer</button>}</div></form></Card>
+    {result.loading?<SkeletonCards count={4}/>:result.error?<Card><p role="alert">{result.error}</p></Card>:users.length?<>
+      <p className="small muted" role="status">{total} compte{total>1?'s':''} correspondant{total>1?'s':''} · affichage {page*size+1}–{shown}</p>
+      {users.map(u=><Card key={u.id} className="stack">
+        <div className="between wrap"><div><strong>{u.display_name||'Profil sans nom'}</strong><p className="small muted">{u.role} · {u.operator_name||'Aucun opérateur'}</p></div>
+          <div className="controls"><Badge tone={u.active?'success':'warning'}>{u.active?'Actif':'Inactif'}</Badge>
+            <Badge tone={u.authenticated?'success':'neutral'}>{u.authenticated?'Authentifié':'Sans identité externe'}</Badge>{u.is_demo&&<Badge tone="warning">TEST</Badge>}</div></div>
+        <div className="summary"><div className="row"><span>E-mail de notification</span><span>{u.notification_email||'—'}</span></div>
+          <div className="row"><span>Téléphone</span><span>{u.passenger_phone||'—'}</span></div>
+          <div className="row"><span>Fournisseur d’identité</span><span>{authProvider(u.auth_issuer)}</span></div>
+          <div className="row"><span>Compte créé</span><span>{fmtDate(u.created_at)}</span></div>
+          <div className="row"><span>Profil complété</span><span>{u.profile_completed_at?'Oui':'Non'}</span></div>
+          <div className="row"><span>Identifiant interne</span><span className="mono">{u.id}</span></div></div>
+      </Card>)}
+      {(page>0||more)&&<div className="controls">
+        <button className="btn btn-soft" disabled={page===0} onClick={()=>setPage(p=>Math.max(0,p-1))}>Page précédente</button>
+        <button className="btn btn-soft" disabled={!more} onClick={()=>setPage(p=>p+1)}>Page suivante</button></div>}
+    </>:<EmptyState icon={CircleUserRound} title="Aucun utilisateur trouvé" text={term?`Aucun compte ne correspond à « ${term} ».`:'Aucun compte enregistré.'}/>}
+  </div></PlatformOnly>;
+}
 
 function EvidenceRow({operator,evidence,onReview,online}){const tone=evidence.status==='verified'?'success':evidence.status==='rejected'?'danger':'warning';return <div className="card stack" style={{padding:12}}><div className="between wrap"><div><strong>{EVIDENCE_LABELS[evidence.kind]||evidence.kind}</strong>{evidence.reference&&<p className="small muted">Référence : {evidence.reference}</p>}</div><Badge tone={tone}>{evidence.status==='verified'?'Validé':evidence.status==='rejected'?'Refusé':'À examiner'}</Badge></div>{evidence.fileUrl&&<a className="btn btn-soft" href={evidence.fileUrl} target="_blank" rel="noreferrer"><ExternalLink size={14}/>Ouvrir le justificatif</a>}<div className="controls"><button className="btn btn-primary" disabled={!online||evidence.status==='verified'} onClick={()=>onReview(operator.id,evidence.id,'verified')}>Valider ce justificatif</button><button className="btn btn-soft" disabled={!online||evidence.status==='rejected'} onClick={()=>onReview(operator.id,evidence.id,'rejected')}>Refuser</button></div></div>;}
 

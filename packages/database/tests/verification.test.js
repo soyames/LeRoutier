@@ -435,3 +435,55 @@ test('Platform Ops health never carries an authentication secret', async () => {
   await assert.rejects(health.read({ id: platformOps.id, role: 'ops', operator_id: demo.operator }), { code: 'FORBIDDEN' });
   await assert.rejects(health.read({ id: demo.passenger, role: 'passenger' }), { code: 'FORBIDDEN' });
 });
+
+test('the Platform Ops user register searches and pages on the server', async () => {
+  const marker = 'Registre' + randomUUID().slice(0, 6);
+  for (let n = 0; n < 7; n += 1) await newPassenger(`${marker} Compte ${n}`);
+
+  // A search is answered by the database, not by filtering a truncated array
+  // in the browser — so the total describes the same filter as the page.
+  const found = await health.users(platformOps, { q: marker, limit: 3 });
+  assert.equal(found.total, 7);
+  assert.equal(found.users.length, 3);
+  assert.ok(found.users.every(u => u.display_name.startsWith(marker)));
+
+  const second = await health.users(platformOps, { q: marker, limit: 3, offset: 3 });
+  assert.equal(second.total, 7);
+  assert.equal(second.users.length, 3);
+  const last = await health.users(platformOps, { q: marker, limit: 3, offset: 6 });
+  assert.equal(last.users.length, 1, 'the final page is short, not empty');
+  const ids = new Set([...found.users, ...second.users, ...last.users].map(u => u.id));
+  assert.equal(ids.size, 7, 'paging returns each account exactly once');
+
+  // An account past the first page is still findable by name and by id: the
+  // failure this replaces was a search that silently stopped at a fixed cap.
+  const target = last.users[0];
+  assert.equal((await health.users(platformOps, { q: target.id })).total, 1);
+  assert.equal((await health.users(platformOps, { q: target.display_name })).total, 1);
+  // A query matching nothing is an honest empty answer.
+  assert.equal((await health.users(platformOps, { q: 'aucun-compte-' + randomUUID() })).total, 0);
+});
+
+test('the user register is minimal, and Company Ops cannot read it', async () => {
+  const listing = await health.users(platformOps, { limit: 5 });
+  const text = JSON.stringify(listing);
+  // A driving licence is a government identifier. It belongs to the reviewed
+  // dossier, not to a directory listing.
+  assert.ok(!text.includes('license_reference'), 'no licence number in a user listing');
+  for (const secret of ['auth_subject', 'password', 'id_token', 'refresh_token', 'access_token']) {
+    assert.ok(!text.includes(secret), `the register must never carry ${secret}`);
+  }
+  assert.ok(listing.users.every(u => typeof u.authenticated === 'boolean'),
+    'whether an identity provider is linked is a boolean, never the subject itself');
+  await assert.rejects(health.users({ id: platformOps.id, role: 'ops', operator_id: demo.operator }, {}), { code: 'FORBIDDEN' });
+  await assert.rejects(health.users({ id: demo.passenger, role: 'passenger' }, {}), { code: 'FORBIDDEN' });
+});
+
+test('a page size cannot be used to dump the whole register', async () => {
+  const huge = await health.users(platformOps, { limit: 100000 });
+  assert.ok(huge.users.length <= 100, 'the server caps the page size it will serve');
+  assert.equal(huge.limit, 100);
+  const negative = await health.users(platformOps, { limit: -5, offset: -10 });
+  assert.equal(negative.limit, 50, 'a nonsense page size falls back to the default');
+  assert.equal(negative.offset, 0);
+});

@@ -40,16 +40,10 @@ export function operationalHealth(db) {
         const signals=(await tx.query("SELECT signal,sum(count)::integer AS count FROM operational_signals WHERE minute>now()-interval '15 minutes' GROUP BY signal")).rows;
         const capacity=await registrationCapacity(tx);
 
-        const users=(await tx.query(`SELECT u.id,u.display_name,u.role,u.active,u.is_demo,u.operator_id,u.notification_email,
-          u.auth_subject IS NOT NULL AS authenticated,u.auth_issuer,u.created_at,u.updated_at,u.profile_completed_at,
-          o.name AS operator_name,o.type AS operator_type,o.verification_status,
-          p.phone AS passenger_phone,d.license_reference,d.active AS driver_active,c.active AS convoyeur_active
-          FROM users u
-          LEFT JOIN operators o ON o.id=u.operator_id
-          LEFT JOIN passenger_profiles p ON p.user_id=u.id
-          LEFT JOIN driver_profiles d ON d.user_id=u.id
-          LEFT JOIN convoyeur_profiles c ON c.user_id=u.id
-          ORDER BY u.created_at DESC LIMIT 500`)).rows;
+        // The user register is NOT returned here. Six Platform Ops screens poll
+        // this endpoint, and shipping hundreds of names, e-mails and phone
+        // numbers to a screen showing database capacity is neither necessary
+        // nor minimal. It has its own searched, paginated reader below.
 
         // Platform Ops gets a review projection, not a public projection. It
         // contains references and evidence URLs needed for manual KYC/KYB but
@@ -101,7 +95,52 @@ export function operationalHealth(db) {
         return {database:'ok',migrations:{applied:counts.migrations,expected,matched:counts.migrations===expected},
           signals,counts,pool:db.poolStats?.()??null,alertTransport:'internal_ops_only',
           storage:capacity,
-          users,kycQueue,paymentAnomalies,payoutAnomalies,incidents};
+          kycQueue,paymentAnomalies,payoutAnomalies,incidents};
+      });
+    },
+
+    /**
+     * The Platform Ops user register: searched and paginated on the server.
+     *
+     * Previously this rode along on every /ops/health poll as a 500-row array
+     * filtered in the browser, which meant two things a console must not do:
+     * six screens shipped hundreds of personal records to display none of
+     * them, and past 500 accounts the search box silently stopped finding
+     * people — indistinguishable, to the operator, from the account not
+     * existing.
+     *
+     * The driver licence number is deliberately absent. It is a government
+     * identifier, it belongs to the reviewed dossier, and a directory listing
+     * is not a reason to hand it out.
+     */
+    async users(actor,{q=null,limit=50,offset=0}={}) {
+      invariant(actor?.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
+      const search=typeof q==='string' && q.trim() ? q.trim().slice(0,100) : null;
+      // A nonsense page size falls back to the default rather than to 1: a
+      // negative number is a caller mistake, not a request for one row.
+      const requested=Number(limit);
+      const size=Number.isFinite(requested) && requested>=1 ? Math.min(Math.trunc(requested),100) : 50;
+      const skipped=Number(offset);
+      const from=Number.isFinite(skipped) && skipped>0 ? Math.trunc(skipped) : 0;
+      return db.transaction(async tx=>{
+        // One parameterized predicate, used for both the page and its count,
+        // so the reported total can never describe a different filter.
+        const where=`($1::text IS NULL OR u.display_name ILIKE '%'||$1||'%' OR u.notification_email ILIKE '%'||$1||'%'
+          OR u.role ILIKE '%'||$1||'%' OR o.name ILIKE '%'||$1||'%' OR u.id::text=$1)`;
+        const rows=(await tx.query(`SELECT u.id,u.display_name,u.role,u.active,u.is_demo,u.operator_id,u.notification_email,
+          u.auth_subject IS NOT NULL AS authenticated,u.auth_issuer,u.created_at,u.updated_at,u.profile_completed_at,
+          o.name AS operator_name,o.type AS operator_type,o.verification_status,
+          p.phone AS passenger_phone,d.active AS driver_active,c.active AS convoyeur_active
+          FROM users u
+          LEFT JOIN operators o ON o.id=u.operator_id
+          LEFT JOIN passenger_profiles p ON p.user_id=u.id
+          LEFT JOIN driver_profiles d ON d.user_id=u.id
+          LEFT JOIN convoyeur_profiles c ON c.user_id=u.id
+          WHERE ${where}
+          ORDER BY u.created_at DESC LIMIT $2 OFFSET $3`,[search,size,from])).rows;
+        const total=(await tx.query(`SELECT count(*)::integer AS total FROM users u
+          LEFT JOIN operators o ON o.id=u.operator_id WHERE ${where}`,[search])).rows[0].total;
+        return {users:rows,total,limit:size,offset:from,query:search};
       });
     },
   };
