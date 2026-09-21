@@ -19,6 +19,7 @@ const me = extra => ({ id: IDENTITY, display_name: 'Test Identity', needs_profil
 const PASSENGER = me({ role: 'passenger', operator_id: null });
 const COMPANY_DRIVER = me({ role: 'driver', operator_type: 'company', operator_id: id(1), verification_status: 'verified' });
 const OPS = me({ role: 'ops', operator_type: 'company', operator_id: id(1), verification_status: 'verified' });
+const OSM_TILE_HOSTS = new Set(['tile.openstreetmap.org', 'a.tile.openstreetmap.org', 'b.tile.openstreetmap.org', 'c.tile.openstreetmap.org']);
 
 const signInAs = identity => async page => {
   await page.route('**/api/v1/auth/demo', r => r.fulfill({ json: { data: { token: 'fixture-session', user: identity } } }));
@@ -58,20 +59,17 @@ test('live GPS shows the vehicle on the real road with progress and next stop', 
 });
 
 test('maps use the configured OpenStreetMap basemap without Google Maps', async ({ page }) => {
-  // The pilot basemap is OpenStreetMap. Geometry remains useful even if tile
-  // requests are blocked, so this test never depends on a tile server.
-  const tileRequests = [];
-  page.on('request', request => {
-    let url;
-    try { url = new URL(request.url()); } catch { return; }
-    if (url.hostname === 'tile.openstreetmap.org') tileRequests.push(request.url());
-  });
   await openTracking(page, trackingFixture());
   const map = page.getByRole('region', { name: 'Carte du véhicule sur son itinéraire' });
   await expect(map.locator('.leaflet-container')).toBeVisible();
-  // The road geometry is still drawn, so tracking works without a provider.
+  // The road geometry is still drawn, so tracking works even when the fixture
+  // serves a local 1x1 tile instead of reaching the public tile infrastructure.
   await expect(map.locator('path.leaflet-interactive').first()).toBeVisible();
-  await expect.poll(() => tileRequests.length).toBeGreaterThan(0);
+  const tile = map.locator('img.leaflet-tile').first();
+  await expect(tile).toHaveAttribute('src');
+  const tileSrc = await tile.getAttribute('src');
+  expect(tileSrc).toBeTruthy();
+  expect(OSM_TILE_HOSTS.has(new URL(tileSrc).hostname)).toBe(true);
   await expect(page.locator('body')).not.toContainText('Google Maps');
 });
 

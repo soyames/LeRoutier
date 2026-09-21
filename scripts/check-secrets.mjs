@@ -29,7 +29,7 @@ function loadReference() {
     raw = fs.readFileSync(reference, 'utf8');
   } catch (error) {
     if (error?.code === 'ENOENT' && !explicit) return null;
-    throw new Error('SECRET_REFERENCE_FILE was set but cannot be read.');
+    throw new Error('SECRET_REFERENCE_FILE was set but cannot be read.', { cause: error });
   }
   const values = new Set();
   for (const match of raw.matchAll(/postgres(?:ql)?:\/\/[^\s'"`<>]+/gi)) {
