@@ -24,12 +24,14 @@ function loadReference() {
   if (path.resolve(reference).startsWith(process.cwd() + path.sep)) {
     throw new Error('The secret reference file must live outside this repository.');
   }
-  if (!fs.existsSync(reference)) {
-    // Explicitly pointed at a missing file is a misconfiguration, not an absence.
-    if (explicit) throw new Error('SECRET_REFERENCE_FILE was set but cannot be read.');
-    return null;
+  let raw;
+  try {
+    raw = fs.readFileSync(reference, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT' && !explicit) return null;
+    throw new Error('SECRET_REFERENCE_FILE was set but cannot be read.');
   }
-  const raw = fs.readFileSync(reference, 'utf8'), values = new Set();
+  const values = new Set();
   for (const match of raw.matchAll(/postgres(?:ql)?:\/\/[^\s'"`<>]+/gi)) {
     const url = new URL(match[0]);
     for (const value of [match[0], url.toString(), url.username, url.password, url.hostname,
@@ -86,23 +88,34 @@ try {
   }
 
   for (const file of files) {
-    if (!fs.existsSync(file)) continue;
     // No tracked file may begin with `.env`, whatever it contains. Absolute rule.
     if (/(?:^|\/)\.env(?:\.|$)/.test(file) && !file.endsWith('.env.example')) { failures++; continue; }
-    scan(fs.readFileSync(file, 'utf8'));
+    try {
+      scan(fs.readFileSync(file, 'utf8'));
+    } catch (error) {
+      if (!['ENOENT', 'EISDIR'].includes(error?.code)) throw error;
+    }
   }
 
   // Derived from the apps directory rather than listed, so a new app — or the
   // canonical unified PWA — cannot be left unscanned by omission.
-  const apps = fs.existsSync('apps')
-    ? fs.readdirSync('apps', { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name) : [];
-  for (const app of apps) {
-    const dir = `apps/${app}/dist`;
-    if (fs.existsSync(dir)) for (const entry of fs.readdirSync(dir, { recursive: true })) {
-      const file = path.join(dir, entry);
-      if (fs.statSync(file).isFile()) scan(fs.readFileSync(file, 'utf8'), true);
+  let apps = [];
+  try {
+    apps = fs.readdirSync('apps', { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  function scanBundleDir(dir) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch (error) { if (error?.code === 'ENOENT') return; throw error; }
+    for (const entry of entries) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) scanBundleDir(file);
+      else if (entry.isFile()) scan(fs.readFileSync(file, 'utf8'), true);
     }
   }
+  for (const app of apps) scanBundleDir(`apps/${app}/dist`);
 
   scan(execFileSync('git', ['diff', 'HEAD', '--no-ext-diff'], { encoding: 'utf8', maxBuffer: 30_000_000 }));
   scan(execFileSync('git', ['log', '--all', '-p', '--no-ext-diff'], { encoding: 'utf8', maxBuffer: 60_000_000 }));
@@ -116,11 +129,14 @@ try {
 
   // The committed local-database file must stay local-only: if it ever grows a
   // remote host, the isolation this repository promises is gone.
-  if (fs.existsSync('docker/postgres.env')) {
+  try {
+    const postgresEnv = fs.readFileSync('docker/postgres.env', 'utf8');
     checked++;
-    for (const match of fs.readFileSync('docker/postgres.env', 'utf8').matchAll(/postgres(?:ql)?:\/\/[^\s'"`]+/gi)) {
+    for (const match of postgresEnv.matchAll(/postgres(?:ql)?:\/\/[^\s'"`]+/gi)) {
       if (!['localhost', '127.0.0.1', '::1'].includes(new URL(match[0]).hostname)) failures++;
     }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
   }
 
   const mode = reference ? 'reference values and patterns' : 'patterns only (no local reference file)';

@@ -5,6 +5,7 @@ import { mockApi, TEST_JOURNEY_OPTION } from './api-fixture.js';
 // happen entirely anonymously. Authentication begins ONLY at
 // "Continuer vers le paiement" — and returns the user to this checkout.
 const APP = 'http://127.0.0.1:4173';
+const GOOGLE_MAP_HOSTS = new Set(['maps.googleapis.com', 'maps.google.com']);
 
 async function searchTrips(page, origin = 'Cotonou', destination = 'Parakou') {
   await page.goto(APP + '/trips');
@@ -102,7 +103,11 @@ test('a sold-out offer is visible with an honest badge and no bookable action', 
 
 test('the map renders with Leaflet and never touches Google Maps', async ({ page }) => {
   const google = [];
-  page.on('request', r => { if (/maps\.googleapis\.com|maps\.google\.com/.test(r.url())) google.push(r.url()); });
+  page.on('request', r => {
+    let hostname = '';
+    try { hostname = new URL(r.url()).hostname; } catch { return; }
+    if (GOOGLE_MAP_HOSTS.has(hostname)) google.push(r.url());
+  });
   await mockApi(page);
   await searchTrips(page);
   const mapToggle = page.getByRole('button', { name: /Carte/ });
