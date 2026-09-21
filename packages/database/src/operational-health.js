@@ -1,6 +1,14 @@
 import {readdir} from 'node:fs/promises';
 import {invariant} from '@leroutier/domain';
 
+function storagePolicy() {
+  const limitMb=Number(process.env.DATABASE_STORAGE_LIMIT_MB);
+  const stopPercent=Number(process.env.REGISTRATION_STORAGE_STOP_PERCENT);
+  const limitBytes=Number.isFinite(limitMb)&&limitMb>0?Math.round(limitMb*1024*1024):null;
+  const threshold=Number.isFinite(stopPercent)&&stopPercent>=50&&stopPercent<=99?stopPercent:85;
+  return {limitBytes,threshold,registrationEnabled:process.env.REGISTRATION_ENABLED!=='false'};
+}
+
 export function operationalHealth(db) {
   return {
     async record(signal) {
@@ -13,6 +21,7 @@ export function operationalHealth(db) {
     async read(actor) {
       invariant(actor?.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
       const expected=(await readdir(new URL('../migrations/',import.meta.url))).filter(f=>/^\d+.*\.sql$/.test(f)).length;
+      const policy=storagePolicy();
       return db.transaction(async tx=>{
         const counts=(await tx.query(`SELECT
           (SELECT count(*) FROM schema_migrations)::integer AS migrations,
@@ -21,10 +30,60 @@ export function operationalHealth(db) {
           (SELECT count(*) FROM outbox WHERE dispatch_dead_at IS NOT NULL)::integer AS dispatch_dead,
           (SELECT count(*) FROM agent_model_cooldowns WHERE until_at>now())::integer AS model_cooldowns,
           (SELECT count(*) FROM agent_model_calls WHERE status='rejected' AND created_at>now()-interval '1 day')::integer AS model_rejected,
-          (SELECT count(*) FROM route_geometry_failures WHERE created_at>now()-interval '1 day')::integer AS routing_failed`)).rows[0];
+          (SELECT count(*) FROM route_geometry_failures WHERE created_at>now()-interval '1 day')::integer AS routing_failed,
+          (SELECT count(*) FROM users)::integer AS users_total,
+          (SELECT count(*) FROM users WHERE active=true)::integer AS users_active,
+          (SELECT count(*) FROM users WHERE auth_subject IS NOT NULL)::integer AS users_authenticated,
+          (SELECT count(*) FROM operators WHERE verification_status='pending_verification')::integer AS kyc_pending,
+          (SELECT count(*) FROM payments WHERE status='failed')::integer AS payments_failed_total,
+          (SELECT count(*) FROM payout_requests WHERE status IN ('failed','reversed'))::integer AS payouts_failed_total,
+          (SELECT count(*) FROM incidents WHERE status<>'resolved')::integer AS incidents_open`)).rows[0];
         const signals=(await tx.query("SELECT signal,sum(count)::integer AS count FROM operational_signals WHERE minute>now()-interval '15 minutes' GROUP BY signal")).rows;
+        const sizeRow=(await tx.query('SELECT pg_database_size(current_database())::bigint AS bytes')).rows[0];
+        const usedBytes=Number(sizeRow?.bytes??0);
+        const usedPercent=policy.limitBytes?Math.round((usedBytes/policy.limitBytes)*1000)/10:null;
+        const registrationsOpen=policy.registrationEnabled && (usedPercent===null || usedPercent<policy.threshold);
+
+        const users=(await tx.query(`SELECT u.id,u.display_name,u.role,u.active,u.is_demo,u.operator_id,u.notification_email,
+          u.auth_subject IS NOT NULL AS authenticated,u.auth_issuer,u.created_at,u.updated_at,u.profile_completed_at,
+          o.name AS operator_name,o.type AS operator_type,o.verification_status,
+          p.phone AS passenger_phone,d.license_reference,d.active AS driver_active,c.active AS convoyeur_active
+          FROM users u
+          LEFT JOIN operators o ON o.id=u.operator_id
+          LEFT JOIN passenger_profiles p ON p.user_id=u.id
+          LEFT JOIN driver_profiles d ON d.user_id=u.id
+          LEFT JOIN convoyeur_profiles c ON c.user_id=u.id
+          ORDER BY u.created_at DESC LIMIT 500`)).rows;
+
+        const kycQueue=(await tx.query(`SELECT o.id,o.name,o.type,o.verification_status,o.contact_phone,o.country,o.registration_ref,o.created_at,
+          owner.display_name AS owner_name,admin.display_name AS admin_name,
+          d.license_reference
+          FROM operators o
+          LEFT JOIN users owner ON owner.id=o.owner_user_id
+          LEFT JOIN users admin ON admin.id=o.admin_user_id
+          LEFT JOIN driver_profiles d ON d.user_id=o.owner_user_id
+          WHERE o.verification_status IN ('pending_verification','rejected','suspended')
+          ORDER BY CASE o.verification_status WHEN 'pending_verification' THEN 0 ELSE 1 END,o.created_at DESC LIMIT 200`)).rows;
+
+        const paymentAnomalies=(await tx.query(`SELECT p.id,p.status,p.amount_minor,p.currency,p.created_at,b.id AS booking_id,
+          s.id AS service_id,o.id AS operator_id,o.name AS operator_name
+          FROM payments p JOIN bookings b ON b.id=p.booking_id JOIN services s ON s.id=b.service_id JOIN operators o ON o.id=s.operator_id
+          WHERE p.status='failed' ORDER BY p.created_at DESC LIMIT 100`)).rows;
+        const payoutAnomalies=(await tx.query(`SELECT r.id,r.status,r.amount_minor,r.currency,r.created_at,u.display_name AS beneficiary,
+          dp.operator_id,o.name AS operator_name
+          FROM payout_requests r JOIN users u ON u.id=r.driver_id LEFT JOIN driver_profiles dp ON dp.user_id=r.driver_id
+          LEFT JOIN operators o ON o.id=dp.operator_id
+          WHERE r.status IN ('failed','reversed') ORDER BY r.created_at DESC LIMIT 100`)).rows;
+        const incidents=(await tx.query(`SELECT i.id,i.kind,i.severity,i.status,i.description,i.created_at,s.id AS service_id,
+          o.id AS operator_id,o.name AS operator_name
+          FROM incidents i JOIN services s ON s.id=i.service_id JOIN operators o ON o.id=s.operator_id
+          WHERE i.status<>'resolved' ORDER BY i.created_at DESC LIMIT 100`)).rows;
+
         return {database:'ok',migrations:{applied:counts.migrations,expected,matched:counts.migrations===expected},
-          signals,counts,pool:db.poolStats?.()??null,alertTransport:'internal_ops_only'};
+          signals,counts,pool:db.poolStats?.()??null,alertTransport:'internal_ops_only',
+          storage:{usedBytes,limitBytes:policy.limitBytes,usedPercent,registrationStopPercent:policy.threshold,registrationsOpen,
+            registrationEnabled:policy.registrationEnabled},
+          users,kycQueue,paymentAnomalies,payoutAnomalies,incidents};
       });
     },
   };
