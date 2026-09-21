@@ -3,6 +3,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import '@leroutier/ui/styles.css';
+import './stitch-polish.css';
 import App from './App.jsx';
 import {PwaUpdate} from './pwa-update.jsx';
 import {Assistant} from './assistant.jsx';

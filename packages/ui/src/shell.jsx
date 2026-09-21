@@ -7,7 +7,9 @@ import { Logo } from './logo.jsx';
  * @param {{ role: string, title: string, subtitle?: string, nav?: { id: string, label: string, icon: Icon }[], active?: string, onNavigate?: (id: string) => void, children: ReactNode, online?: boolean, actions?: ReactNode, avatar?: ReactNode, onNotifications?: () => void, unread?: number, onHome?: () => void }} props
  */
 export function AppShell({ role, title, subtitle, nav = [], active, onNavigate, children, online = true, actions, avatar = null, onNotifications, unread = 0, onHome }) {
-  return <div className="lr-app">
+  const roleKey = String(role || 'public').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-');
+  const pageKey = String(active || title || 'home').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-');
+  return <div className="lr-app" data-role={roleKey} data-page={pageKey}>
     <a className="skip-link" href="#lr-content">Aller au contenu</a>
     <header className="lr-header">
       <div className="lr-header-main">
@@ -22,10 +24,10 @@ export function AppShell({ role, title, subtitle, nav = [], active, onNavigate, 
             <Bell size={19}/>{unread > 0 && <span className="icon-badge" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>}
           </button>{avatar}</div>
       </div>
-      <div className="lr-role-strip"><span>{role}</span><small>LeRoutier · mobilité interurbaine</small></div>
+      <div className="lr-role-strip"><span>{role}</span><small>{title} · LeRoutier Bénin</small></div>
     </header>
     <main className="lr-main" id="lr-content">{children}</main>
-    {nav.length > 0 && <nav className="lr-bottom-nav">{nav.map(item => { const Icon = item.icon; const selected = active === item.id; return <button key={item.id} className={selected ? 'active' : ''} onClick={() => onNavigate?.(item.id)} aria-current={selected ? 'page' : undefined}><Icon size={22}/><span>{item.label}</span></button>; })}</nav>}
+    {nav.length > 0 && <nav className="lr-bottom-nav" aria-label={`Navigation ${role}`}>{nav.map(item => { const Icon = item.icon; const selected = active === item.id; return <button key={item.id} className={selected ? 'active' : ''} onClick={() => onNavigate?.(item.id)} aria-current={selected ? 'page' : undefined}><Icon size={22}/><span>{item.label}</span></button>; })}</nav>}
   </div>;
 }
 
