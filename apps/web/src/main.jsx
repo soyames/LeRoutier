@@ -8,6 +8,8 @@ import {PwaUpdate} from './pwa-update.jsx';
 import {Assistant} from './assistant.jsx';
 import { About } from './about.jsx';
 import { LegalNotice, PrivacyPolicy, TermsOfUse, CancellationPolicy, CookiePolicy } from './legal.jsx';
+import { Seo } from './seo.jsx';
+import { BusBeninPage, RoutePage, ColisBeninPage, StationsBeninPage, TransporteursBeninPage } from './seo-pages.jsx';
 
 // VITE_API_URL may be an absolute API origin, or the literal "same-origin" to
 // call /api/v1 on whatever domain serves the app. Same-origin goes through the
@@ -24,8 +26,17 @@ createRoot(document.getElementById('root')).render(
   <React.StrictMode><BrowserRouter>
     <ApiProvider baseUrl={apiUrl} role={['passenger', 'driver', 'convoyeur', 'ops']}>
       <PwaUpdate/>
+      <Seo/>
       <Routes>
         <Route path="/about" element={<About/>}/>
+        <Route path="/bus-benin" element={<BusBeninPage/>}/>
+        <Route path="/cotonou-parakou" element={<RoutePage slug="cotonou-parakou"/>}/>
+        <Route path="/cotonou-porto-novo" element={<RoutePage slug="cotonou-porto-novo"/>}/>
+        <Route path="/cotonou-bohicon" element={<RoutePage slug="cotonou-bohicon"/>}/>
+        <Route path="/cotonou-natitingou" element={<RoutePage slug="cotonou-natitingou"/>}/>
+        <Route path="/colis-benin" element={<ColisBeninPage/>}/>
+        <Route path="/gares-routieres-benin" element={<StationsBeninPage/>}/>
+        <Route path="/transporteurs-benin" element={<TransporteursBeninPage/>}/>
         <Route path="/legal" element={<LegalNotice/>}/>
         <Route path="/privacy" element={<PrivacyPolicy/>}/>
         <Route path="/terms" element={<TermsOfUse/>}/>
