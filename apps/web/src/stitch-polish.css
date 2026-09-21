@@ -82,7 +82,11 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .control:focus{background:#fff!important;border-color:var(--lr-primary)!important;outline:3px solid rgba(177,95,0,.1)!important}
 
 /* Public journey search --------------------------------------------- */
-.hero{background:linear-gradient(145deg,#fff8f1 0%,#fff 54%,#f3f6ff 100%)!important;border-color:#f3dbc7!important;position:relative;overflow:visible}
+.hero{background:linear-gradient(145deg,#fff8f1 0%,#fff 54%,#f3f6ff 100%)!important;border-color:#f3dbc7!important;position:relative;/* The decorative glow below sits 28px past the right edge. Left unclipped
+   it became real scrollable overflow, so every screen carrying a hero card
+   scrolled sideways by 13px at 390px. Clipped to the card, exactly as
+   .parcel-hero already does, the glow still bleeds into the corner. */
+overflow:hidden}
 .hero:before{content:'';position:absolute;right:-28px;top:-28px;width:115px;height:115px;border-radius:50%;background:rgba(255,183,125,.18);filter:blur(4px);pointer-events:none}
 .hero h1{font-size:clamp(26px,6vw,38px)!important;letter-spacing:-.035em!important;font-weight:800!important}
 .hero p{font-size:14px!important}

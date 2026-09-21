@@ -5,7 +5,10 @@ async function login(page,label){
   await page.goto(APP+'/account');
   await page.getByText('Profils TEST — tous les espaces',{exact:true}).click();
   await page.getByRole('button',{name:'TEST : '+label,exact:true}).click();
-  await expect(page).toHaveURL(APP+(label==='Voyageur'?'/tickets':label.startsWith('Exploitation')?'/ops/today':'/work/today'));
+  // Platform Ops has its own control plane and lands there, not on a company
+  // operations console it has no operator scope for.
+  const landing=label==='Voyageur'?'/tickets':label==='Exploitation plateforme'?'/ops/platform':label.startsWith('Exploitation')?'/ops/today':'/work/today';
+  await expect(page).toHaveURL(APP+landing);
 }
 /** @type {Array<[string,string,string[]]>} */
 const profiles=[
@@ -14,7 +17,7 @@ const profiles=[
   ['Conducteur de compagnie','/work/today',['Aujourd’hui','Manifeste','Scanner','Comptant','Colis','Véhicule','Profil']],
   ['Convoyeur','/work/today',['Service','Manifeste','Scanner','Comptant','Colis','Profil']],
   ['Exploitation compagnie','/ops/today',['Aujourd’hui','Services','Flotte','Équipage','Stations','Colis','Paiements','Règlements','Incidents','Alertes','Paramètres']],
-  ['Exploitation plateforme','/ops/today',['Aujourd’hui','Services','Flotte','Équipage','Stations','Colis','Paiements','Règlements','Incidents','Alertes','Paramètres']],
+  ['Exploitation plateforme','/ops/platform',['Vue plateforme','Opérateurs','Vérifications','Utilisateurs','Services','Colis','Incidents','Finances','Système']],
 ];
 for(const [label,path,links] of profiles) test(`TEST ${label}: mobile login, workspace and every navigation destination`,async({page})=>{
   test.setTimeout(120_000);
@@ -30,7 +33,28 @@ for(const [label,path,links] of profiles) test(`TEST ${label}: mobile login, wor
     await expect(page.getByRole('alert')).toHaveCount(0);
     await expect(page.locator('main')).not.toBeEmpty();
     await expect(page.getByText('Espace non autorisé',{exact:true})).toHaveCount(0);
-    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    // A bare true/false here says a screen overflows but not what did it, which
+    // is most of the work. Name the elements that actually stick out, ignoring
+    // deliberate horizontal scrollers whose own overflow is contained.
+    const overflow=await page.evaluate(()=>{
+      const limit=document.documentElement.clientWidth;
+      if(document.documentElement.scrollWidth<=limit)return null;
+      const describe=el=>el.tagName.toLowerCase()+(el.id?'#'+el.id:'')+
+        (typeof el.className==='string'&&el.className.trim()?'.'+el.className.trim().split(/\s+/).join('.'):'');
+      const scrolls=el=>{const o=getComputedStyle(el).overflowX;return o==='auto'||o==='scroll'||o==='hidden';};
+      const culprits=[...document.querySelectorAll('body *')].filter(el=>{
+        const r=el.getBoundingClientRect();
+        if(r.width===0&&r.height===0)return false;
+        if(r.right<=limit+1&&r.left>=-1)return false;
+        // A child kept inside a scroller is that scroller's business.
+        for(let p=el.parentElement;p&&p!==document.body;p=p.parentElement)if(scrolls(p))return false;
+        return true;
+      }).map(el=>({el:describe(el),right:Math.round(el.getBoundingClientRect().right),
+        left:Math.round(el.getBoundingClientRect().left),text:(el.textContent||'').trim().slice(0,60)}));
+      return {scrollWidth:document.documentElement.scrollWidth,viewport:limit,
+        culprits:culprits.slice(0,4)};
+    });
+    expect(overflow,`${label} › ${name} overflows at 390px: `+JSON.stringify(overflow)).toBeNull();
   }
   if(label==='Convoyeur'){
     await page.getByRole('navigation').getByRole('button',{name:'Service',exact:true}).click();
