@@ -397,8 +397,9 @@ test('Gemini is selectable, defaults to the verified Flash model, and needs no A
   const config = modelConfig(env());
   assert.equal(config.provider, 'gemini');
   assert.equal(config.gemini.model, 'gemini-3.6-flash');
-  assert.equal(config.gemini.baseUrl.startsWith('https://generativelanguage.googleapis.com'), true);
-  assert.equal(config.gemini.baseUrl.includes('aiplatform'), false, 'Vertex AI requires billing and is unreachable from here');
+  const endpoint = new URL(config.gemini.baseUrl);
+  assert.equal(endpoint.protocol, 'https:');
+  assert.equal(endpoint.hostname, 'generativelanguage.googleapis.com', 'Vertex AI is not the configured Gemini endpoint');
   assert.equal('apiKey' in config.gemini, false);
   assert.equal(createModelProvider({ model: config }, fakeGoogle().impl).configured, true);
 });

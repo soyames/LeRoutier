@@ -13,6 +13,7 @@ import fs from 'node:fs';
 // Never record tokens, authorization headers or provider traffic in artifacts.
 test.use({ trace: 'off', video: 'off', screenshot: 'off' });
 
+const PROVIDER_HOST = /^(?:[a-z0-9-]+\.)*(?:googleapis\.com|google\.com|firebaseapp\.com|gstatic\.com)$/i;
 const FIREBASE = {
   apiKey: 'browser-test-api-key', authDomain: 'example.firebaseapp.com',
   projectId: 'example-project', appId: '1:1:web:test', providers: ['google'],
@@ -20,7 +21,11 @@ const FIREBASE = {
 
 /** No test may reach Google. A blocked call is a failed sign-in, never a real one. */
 async function isolateProvider(page) {
-  await page.route(/googleapis\.com|google\.com|firebaseapp\.com|gstatic\.com/, r => r.abort());
+  await page.route('**/*', r => {
+    let hostname = '';
+    try { hostname = new URL(r.request().url()).hostname; } catch { return r.fallback(); }
+    return PROVIDER_HOST.test(hostname) ? r.abort() : r.fallback();
+  });
 }
 
 /** Signs in through the development path: the same /me and the same role gating. */

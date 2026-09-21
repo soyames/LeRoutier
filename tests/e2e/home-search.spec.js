@@ -4,6 +4,7 @@ import { mockApi } from './api-fixture.js';
 // The homepage journey search: geography-backed, route-independent. The form
 // must exist even with zero routes, zero services and no login.
 const APP = 'http://127.0.0.1:4173';
+const GOOGLE_MAP_HOSTS = new Set(['maps.googleapis.com', 'maps.google.com']);
 const id = n => `00000000-0000-4000-b000-0000000003${String(n).padStart(2, '0')}1`;
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -134,12 +135,19 @@ test('granted position activates the first-mile planner with transient coordinat
   await page.goto(APP + `/trips?from=my-location&to=place:${id(3)}&date=${today()}`);
   await page.getByRole('button', { name: 'Utiliser ma position actuelle' }).click();
   await expect(page.getByText('Aucun départ disponible pour cet itinéraire pour le moment.')).toBeVisible();
-  expect(planRequests.some(u => u.includes('lat=6.355') && u.includes('lon=2.435') && u.includes('destinationPlaceId=')), 'the plan uses the transient position').toBeTruthy();
+  expect(planRequests.some(raw => {
+    const url = new URL(raw);
+    return url.searchParams.get('lat') === '6.355' && url.searchParams.get('lon') === '2.435' && Boolean(url.searchParams.get('destinationPlaceId'));
+  }), 'the plan uses the transient position').toBeTruthy();
 });
 
 test('no Google Maps dependency during the search flow', async ({ page }) => {
   const google = [];
-  page.on('request', r => { if (/maps\.googleapis\.com|maps\.google\.com/.test(r.url())) google.push(r.url()); });
+  page.on('request', r => {
+    let hostname = '';
+    try { hostname = new URL(r.url()).hostname; } catch { return; }
+    if (GOOGLE_MAP_HOSTS.has(hostname)) google.push(r.url());
+  });
   await mockGeography(page, CITIES);
   await page.route('**/api/v1/journey-plan*', r => r.fulfill({ json: { data: { options: [], originResolved: null, generatedAt: '2026-09-17T00:00:00Z' } } }));
   await page.goto(APP + '/');

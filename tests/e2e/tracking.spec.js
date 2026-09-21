@@ -62,7 +62,9 @@ test('maps use the configured OpenStreetMap basemap without Google Maps', async 
   // requests are blocked, so this test never depends on a tile server.
   const tileRequests = [];
   page.on('request', request => {
-    if (request.url().includes('tile.openstreetmap.org')) tileRequests.push(request.url());
+    let url;
+    try { url = new URL(request.url()); } catch { return; }
+    if (url.hostname === 'tile.openstreetmap.org') tileRequests.push(request.url());
   });
   await openTracking(page, trackingFixture());
   const map = page.getByRole('region', { name: 'Carte du véhicule sur son itinéraire' });

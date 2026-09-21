@@ -8,6 +8,7 @@ import { mockApi } from './api-fixture.js';
 test.use({ trace: 'off', video: 'off', screenshot: 'off' });
 
 const APP = 'http://127.0.0.1:4173';
+const FIREBASE_HOST = /^(?:[a-z0-9-]+\.)*(?:googleapis\.com|google\.com|firebaseapp\.com|gstatic\.com)$/i;
 const FIREBASE = {
   apiKey: 'browser-test-api-key', authDomain: 'example.firebaseapp.com',
   projectId: 'example-project', appId: '1:1:web:test',
@@ -15,25 +16,28 @@ const FIREBASE = {
 
 async function mockFirebase(page, { signUp = null, signIn = null, reset = null } = {}) {
   await mockApi(page);
-  await page.route(/googleapis\.com|google\.com|firebaseapp\.com|gstatic\.com/, async r => {
-    const url = r.request().url();
-    if (url.includes('identitytoolkit.googleapis.com/v1/accounts:signUp')) {
+  await page.route('**/*', async r => {
+    let url;
+    try { url = new URL(r.request().url()); } catch { return r.fallback(); }
+    if (!FIREBASE_HOST.test(url.hostname)) return r.fallback();
+    const identityToolkit = url.hostname === 'identitytoolkit.googleapis.com';
+    if (identityToolkit && url.pathname === '/v1/accounts:signUp') {
       if (!signUp) return r.abort();
       return r.fulfill({ status: 200, json: { idToken: 'firebase-id-token', email: signUp.email, localId: 'local-1',
         refreshToken: 'refresh', expiresIn: '3600' } });
     }
-    if (url.includes('identitytoolkit.googleapis.com/v1/accounts:signInWithPassword')) {
+    if (identityToolkit && url.pathname === '/v1/accounts:signInWithPassword') {
       if (signIn === 'wrong-password') return r.fulfill({ status: 400, json: { error: { code: 400, message: 'INVALID_LOGIN_CREDENTIALS', errors: [{ message: 'INVALID_LOGIN_CREDENTIALS' }] } } });
       if (!signIn) return r.abort();
       return r.fulfill({ status: 200, json: { idToken: 'firebase-id-token', email: signIn.email, localId: 'local-1',
         refreshToken: 'refresh', expiresIn: '3600' } });
     }
-    if (url.includes('identitytoolkit.googleapis.com/v1/accounts:lookup')) {
+    if (identityToolkit && url.pathname === '/v1/accounts:lookup') {
       // The SDK refreshes user info right after sign-up/sign-in.
       return r.fulfill({ status: 200, json: { users: [{ localId: 'local-1', email: signUp?.email ?? signIn?.email ?? '',
         displayName: '', providerUserInfo: [], validSince: '0', lastLoginAt: '0', createdAt: '0' }] } });
     }
-    if (url.includes('identitytoolkit.googleapis.com/v1/accounts:sendOobCode')) {
+    if (identityToolkit && url.pathname === '/v1/accounts:sendOobCode') {
       if (!reset) return r.abort();
       return r.fulfill({ status: 200, json: { email: reset.email } });
     }
@@ -93,7 +97,7 @@ test('sign-in with email works; a wrong password is explained in product languag
   await expect(page.getByText('Test Identity').first()).toBeVisible();
   // Wrong password → clear French guidance, no provider internals.
   await page.getByRole('button', { name: 'Déconnexion' }).click();
-  await page.route(/identitytoolkit\.googleapis\.com\/v1\/accounts:signInWithPassword/, r =>
+  await page.route('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword*', r =>
     r.fulfill({ status: 400, json: { error: { code: 400, message: 'INVALID_LOGIN_CREDENTIALS' } } }));
   await page.getByLabel('Adresse e-mail').fill('nouveau@example.com');
   await page.getByLabel('Mot de passe').fill('mauvais');

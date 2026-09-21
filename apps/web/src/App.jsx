@@ -16,6 +16,12 @@ import {
   Wallet, BusFront, MapPin, Radio, WalletCards, ShieldAlert, Settings as SettingsIcon, Layers, Lock, LogOut, ShieldCheck,
 } from 'lucide-react';
 
+function trimTrailingSlashes(value) {
+  let end = value.length;
+  while (end > 1 && value.charCodeAt(end - 1) === 47) end--;
+  return value.slice(0, end);
+}
+
 // Deep-linked ticket: the booking id leads the list and drives the end-to-end
 // journey view — first mile, boarding, departure, arrival.
 function TicketsRoute() {
@@ -106,7 +112,7 @@ export default function App() {
   const unread = useUnreadCount();
   const can = capabilities(user);
   const workspace = workspaceOf(pathname);
-  const segments = pathname.replace(/\/+$/, '').split('/').filter(Boolean);
+  const segments = trimTrailingSlashes(pathname).split('/').filter(Boolean);
 
   // ---- Public and passenger -------------------------------------------------
   // Five destinations, thumb-reachable. Home lives behind the brand mark.
@@ -181,7 +187,7 @@ export default function App() {
 
   const shell = content => <AppShell
     online={online} role={scoped.role} title={scoped.titles[page] ?? 'LeRoutier'} subtitle="LeRoutier · Bénin"
-    nav={scoped.nav} active={page} onNavigate={id => navigate(`${scoped.prefix}/${id}`.replace(/\/+$/, '') || '/')}
+    nav={scoped.nav} active={page} onNavigate={id => navigate(trimTrailingSlashes(`${scoped.prefix}/${id}`) || '/')}
     unread={unread} onNotifications={() => navigate(`${scoped.prefix}/notifications`)} onHome={() => navigate('/')}
     avatar={<AccountMenu/>}
     actions={<WorkspaceSwitcher current={workspace} onSwitch={path => navigate(path)}/>}>

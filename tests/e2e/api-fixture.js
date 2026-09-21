@@ -55,14 +55,20 @@ export const trackingFixture=(overrides={})=>({
   eta:{at:'2026-09-16T13:40:00Z',confidence:'live',speedMps:19.4,roundedToMinutes:5},
   ...overrides});
 
+const TILE_HOSTS=new Set(['tile.openstreetmap.org','basemaps.cartocdn.com']);
+
 export async function mockApi(page) {
   const token=role=>`fixture-session-${role}`;
   // Map tiles are never fetched in tests: the suite must not depend on a tile
   // server being online, and a blocked tile is indistinguishable to Leaflet
   // from a slow one. The container, route line and markers still render.
-  await page.route(/tile\.openstreetmap\.org|basemaps\.cartocdn\.com/,r=>r.fulfill({
-    status:200,contentType:'image/png',
-    body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==','base64')}));
+  await page.route('**/*',r=>{
+    let hostname='';
+    try { hostname=new URL(r.request().url()).hostname; } catch { return r.fallback(); }
+    if(!TILE_HOSTS.has(hostname)) return r.fallback();
+    return r.fulfill({status:200,contentType:'image/png',
+      body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==','base64')});
+  });
   await page.route('**/api/v1/auth/config',r=>r.fulfill({json:{data:{demoLogin:true}}}));
   await page.route('**/api/v1/auth/demo',r=>{const role=r.request().postDataJSON().role;
     return r.fulfill({json:{data:{token:token(role),user:{id:id(2),role,display_name:'Compte Démo',operator_id:role==='passenger'?null:id(1)}}}});
