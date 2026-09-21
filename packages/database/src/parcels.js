@@ -42,7 +42,6 @@ const publicParcel = (row, parties = null) => ({
 const driverParcel = row => ({ id: row.id, trackingNumber: row.tracking_number, category: row.category, quantity: row.quantity,
   weightG: row.weight_g, status: row.status, originStopId: row.origin_stop_id, destinationStopId: row.destination_stop_id,
   originCity: row.origin_city, destinationCity: row.destination_city, pickupRequired: row.pickup_required, notes: row.notes });
-const maskPhone = phone => phone ? phone.replace(/(\+?[0-9]{2})[0-9 -]+([0-9]{2})$/, '$1••••••$2') : null;
 
 async function trackingNumber(tx) {
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -276,7 +275,7 @@ export function parcels(db) {
       invariant(['driver','convoyeur'].includes(actor?.role), 'FORBIDDEN', 'Crew access required.', 403);
       invariant(typeof code === 'string' && code.trim().length > 0 && code.trim().length <= 200,
         'INVALID_REFERENCE', 'Saisissez le QR ou la référence LRP du colis.', 400);
-      const value = code.trim();
+      const value = code.trim().replace(/^https:\/\/leroutier\.app\/parcels\/track\?ref=(LRP-[0-9A-Fa-f]{8})$/, '$1');
       const tokenHash = value.startsWith('LRP1.') ? hash(value) : null;
       return db.transaction(async tx => {
         const row = await one(tx, `SELECT p.*,o.name AS origin_city,d.name AS destination_city
@@ -310,21 +309,27 @@ export function parcels(db) {
     async label(actor, id) {
       return db.transaction(async tx => {
         const parcel = await authorize(tx, actor, id);
-        const token = 'LRP1.' + randomBytes(32).toString('base64url');
-        const row = await one(tx, `INSERT INTO parcel_labels(parcel_id,version,token_hash) VALUES($1,1,$2)
-          ON CONFLICT(parcel_id) DO UPDATE SET version=parcel_labels.version+1,token_hash=EXCLUDED.token_hash,issued_at=now()
-          RETURNING version`, [parcel.id, hash(token)]);
-        const places = await one(tx, `SELECT op.name AS origin_city,dp.name AS destination_city,
-            pp.name AS receiver_name,pp.phone AS receiver_phone
-          FROM parcels p JOIN stops os ON os.id=p.origin_stop_id JOIN stops ds ON ds.id=p.destination_stop_id
+        let row=await one(tx,'SELECT * FROM parcel_labels WHERE parcel_id=$1',[parcel.id]);
+        if(!row?.token) {
+          const token='LRP1.'+randomBytes(32).toString('base64url');
+          row=await one(tx,`INSERT INTO parcel_labels(parcel_id,version,token_hash,token) VALUES($1,1,$2,$3)
+            ON CONFLICT(parcel_id) DO UPDATE SET version=parcel_labels.version+1,token_hash=EXCLUDED.token_hash,
+            token=EXCLUDED.token,issued_at=now() RETURNING *`,[parcel.id,hash(token),token]);
+        }
+        const places=await one(tx,`SELECT op.name AS origin_city,dp.name AS destination_city,
+          coalesce(cp.name,os.name) AS origin_name,coalesce(pp.name,ds.name) AS destination_name,o.name AS operator_name,o.is_demo
+          FROM parcels p JOIN operators o ON o.id=p.operator_id
+          JOIN stops os ON os.id=p.origin_stop_id JOIN stops ds ON ds.id=p.destination_stop_id
           JOIN places op ON op.id=os.place_id JOIN places dp ON dp.id=ds.place_id
-          LEFT JOIN parcel_parties pp ON pp.parcel_id=p.id AND pp.role='receiver'
-          WHERE p.id=$1`, [parcel.id]);
-        return {
-          trackingNumber: parcel.tracking_number, token, barcode: parcel.tracking_number, version: row.version,
-          origin: places?.origin_city, destination: places?.destination_city, category: parcel.category,
-          receiver: places?.receiver_name ? { initial: places.receiver_name.trim().charAt(0).toUpperCase(), phone: maskPhone(places.receiver_phone) } : null,
-        };
+          LEFT JOIN boarding_points cp ON cp.id=p.consignment_point_id LEFT JOIN boarding_points pp ON pp.id=p.pickup_point_id
+          WHERE p.id=$1`,[parcel.id]);
+        const parties=await loadParties(tx,parcel.id);
+        const paid=await one(tx,"SELECT coalesce(sum(amount_minor),0)::integer AS amount FROM parcel_payments WHERE parcel_id=$1 AND status='succeeded'",[parcel.id]);
+        return {...publicParcel(parcel,parties),token:row.token,barcode:parcel.tracking_number,version:row.version,
+          origin:places.origin_city,destination:places.destination_city,originName:places.origin_name,destinationName:places.destination_name,
+          operatorName:places.operator_name,isTest:places.is_demo,paidMinor:paid.amount,
+          paymentStatus:paid.amount>=parcel.price_minor?'succeeded':paid.amount>0?'partial':'unpaid',
+          trackingUrl:'https://leroutier.app/parcels/track?ref='+parcel.tracking_number};
       });
     },
     async accept(actor, id) {

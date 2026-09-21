@@ -16,8 +16,8 @@ export function notificationDelivery(db, adapters = {}) {
           try {
             const notification=await db.transaction(async tx=>(await tx.query('SELECT * FROM notifications WHERE id=$1',[delivery.notification_id])).rows[0]);
             const result=await adapter.send({notification,idempotencyKey:delivery.id});
-            if(result?.accepted!==true) throw new Error('not accepted');
-            status='sent'; detail='provider_accepted';
+            if(result?.unavailable===true) { status='unavailable'; detail='recipient_unavailable'; }
+            else { if(result?.accepted!==true) throw new Error('not accepted'); status='sent'; detail='provider_accepted'; }
           } catch {status=delivery.attempts>=5?'failed':'pending';detail=status==='failed'?'dead_letter':'retry_scheduled';}
         }
         await db.transaction(async tx=>{

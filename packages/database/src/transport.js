@@ -176,14 +176,14 @@ export function transport(db) {
       return db.transaction(async tx => {
         const { rows } = await tx.query('SELECT DISTINCT service_id FROM bookings WHERE passenger_id=$1 ORDER BY service_id', [actor.id]);
         for (const row of rows) await serviceLock(tx, row.service_id);
-        return (await tx.query(`SELECT b.*,r.name AS route_name,s.departure_at,s.departure_point_id,s.arrival_point_id,
+        return (await tx.query(`SELECT b.*,r.name AS route_name,CASE WHEN b.origin_sequence=0 THEN s.departure_at END AS departure_at,s.departure_point_id,s.arrival_point_id,
           bdp.name AS departure_point_name,bdp.description AS departure_point_landmark,bdp.latitude AS departure_point_latitude,bdp.longitude AS departure_point_longitude,
           bap.name AS arrival_point_name,bap.description AS arrival_point_landmark,bap.latitude AS arrival_point_latitude,bap.longitude AS arrival_point_longitude,
           coalesce(op.name,(SELECT p.name FROM service_stops ss JOIN stops st ON st.id=ss.stop_id JOIN places p ON p.id=st.place_id WHERE ss.service_id=s.id AND ss.sequence=b.origin_sequence)) AS departure_city,
           coalesce(ap.name,(SELECT p.name FROM service_stops ss JOIN stops st ON st.id=ss.stop_id JOIN places p ON p.id=st.place_id WHERE ss.service_id=s.id AND ss.sequence=b.destination_sequence)) AS arrival_city
           FROM bookings b JOIN services s ON s.id=b.service_id JOIN routes r ON r.id=s.route_id
-          LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN places op ON op.id=bdp.place_id
-          LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id LEFT JOIN places ap ON ap.id=bap.place_id
+          LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id AND bdp.place_id=(SELECT st.place_id FROM service_stops ss JOIN stops st ON st.id=ss.stop_id WHERE ss.service_id=s.id AND ss.sequence=b.origin_sequence) LEFT JOIN places op ON op.id=bdp.place_id
+          LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id AND bap.place_id=(SELECT st.place_id FROM service_stops ss JOIN stops st ON st.id=ss.stop_id WHERE ss.service_id=s.id AND ss.sequence=b.destination_sequence) LEFT JOIN places ap ON ap.id=bap.place_id
           WHERE passenger_id=$1 ORDER BY b.created_at DESC LIMIT 100`, [actor.id])).rows;
       });
     },

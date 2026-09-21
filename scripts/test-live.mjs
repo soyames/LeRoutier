@@ -20,7 +20,9 @@ const PREVIEW_ORIGINS = [4173].flatMap(port => [`http://127.0.0.1:${port}`, `htt
 // developer's local CORS_ORIGINS. Production CORS is unaffected: this config
 // exists only for these throwaway schemas and this in-process server.
 const base = serverConfig();
-const SPECS = ['tests/e2e/unified.live.spec.js','tests/e2e/roles.live.spec.js'];
+const ALL_SPECS = ['tests/e2e/unified.live.spec.js','tests/e2e/roles.live.spec.js','tests/e2e/documents.live.spec.js'];
+const SPECS = process.argv.length > 2 ? ALL_SPECS.filter(spec => process.argv.slice(2).includes(spec)) : ALL_SPECS;
+if (!SPECS.length) throw new Error('Choose one of the registered live specifications.');
 
 function reclaimPorts() {
   if (process.platform !== 'win32') return;
@@ -39,7 +41,7 @@ async function runSpec(spec) {
     assertDisposableSchema(db, { purpose: 'The live integration suite' });
     console.log(`Live suite target: schema=${db.schema} environment=${environmentLabel(db.schema)}`);
     await migrate(db);
-    if(spec.endsWith('/roles.live.spec.js')) await seedTestProfiles(db); else await seed(db);
+    if(spec.endsWith('/roles.live.spec.js') || spec.endsWith('/documents.live.spec.js')) await seedTestProfiles(db); else await seed(db);
     await db.transaction(tx => tx.query("UPDATE services SET departure_at=now()+interval '1 hour' WHERE is_demo=true"));
     reclaimPorts();
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(4000, resolve); });

@@ -9,6 +9,8 @@ import { JourneySearchResults } from './journey-results.jsx';
 import { rememberCheckout } from './checkout.jsx';
 import { JourneyTimeline } from './journey.jsx';
 import { JourneyTracking } from './tracking.jsx';
+import { TicketDocuments, ParcelDocuments } from './documents.jsx';
+import { QrCapture } from './qr-capture.jsx';
 
 const isoDay = value => new Date(value).toISOString().slice(0, 10);
 const sameDay = (value, day) => isoDay(value) === day;
@@ -348,7 +350,8 @@ export function Tickets({ focusId = null }) {
   const paymentsConfig = useApi('/payments/config');
   const navigate = useNavigate();
   const [error, setError] = useState(''), [busy, setBusy] = useState('');
-  const [tickets, setTickets] = useState({}), [payStates, setPayStates] = useState({});
+  const [openedTicket, setOpenedTicket] = useState(null), [payStates, setPayStates] = useState({});
+  const ticketOpener = useRef(null);
   const onlinePayments = paymentsConfig.data?.available === true;
 
   // After returning from the payment page, poll trusted server state: only the
@@ -390,11 +393,12 @@ export function Tickets({ focusId = null }) {
       setError(e.code === 'PAYMENT_UNAVAILABLE' ? 'Le paiement en ligne est momentanément indisponible.' : e.message);
     } finally { setBusy(''); }
   }
-  async function issue(id) {
+  async function issue(id, opener) {
+    ticketOpener.current = opener;
     setBusy(id); setError('');
     try {
       const ticket = await request(`/bookings/${id}/ticket`, { method: 'POST', body: {} });
-      setTickets(prev => ({ ...prev, [id]: ticket }));
+      setOpenedTicket(ticket);
     } catch (e) { setError(e.message); } finally { setBusy(''); }
   }
 
@@ -406,6 +410,8 @@ export function Tickets({ focusId = null }) {
 
   return <>
     <SectionTitle icon={Ticket} title="Mes billets"/>
+    {openedTicket?.document && <TicketDocuments ticket={openedTicket} onClose={() => { setOpenedTicket(null); requestAnimationFrame(() => ticketOpener.current?.focus()); }}/>}
+    {openedTicket && !openedTicket.document && <div className="ticket-qr"><QRCodeSVG value={openedTicket.token} size={190} marginSize={4}/><span className="ticket-code">{openedTicket.manualCode}</span></div>}
     {error && <ErrorState title="Action impossible" text={error}/>}
     {!user ? <ApiState resource={{ loading: false, error: null }} emptyTitle="Connectez-vous"
       empty="Vos billets et réservations apparaissent ici une fois connecté."/>
@@ -419,7 +425,6 @@ export function Tickets({ focusId = null }) {
             : list.map(b => {
               const state = status('booking', b.status);
               const pay$ = payStates[b.id] ?? 'none';
-              const ticket = tickets[b.id];
               return <Card key={b.id} className="ticket">
                 <div className="ticket-head between wrap">
                   <div>
@@ -455,14 +460,8 @@ export function Tickets({ focusId = null }) {
                     {pay$ === 'pending' && <p className="small muted">Nous attendons la confirmation de votre paiement. Cette page se met à jour toute seule.</p>}
                   </div>}
 
-                  {['confirmed', 'boarded'].includes(b.status) && !ticket &&
-                    <button className="btn btn-primary" disabled={!!busy || !online} onClick={() => issue(b.id)}><QrCode size={16}/>Afficher mon billet</button>}
-
-                  {ticket && <div className="ticket-qr">
-                    <QRCodeSVG value={ticket.token} size={190} marginSize={1}/>
-                    <span className="ticket-code">{ticket.manualCode}</span>
-                    <span className="small muted">Présentez ce code à l’embarquement. Code de secours si le QR ne passe pas.</span>
-                  </div>}
+                  {['confirmed', 'boarded', 'completed', 'cancelled', 'expired'].includes(b.status) &&
+                    <button className="btn btn-primary" disabled={busy === b.id} onClick={e => issue(b.id, e.currentTarget)}><QrCode size={16}/>{busy === b.id ? 'Ouverture du billet…' : 'Afficher mon billet'}</button>}
 
                   <div className="controls">
                     {['confirmed', 'boarded'].includes(b.status) &&
@@ -798,7 +797,7 @@ export function Parcels() {
   const [receiverName, setReceiverName] = useState(''), [receiverPhone, setReceiverPhone] = useState('');
   const [origin, setOrigin] = useState(''), [destination, setDestination] = useState(''), [category, setCategory] = useState('documents');
   const [weight, setWeight] = useState(''), [notes, setNotes] = useState('');
-  const [label, setLabel] = useState(null);
+  const [label, setLabel] = useState(null), [showDocuments, setShowDocuments] = useState(false);
   const quoteUrl = origin && destination ? `/parcels/quote?originStopId=${origin}&destinationStopId=${destination}&category=${category}${weight ? `&weightG=${weight}` : ''}` : null;
   const quoteApi = useApi(quoteUrl);
   const quote = quoteApi.data;
@@ -809,7 +808,8 @@ export function Parcels() {
       const parcel = await request('/parcels', { method: 'POST', key: 'parcel-' + crypto.randomUUID(), body: {
         senderName, senderPhone: senderPhone.trim(), receiverName, receiverPhone: receiverPhone.trim(),
         originStopId: origin, destinationStopId: destination, category, weightG: weight ? Number(weight) : undefined, notes: notes.trim() || undefined } });
-      setLabel(await request(`/parcels/${parcel.id}/label`)); mine.reload(); setStep(3);
+      mine.reload(); setStep(3);
+      setLabel(await request(`/parcels/${parcel.id}/label`));
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
@@ -826,13 +826,16 @@ export function Parcels() {
 
     {label ? <Card className="card-success stack">
       <div className="between wrap"><h3>Colis enregistré</h3><Badge tone="success">{label.trackingNumber}</Badge></div>
-      <div className="ticket-qr"><QRCodeSVG value={label.token} size={180} marginSize={1}/>
+      <div className="ticket-qr"><QRCodeSVG value={label.trackingUrl || label.token} size={180} marginSize={4}/>
         <span className="small muted">Présentez ce QR depuis votre téléphone au conducteur. Aucune impression n’est nécessaire.</span></div>
       <Card className="stack label-print">
         <strong>Référence courte : {label.trackingNumber}</strong>
         <span className="small muted">Si votre téléphone est indisponible, écrivez cette référence sur le colis.</span>
         <span className="small">{label.origin} → {label.destination} · {categoryLabels[label.category]}{label.receiver ? ` · destinataire ${label.receiver.initial}. · ${label.receiver.phone}` : ''}</span>
-        <button type="button" className="btn btn-soft" onClick={() => window.print()}>Imprimer une étiquette (facultatif)</button>
+        <button type="button" className="btn btn-soft" onClick={() => setShowDocuments(true)}>Étiquette et reçu · PDF / impression</button>
+        {showDocuments && <ParcelDocuments parcel={label} onClose={() => setShowDocuments(false)}/>}
+        <p className="small">{label.parties?.sender?.name} → {label.parties?.receiver?.name}</p>
+        <p className="small">{status('parcel', label.status).label} · Impression facultative</p>
       </Card>
       <p className="small">Communiquez le numéro <strong>{label.trackingNumber}</strong> au destinataire pour le suivi public. Le QR du colis ne prouve jamais son identité.</p>
       <div className="controls"><button className="btn btn-soft" onClick={() => { setLabel(null); setStep(0); }}>Envoyer un autre colis</button></div>
@@ -853,7 +856,7 @@ export function Parcels() {
           <label>Votre téléphone<input className="control" type="tel" required value={senderPhone} onChange={e => setSenderPhone(e.target.value)}/></label>
           <label>Nom du destinataire<input className="control" required minLength={2} maxLength={100} value={receiverName} onChange={e => setReceiverName(e.target.value)}/></label>
           <label>Téléphone du destinataire<input className="control" type="tel" required value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)}/></label>
-          <p className="small muted">Le destinataire reçoit le numéro de suivi et retire le colis avec un code.</p>
+          <p className="small muted">Partagez la référence avec le destinataire. Les alertes utilisent les canaux disponibles ; le retrait nécessite un code distinct.</p>
           <div className="controls">
             <button type="button" className="btn btn-primary" disabled={!canPeople} onClick={() => setStep(2)}>Continuer</button>
             <button type="button" className="btn btn-soft" onClick={() => setStep(0)}>Retour</button>
@@ -901,10 +904,13 @@ export function Parcels() {
 // Public parcel tracking: a modern logistics timeline, no custody internals.
 export function ParcelTracking() {
   const { request } = useSession();
-  const [input, setInput] = useState(''), [tracking, setTracking] = useState(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
-  async function track(e) {
-    e.preventDefault(); setError(''); setTracking(null); setBusy(true);
-    try { setTracking(await request(`/public/parcel-tracking/${input.trim().toUpperCase()}`)); }
+  const [params] = useSearchParams();
+  const [input, setInput] = useState(() => params.get('ref') || ''), [tracking, setTracking] = useState(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  async function track(e, scanned) {
+    e?.preventDefault(); setError(''); setTracking(null); setBusy(true);
+    const value = scanned || input;
+    if (scanned) setInput(scanned);
+    try { setTracking(await request(`/public/parcel-tracking/${encodeURIComponent(value.trim().toUpperCase())}`)); }
     catch (e) { setError(e.status === 404 ? 'Ce numéro de suivi est introuvable. Vérifiez les caractères saisis.' : 'Le suivi est momentanément indisponible.'); }
     finally { setBusy(false); }
   }
@@ -913,6 +919,7 @@ export function ParcelTracking() {
     <SectionTitle icon={Package} title="Suivre un colis"/>
     <Card className="stack">
       <form className="stack" onSubmit={track}>
+        <QrCapture onRead={value => { const match = value.match(/^(?:https:\/\/leroutier\.app\/parcels\/track\?ref=)?(LRP-[0-9A-F]{8})$/i); if (match) track(null, match[1].toUpperCase()); else setError('Ce QR ne contient pas de référence de suivi LeRoutier.'); }} label="Scanner le QR du colis"/>
         <label>Numéro de suivi<input className="control" placeholder="LRP-XXXXXXXX" aria-label="Numéro de suivi" value={input} onChange={e => setInput(e.target.value)}/></label>
         <button className="btn btn-primary" disabled={!input.trim() || busy}>{busy ? 'Recherche…' : 'Suivre mon colis'}</button>
       </form>

@@ -142,7 +142,7 @@ export function privacyCenter(db) {
         // security metadata, no other users, no operator financial data.
         const payload = {
           exportedAt: new Date().toISOString(), currency: 'XOF',
-          account: { displayName: user.display_name, role: user.role, createdAt: user.created_at },
+          account: { displayName: user.display_name, role: user.role, createdAt: user.created_at, notificationEmail: user.notification_email },
           profile: profile ? { phone: profile.phone } : null,
           bookings, payments, parcels: parcelsRows, notifications, consents, acknowledgements,
         };
@@ -275,7 +275,7 @@ export function privacyCenter(db) {
             await tx.query(`UPDATE deletion_requests SET status='scheduled',blockers=$2,updated_at=now() WHERE id=$1`, [request.id, JSON.stringify(blockers)]);
             continue;
           }
-          await tx.query(`UPDATE users SET display_name='Utilisateur supprimé',auth_subject=NULL,active=false,updated_at=now() WHERE id=$1`, [request.user_id]);
+          await tx.query(`UPDATE users SET display_name='Utilisateur supprimé',auth_subject=NULL,notification_email=NULL,active=false,updated_at=now() WHERE id=$1`, [request.user_id]);
           await tx.query('UPDATE passenger_profiles SET phone=NULL WHERE user_id=$1', [request.user_id]);
           await tx.query(`UPDATE deletion_requests SET status='completed',processed_at=now(),blockers='[]',outcome='anonymized',updated_at=now() WHERE id=$1`, [request.id]);
           await tx.query('DELETE FROM api_sessions WHERE user_id=$1', [request.user_id]);

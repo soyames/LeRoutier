@@ -19,6 +19,7 @@ import { operatorSettlements } from '@leroutier/database/operator-settlements';
 import { walkUpBookings } from '@leroutier/database/walkup';
 import { notificationPolicies } from '@leroutier/database/notifications';
 import { notificationDelivery } from '@leroutier/database/notification-delivery';
+import { notificationProviders } from '@leroutier/database/notification-providers';
 import { operationalHealth } from '@leroutier/database/operational-health';
 import { fareIntelligence } from '@leroutier/database/fare-intelligence';
 import { commercial } from '@leroutier/database/commercial';
@@ -42,6 +43,8 @@ class RawResponse {
 }
 
 export function createApi(db, config, keyResolver=undefined, adapter=paymentAdapter(config)) {
+  const providers=notificationProviders(db,config);
+  config={...config,notificationProviders:providers};
   const health=operationalHealth(db);
   const fares=fareIntelligence(db);
   const commerce=commercial(db);
@@ -335,7 +338,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='POST' && path==='/workflows/tick') {
       invariant(actor.agent && actor.agent.scopes.includes('workflow.run'),'FORBIDDEN','Agent scope workflow.run is required.',403);
       const result=await workflows.processOutbox();
-      await notificationDelivery(db).tick();
+      await notificationDelivery(db,providers).tick();
       return result;
     }
     if(method==='POST' && path==='/tickets/verify')return ticket.verify(actor,await body());

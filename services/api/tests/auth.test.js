@@ -6,7 +6,11 @@ import { jwtFixture } from './jwt-fixture.js';
 let fixture,verify;
 before(async()=>{fixture=await jwtFixture();verify=jwtVerifier(fixture.config,fixture.resolver);});
 test('valid signature returns only verified subject and issuer',async()=>{
-  assert.deepEqual(await verify(await fixture.sign('person',{role:'ops',operator_id:'untrusted'})),{subject:'person',issuer:fixture.config.issuer});
+  assert.deepEqual(await verify(await fixture.sign('person',{role:'ops',operator_id:'untrusted'})),{subject:'person',issuer:fixture.config.issuer,notificationEmail:null});
+});
+test('only a verified email claim can receive confirmation mail',async()=>{
+  assert.equal((await verify(await fixture.sign('person',{email:'test@example.invalid',email_verified:false}))).notificationEmail,null);
+  assert.equal((await verify(await fixture.sign('person',{email:'test@example.invalid',email_verified:true}))).notificationEmail,'test@example.invalid');
 });
 test('malformed JWT is rejected',async()=>assert.rejects(verify('invalid.jwt.input'),{code:'UNAUTHORIZED'}));
 test('JWT with another signing key is rejected',async()=>{const other=await jwtFixture();await assert.rejects(verify(await other.sign('person')),{code:'UNAUTHORIZED'});});

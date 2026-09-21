@@ -71,8 +71,8 @@ test('camera decodes a passenger phone QR, shows the booking, confirms boarding 
   await login(passenger,'Voyageur');
   const card=passenger.locator('.ticket').filter({hasText:'TEST Corridor'}).first();
   await card.getByRole('button',{name:'Afficher mon billet'}).click();
-  const svg=await card.locator('.ticket-qr svg').evaluate(el=>el.outerHTML);
-  const manual=await card.locator('.ticket-qr .ticket-code').textContent();
+  const svg=await passenger.locator('.document-dialog .ticket-qr svg').evaluate(el=>el.outerHTML);
+  const manual=await passenger.locator('.document-dialog .ticket-qr .ticket-code').textContent();
   await login(driver,'Conducteur de compagnie');
   await driver.getByRole('navigation').getByRole('button',{name:'Scanner',exact:true}).click();
   await camera(driver,svg);
@@ -122,8 +122,9 @@ test('parcel receipt reopens without printing, camera decodes it and handwritten
   const pickup=(await ops.getByText(/Code de retrait \(15 min\) :/).innerText()).match(/: (\d{6})/)[1];
   await login(collector,'Conducteur de compagnie');
   await collector.getByRole('navigation').getByRole('button',{name:'Colis',exact:true}).click();
-  collector.once('dialog',dialog=>dialog.accept(pickup));
   await collector.getByRole('button',{name:'Remettre avec le code'}).click();
+  await collector.getByLabel('Code de retrait du destinataire').fill(pickup);
+  await collector.getByRole('button',{name:'Confirmer la remise'}).click();
   await expect(collector.getByText('Colis remis au destinataire.')).toBeVisible();
   await expect(collector.getByRole('button',{name:'Remettre avec le code'})).toHaveCount(0);
   await collector.screenshot({path:'.tmp/parcel-collected.png',fullPage:true});
@@ -135,7 +136,7 @@ test('offline manual boarding remains unverified until the server accepts it aft
   await login(passenger,'Voyageur');
   const card=passenger.locator('.ticket').filter({hasText:'TEST Service Cotonou–Parakou'}).first();
   await card.getByRole('button',{name:'Afficher mon billet'}).click();
-  const manual=await card.locator('.ticket-qr .ticket-code').textContent();
+  const manual=await passenger.locator('.document-dialog .ticket-qr .ticket-code').textContent();
   await login(driver,'Chauffeur indépendant');
   await driver.getByRole('navigation').getByRole('button',{name:'Scanner',exact:true}).click();
   await expect(driver.getByLabel('Code du billet')).toBeVisible();
