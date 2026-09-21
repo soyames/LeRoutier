@@ -9,6 +9,8 @@
 
 const RETURN_TO = 'leroutier:return-to';
 const PENDING_REDIRECT = 'leroutier:auth-redirect';
+const FIREBASE_APP_NAME = 'leroutier-auth';
+const BRANDED_AUTH_HOSTS = new Set(['leroutier.app', 'www.leroutier.app']);
 
 // Only a same-origin, absolute path may be returned to after sign-in. Anything
 // else — an absolute URL, a protocol-relative "//evil.example", the callback
@@ -32,6 +34,21 @@ export function takeReturnPath() {
   } catch { return '/'; }
 }
 
+/**
+ * The production PWA deliberately serves Firebase's helper routes through the
+ * LeRoutier origin. Firebase recommends this reverse-proxy pattern for apps
+ * hosted outside Firebase Hosting because it keeps the auth helper same-origin
+ * and avoids third-party-storage failures. It also means the account chooser
+ * is branded with LeRoutier's domain instead of *.firebaseapp.com.
+ *
+ * Local development keeps the configured Firebase domain because localhost
+ * does not proxy /__/auth to the Firebase project.
+ */
+export function browserAuthDomain(config, location = globalThis.window?.location) {
+  const hostname = String(location?.hostname || '').toLowerCase();
+  return BRANDED_AUTH_HOSTS.has(hostname) ? hostname : config?.authDomain;
+}
+
 let cached = null;
 
 /**
@@ -41,18 +58,30 @@ let cached = null;
  */
 export async function firebaseAuth(config) {
   if (!config?.apiKey || !config?.authDomain || !config?.projectId || !config?.appId) return null;
-  const key = `${config.projectId}:${config.appId}`;
+  const authDomain = browserAuthDomain(config);
+  if (!authDomain) return null;
+  const key = `${config.projectId}:${config.appId}:${authDomain}`;
   if (cached?.key === key) return cached;
 
-  const [{ initializeApp, getApps, getApp }, auth] = await Promise.all([
+  const [{ initializeApp, getApps, deleteApp }, auth] = await Promise.all([
     import('firebase/app'),
     import('firebase/auth'),
   ]);
-  // A hot reload or a second provider must not register the app twice.
-  const app = getApps().length ? getApp() : initializeApp({
-    apiKey: config.apiKey, authDomain: config.authDomain,
-    projectId: config.projectId, appId: config.appId,
-  });
+
+  // Use one dedicated Firebase app. Older flows in the bundle must not be able
+  // to leave an app initialised with firebaseapp.com and silently win forever.
+  let app = getApps().find(candidate => candidate.name === FIREBASE_APP_NAME) ?? null;
+  if (app && app.options.authDomain !== authDomain) {
+    await deleteApp(app);
+    app = null;
+  }
+  if (!app) app = initializeApp({
+    apiKey: config.apiKey,
+    authDomain,
+    projectId: config.projectId,
+    appId: config.appId,
+  }, FIREBASE_APP_NAME);
+
   const instance = auth.getAuth(app);
   // Tokens live for the tab and no longer. A shared handset at a station
   // should not sign the next person in as the last one.
@@ -65,10 +94,10 @@ export async function firebaseAuth(config) {
 /**
  * Starts a Google sign-in.
  *
- * Popup first, redirect as a fallback. The popup keeps the page — and any
- * half-filled booking — alive, and avoids the cross-site storage problems a
- * redirect hits when the Firebase auth domain differs from the app's own.
- * When a browser blocks the popup, the redirect still works.
+ * Popup first, redirect as a fallback. Both use the same branded authDomain in
+ * production, so the helper stays on the LeRoutier origin. Mobile browsers that
+ * block the popup can therefore fall back to redirect without crossing to the
+ * Firebase Hosting domain.
  */
 export async function signInWithGoogle(config, returnTo = '/') {
   const ready = await firebaseAuth(config);
