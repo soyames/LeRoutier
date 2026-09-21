@@ -4,6 +4,7 @@ import { Parcels as LegacyParcels, ParcelTracking as LegacyParcelTracking } from
 import './parcel-experience.css';
 
 export * from './passenger.jsx';
+export { OnboardingPage } from './operator-onboarding.jsx';
 
 function ParcelHero({ tracking }) {
   const navigate = useNavigate();
