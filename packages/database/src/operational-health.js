@@ -16,7 +16,7 @@ export function operationalHealth(db) {
       await db.transaction(async tx=>{
         await tx.query(`INSERT INTO operational_signals(signal) VALUES($1)
           ON CONFLICT(minute,signal) DO UPDATE SET count=operational_signals.count+1`,[signal]);
-      }).catch(()=>{}); // DB failure remains visible through 503 and safe logs.
+      }).catch(()=>{});
     },
     async read(actor) {
       invariant(actor?.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
@@ -55,13 +55,24 @@ export function operationalHealth(db) {
           LEFT JOIN convoyeur_profiles c ON c.user_id=u.id
           ORDER BY u.created_at DESC LIMIT 500`)).rows;
 
-        const kycQueue=(await tx.query(`SELECT o.id,o.name,o.type,o.verification_status,o.contact_phone,o.country,o.registration_ref,o.created_at,
+        // Platform Ops gets a review projection, not a public projection. It
+        // contains references and evidence URLs needed for manual KYC/KYB but
+        // never authentication tokens/passwords. Company employees are not
+        // individually KYC'd; independent owner-drivers are.
+        const kycQueue=(await tx.query(`SELECT o.id,o.name,o.legal_name,o.type,o.verification_status,o.contact_phone,o.country,o.registration_ref,o.tax_reference,
+          o.representative_name,o.representative_id_reference,o.transport_authorization_reference,o.registered_address,o.created_at,o.verified_at,
           owner.display_name AS owner_name,admin.display_name AS admin_name,
-          d.license_reference
+          d.id_document_type,d.id_document_reference,d.license_reference,d.photo_url AS driver_photo_url,d.insurance_reference,d.roadworthiness_reference,
+          v.id AS vehicle_id,v.registration AS vehicle_registration,v.make AS vehicle_make,v.model AS vehicle_model,v.color AS vehicle_color,
+          v.model_year AS vehicle_year,v.photo_url AS vehicle_photo_url,
+          COALESCE((SELECT json_agg(json_build_object('id',e.id,'kind',e.kind,'reference',e.reference,'fileUrl',e.file_url,'status',e.status,
+            'submittedAt',e.submitted_at,'reviewedAt',e.reviewed_at,'notes',e.notes) ORDER BY e.submitted_at,e.kind)
+            FROM verification_evidence e WHERE e.operator_id=o.id),'[]'::json) AS evidence
           FROM operators o
           LEFT JOIN users owner ON owner.id=o.owner_user_id
           LEFT JOIN users admin ON admin.id=o.admin_user_id
-          LEFT JOIN driver_profiles d ON d.user_id=o.owner_user_id
+          LEFT JOIN driver_profiles d ON d.user_id=o.owner_user_id AND o.type='independent'
+          LEFT JOIN LATERAL (SELECT vv.* FROM vehicles vv WHERE vv.operator_id=o.id ORDER BY vv.created_at LIMIT 1) v ON true
           WHERE o.verification_status IN ('pending_verification','rejected','suspended')
           ORDER BY CASE o.verification_status WHEN 'pending_verification' THEN 0 ELSE 1 END,o.created_at DESC LIMIT 200`)).rows;
 
