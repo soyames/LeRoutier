@@ -35,24 +35,44 @@ test('concurrent ticket previews preserve the same QR, code and financial projec
   const authenticated=await api(new Request(`http://localhost/api/v1/bookings/${seeded.bookings[0]}/ticket`,{method:'POST',body:'{}',headers:{authorization:'Bearer '+token,'content-type':'application/json'}}));
   assert.equal(authenticated.status,200);assert.match(authenticated.headers.get('cache-control'),/no-store/);
 });
-test('boarded and completed tickets reopen as archives without a reusable boarding QR',async()=>{
+test('boarded and completed tickets reopen with the original archived QR but cannot board twice',async()=>{
   const domain=transport(db),id=seeded.bookings[0];
+  const original=await tickets(db).issue(passenger,id);
   await domain.transition(driver,id,'board',0);
   const boarded=await tickets(db).issue(passenger,id);
-  assert.equal(boarded.document.status,'boarded');assert.equal(boarded.validForBoarding,false);assert.equal(boarded.token,null);
+  assert.equal(boarded.document.status,'boarded');assert.equal(boarded.validForBoarding,false);
+  assert.equal(boarded.token,original.token);assert.equal(boarded.manualCode,original.manualCode);
+  await assert.rejects(tickets(db).verify(driver,{code:boarded.token,serviceId:boarded.serviceId,stopSequence:0}),{code:'ALREADY_BOARDED'});
   const destination=boarded.document.destination_sequence;
   await db.transaction(tx=>tx.query('UPDATE services SET current_sequence=$2 WHERE id=$1',[TEST.service1,destination]));
   await domain.transition(driver,id,'alight',destination);
-  assert.equal((await tickets(db).issue(passenger,id)).document.status,'completed');
+  const completed=await tickets(db).issue(passenger,id);
+  assert.equal(completed.document.status,'completed');assert.equal(completed.token,original.token);assert.equal(completed.validForBoarding,false);
+});
+test('a refunded payment invalidates an already issued boarding credential',async()=>{
+  const id=seeded.bookings[1],issued=await tickets(db).issue(passenger,id);
+  const b=issued.document;
+  const assignedDriver=(await db.transaction(tx=>tx.query(`SELECT u.* FROM users u JOIN service_assignments sa ON sa.driver_id=u.id
+    WHERE sa.service_id=$1 AND sa.ended_at IS NULL ORDER BY sa.assigned_at DESC LIMIT 1`,[issued.serviceId]))).rows[0];
+  assert.ok(assignedDriver);
+  await db.transaction(async tx=>{
+    await tx.query("UPDATE payments SET status='refunded' WHERE booking_id=$1 AND status='succeeded'",[id]);
+    await tx.query("UPDATE services SET status='active',current_sequence=$2 WHERE id=$1",[issued.serviceId,b.origin_sequence]);
+  });
+  await assert.rejects(tickets(db).verify(assignedDriver,{code:issued.token,serviceId:issued.serviceId,stopSequence:b.origin_sequence}),{code:'TICKET_INVALID'});
+  await db.transaction(async tx=>{
+    await tx.query("UPDATE payments SET status='succeeded' WHERE booking_id=$1 AND status='refunded'",[id]);
+    await tx.query("UPDATE services SET status='scheduled',current_sequence=0 WHERE id=$1",[issued.serviceId]);
+  });
 });
 test('cancellation document separates pending review from actual refunded payments',async()=>{
   const id=seeded.bookings[1];await transport(db).transition(passenger,id,'cancel');
   const cancelled=await tickets(db).issue(passenger,id);
-  assert.equal(cancelled.document.status,'cancelled');assert.equal(cancelled.token,null);assert.equal(cancelled.document.refundedMinor,0);
+  assert.equal(cancelled.document.status,'cancelled');assert.ok(cancelled.token);assert.equal(cancelled.validForBoarding,false);assert.equal(cancelled.document.refundedMinor,0);
   assert.ok(cancelled.document.paidMinor>0);
   await db.transaction(tx=>tx.query("UPDATE payments SET status='refunded' WHERE booking_id=$1",[id]));
   const refunded=await tickets(db).issue(passenger,id);
-  assert.equal(refunded.document.refundedMinor,refunded.document.paidMinor);
+  assert.equal(refunded.document.refundedMinor,refunded.document.paidMinor);assert.equal(refunded.token,cancelled.token);
 });
 test('intermediate boarding uses the booked stop and does not invent a timetable',async()=>{
   const domain=transport(db);
