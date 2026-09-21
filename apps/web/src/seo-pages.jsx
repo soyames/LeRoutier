@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { Card, SectionTitle } from '@leroutier/ui';
+import { Card } from '@leroutier/ui';
 import { LegalFooter } from './legal.jsx';
 
 const ROUTES = {
