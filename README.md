@@ -1,114 +1,52 @@
 # LeRoutier
 
-Interurban mobility for Bénin: intercity trips, parcels and the operators who
-run them — one platform, one shared transport domain.
+**LeRoutier** est une plateforme numérique de mobilité interurbaine conçue pour faciliter les déplacements de ville à ville au Bénin et progressivement sur les corridors régionaux d'Afrique de l'Ouest.
 
-**Product:** <https://leroutier.app> · **API:**
-<https://api.leroutier.app/api/v1>
+🌐 https://leroutier.app
 
-## One product, several workspaces
+## Voyager plus simplement
 
-LeRoutier is **one** application. A person installs LeRoutier, signs in once,
-and lands in whichever workspace their identity authorizes. Passenger,
-Independent Owner-Driver, Company Driver, Convoyeur and Operations are use
-cases *inside* LeRoutier — a user never meets our deployment architecture.
+LeRoutier permet aux voyageurs de rechercher un trajet, comparer les départs disponibles, réserver leur place, recevoir leur billet et suivre les informations utiles de leur voyage.
 
-| Workspace | Route | Who |
-| --- | --- | --- |
-| Voyageur | `/` | everyone, most of it without an account |
-| Conduite / Convoyeur | `/work` | crew attached to an operator |
-| Exploitation | `/ops` | operations staff |
+La plateforme relie dans une même expérience :
 
-`apps/web` is that application and the only frontend. All role workspaces are
-reachable from it; there are no separate passenger, driver or operations apps.
+- les voyageurs
+- les chauffeurs indépendants
+- les compagnies de transport
+- les chauffeurs et convoyeurs
+- les gares et points d'embarquement
+- le transport de colis
 
-## The rule that shapes everything
+## Pour les chauffeurs et transporteurs
 
-**Capacity is per segment, not per route.** A seat sold Cotonou → Bohicon is
-sold again from Bohicon once that passenger alights. Every client — web, crew,
-operations, USSD — goes through the same booking and capacity logic in
-`packages/domain`. No client may implement its own.
+Les chauffeurs indépendants et les compagnies peuvent gérer leurs trajets, véhicules, places disponibles, passagers, embarquements et colis.
 
-## Layout
+LeRoutier est conçu pour prendre en compte la réalité du transport interurbain : arrêts intermédiaires, places libérées en cours de trajet, gares routières, points d'embarquement et itinéraires comportant plusieurs villes.
 
-| Path | What lives there |
-| --- | --- |
-| `apps/web` | the unified PWA |
-| `services/api` | the only thing that talks to the database (`/api/v1`) |
-| `packages/domain` | booking, capacity, fares, state machines — pure logic |
-| `packages/database` | schema, migrations, data access, safety guards |
-| `packages/screens` · `packages/ui` | shared screens and design system |
-| `packages/geo` · `packages/routing` | route geometry, progress, ETA, routing adapter |
-| `packages/agents` | agent principals, typed action catalog, workflow engine |
-| `packages/config` | server and client configuration, Firebase Authentication |
+## Trajets au Bénin et corridors régionaux
 
-## Getting started
+LeRoutier s'appuie sur la géographie réelle et le réseau routier pour couvrir les liaisons interurbaines du Bénin.
 
-Node 24 and the pnpm pinned in `package.json` (`corepack enable` first).
+La plateforme est également conçue pour accompagner progressivement les corridors transfrontaliers vers des destinations régionales telles que Lomé, Lagos, Accra, Ouagadougou, Abidjan et d'autres grandes villes d'Afrique de l'Ouest.
 
-```bash
-pnpm install
-```
+Un itinéraire connu n'est pas automatiquement un départ disponible : les voyages proposés aux passagers correspondent aux services réellement déclarés par les chauffeurs et compagnies.
 
-### A database of your own
+## Colis
 
-Development and tests run against a PostgreSQL container on your machine —
-never against production. The image matches production's major version.
+LeRoutier permet également l'envoi et le suivi de colis entre villes, avec identification du colis, QR code, suivi des étapes et confirmation de retrait.
 
-```bash
-pnpm docker:up && pnpm db:local:migrate && pnpm db:local:seed
-```
+## Cartographie et suivi
 
-Then run the API and the unified PWA against it:
+La plateforme utilise la cartographie routière, la localisation GPS et le suivi du trajet pour aider les voyageurs et les professionnels à mieux comprendre l'avancement du voyage.
 
-```bash
-pnpm dev:local
-```
+## Une seule application
 
-For all six role logins with meaningful local TEST journeys, see
-[TEST profiles and inspection guide](tests/TEST-PROFILES.md).
+Voyageurs, chauffeurs, convoyeurs et équipes d'exploitation utilisent la même application LeRoutier avec des espaces adaptés à leur rôle.
 
-`pnpm docker:reset` rebuilds it from empty. `pnpm docker:down` stops it.
-`pnpm dev` runs every app including the legacy ones, against whatever
-`.env.local` points at.
+## Contact
 
-## Validation
+LeRoutier est un projet de DIGITAL CONDORDIA.
 
-```bash
-pnpm lint && pnpm typecheck && pnpm build && pnpm test
-```
+📧 leroutierbj@gmail.com
 
-| Command | What it proves |
-| --- | --- |
-| `pnpm test` | unit, API and browser suites |
-| `pnpm test:database:local` | the domain against a real PostgreSQL |
-| `pnpm test:migrate:fresh` | the migration chain still works from nothing |
-| `pnpm test:live:local` | real API, real database, real browser, end to end |
-| `pnpm secrets:check` | no credential in the tree, the diff, the history or a bundle |
-| `pnpm smoke:prod` | production is actually serving |
-
-Dependencies are installed once at the root; shared versions live in the
-`pnpm-workspace.yaml` catalog and local packages use `workspace:*`. No
-app-local installs, no `file:` dependencies.
-
-## What the platform actually does
-
-Real operators, real vehicles, real money — nothing is mocked into existence.
-
-- **Booking** — segment-aware seats, online payment only for passengers, cash
-  only through crew, tickets as QR plus a manual code.
-- **Money** — FedaPay collections and payouts, an operator-owned ledger.
-  Company employees cannot withdraw company money; an independent
-  owner-driver can withdraw their own.
-- **Parcels** — consignment, custody, scanning, pickup codes, and public
-  tracking that reveals no party.
-- **Maps and tracking** — real OpenStreetMap geography, real road geometry,
-  real GPS. A straight line between two cities is never drawn as a road, and
-  "live" is never claimed without a recent fix.
-- **Identity** — Firebase Authentication with Google Sign-In. Google says who
-  you are; the database says what you may do, and a token claim grants nothing.
-  [Production Google sign-in configuration](packages/config/README.md#production-google-authentication).
-- **Agentic operations** — domain events drive typed, scoped, audited agent
-  actions. Money and privileged changes always wait for a human.
-
-Security reports: [`SECURITY.md`](SECURITY.md) — privately, never a public issue.
+Pour signaler un problème de sécurité, consultez [SECURITY.md](SECURITY.md).
