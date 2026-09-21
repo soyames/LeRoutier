@@ -6,6 +6,7 @@ import { Trips, Tickets, Stations, Tracking, Account, Parcels as PassengerParcel
 import { Checkout } from '@leroutier/screens/checkout';
 import { Today as CrewToday, Manifest, Scanner, WalkUp, Parcels as CrewParcels, Vehicle, Points, Earnings, Profile } from '@leroutier/screens/crew';
 import { Today as OpsToday, Services, Fleet, Crew, Stations as OpsStations, Parcels as OpsParcels, Payments, Settlements, Incidents, Alerts, Settings } from '@leroutier/screens/ops';
+import { PlatformOverview, PlatformOperators, PlatformVerification, PlatformUsers, PlatformFinance, PlatformIncidents, PlatformSystem } from '@leroutier/screens/platform-ops';
 import { JourneyTimeline } from '@leroutier/screens/journey';
 import { JourneyTracking } from '@leroutier/screens/tracking';
 import { NotificationCentre, useUnreadCount } from '@leroutier/screens/notifications';
@@ -13,7 +14,7 @@ import { Home } from './home.jsx';
 import { PASSENGER, WORK, OPS, workspacesFor, capabilities, workspaceOf, isAuthorized } from './workspaces.js';
 import {
   Search, Ticket, UserRound, Package, Bell, Home as HomeIcon, Route, Users, QrCode,
-  Wallet, BusFront, MapPin, Radio, WalletCards, ShieldAlert, Settings as SettingsIcon, Layers, Lock, LogOut, ShieldCheck,
+  Wallet, BusFront, MapPin, Radio, WalletCards, ShieldAlert, Settings as SettingsIcon, Layers, Lock, LogOut, ShieldCheck, Building2, Database,
 } from 'lucide-react';
 
 function trimTrailingSlashes(value) {
@@ -22,27 +23,20 @@ function trimTrailingSlashes(value) {
   return value.slice(0, end);
 }
 
-// Deep-linked ticket: the booking id leads the list and drives the end-to-end
-// journey view — first mile, boarding, departure, arrival.
 function TicketsRoute() {
   const { id } = useParams();
   return <div className="stack">
     <Tickets focusId={id}/>
-    {/* Live vehicle tracking sits with the journey it belongs to: the map, the
-        progress and the first-mile advice are one screen, not three. */}
     {id && <JourneyTracking bookingId={id}/>}
     {id && <JourneyTimeline bookingId={id}/>}
   </div>;
 }
 
-// /parcels/track is public; /parcels (sending) needs an account.
 function ParcelsRoute() {
   const { id } = useParams();
   return id === 'track' ? <ParcelTracking/> : <PassengerParcels/>;
 }
 
-// A workspace the identity is not authorized for is stated plainly rather than
-// bounced to an unrelated screen. The API refuses the data regardless.
 function NotAuthorized({ workspace }) {
   return <EmptyState icon={Lock} title="Espace non autorisé"
     text={workspace === OPS
@@ -50,8 +44,6 @@ function NotAuthorized({ workspace }) {
       : 'Votre identité LeRoutier n’est pas encore rattachée à un opérateur comme chauffeur ou convoyeur. Passez par « Devenir opérateur ».'}/>;
 }
 
-// One LeRoutier sign-in, reusing the shared session panel so the experience is
-// identical everywhere. The user stays on the route they asked for.
 function SignInRequired() {
   const navigate = useNavigate();
   return <div className="stack">
@@ -63,9 +55,6 @@ function SignInRequired() {
   </div>;
 }
 
-// The account avatar: anonymous shows a neutral user icon that leads to
-// sign-in; an authenticated user shows their initials (or the icon) and a
-// small account menu. Never a hardcoded "LR" placeholder.
 function AccountMenu() {
   const { user, logout } = useSession();
   const navigate = useNavigate();
@@ -90,7 +79,6 @@ function WorkspaceSwitcher({ current, onSwitch }) {
   const { user } = useSession();
   const [open, setOpen] = useState(false);
   const available = workspacesFor(user);
-  // A single workspace needs no switcher, and dead workspaces are never shown.
   if (available.length < 2) return null;
   return <>
     <button className="workspace-switch" onClick={() => setOpen(v => !v)} aria-expanded={open} aria-label="Changer d’espace">
@@ -114,8 +102,6 @@ export default function App() {
   const workspace = workspaceOf(pathname);
   const segments = trimTrailingSlashes(pathname).split('/').filter(Boolean);
 
-  // ---- Public and passenger -------------------------------------------------
-  // Five destinations, thumb-reachable. Home lives behind the brand mark.
   const passengerNav = [
     { id: 'trips', label: 'Voyager', icon: Search },
     { id: 'tickets', label: 'Billets', icon: Ticket },
@@ -134,7 +120,6 @@ export default function App() {
     checkout: 'Paiement', notifications: 'Notifications',
   };
 
-  // ---- Work (driver, independent owner-driver, convoyeur) -------------------
   const workNav = [
     { id: 'today', label: can.convoyeur ? 'Service' : 'Aujourd’hui', icon: Route },
     { id: 'manifest', label: 'Manifeste', icon: Users },
@@ -142,7 +127,6 @@ export default function App() {
     { id: 'walk-up', label: 'Comptant', icon: Wallet },
     { id: 'parcels', label: 'Colis', icon: Package },
     ...(can.role === 'driver' ? [{ id: 'vehicle', label: 'Véhicule', icon: BusFront }] : []),
-    // Revenue and withdrawals belong to the operator owner, never to crew.
     ...(can.independent ? [{ id: 'boarding-points', label: 'Points', icon: MapPin }, { id: 'earnings', label: 'Recettes', icon: Wallet }] : []),
     { id: 'profile', label: 'Profil', icon: UserRound },
   ];
@@ -157,8 +141,7 @@ export default function App() {
     'boarding-points': 'Points d’embarquement', earnings: 'Recettes & retraits', profile: 'Profil', notifications: 'Notifications',
   };
 
-  // ---- Ops ------------------------------------------------------------------
-  const opsNav = [
+  const companyOpsNav = [
     { id: 'today', label: 'Aujourd’hui', icon: HomeIcon }, { id: 'services', label: 'Services', icon: Radio },
     { id: 'fleet', label: 'Flotte', icon: BusFront }, { id: 'crew', label: 'Équipage', icon: Users },
     { id: 'stations', label: 'Stations', icon: MapPin }, { id: 'parcels', label: 'Colis', icon: Package },
@@ -166,27 +149,51 @@ export default function App() {
     { id: 'incidents', label: 'Incidents', icon: ShieldAlert }, { id: 'alerts', label: 'Alertes', icon: Bell },
     { id: 'settings', label: 'Paramètres', icon: SettingsIcon },
   ];
-  const opsScreens = {
+  const companyOpsScreens = {
     today: <OpsToday/>, services: <Services/>, fleet: <Fleet/>, crew: <Crew/>, stations: <OpsStations/>,
     parcels: <OpsParcels/>, payments: <Payments/>, settlements: <Settlements/>, incidents: <Incidents/>,
     alerts: <Alerts/>, settings: <Settings/>, notifications: <NotificationCentre onOpen={to => navigate(to)}/>,
   };
-  const opsTitles = {
+  const companyOpsTitles = {
     today: 'Aujourd’hui', services: 'Services & lignes', fleet: 'Flotte & véhicules', crew: 'Équipage & personnel',
     stations: 'Stations & points', parcels: 'Colis & fret', payments: 'Paiements', settlements: 'Règlements & retraits',
     incidents: 'Incidents', alerts: 'Alertes & approbations', settings: 'Paramètres', notifications: 'Notifications',
   };
 
+  const platformOpsNav = [
+    { id: 'platform', label: 'Vue plateforme', icon: HomeIcon },
+    { id: 'operators', label: 'Opérateurs', icon: Building2 },
+    { id: 'verification', label: 'Vérifications', icon: ShieldCheck },
+    { id: 'users', label: 'Utilisateurs', icon: Users },
+    { id: 'services', label: 'Services', icon: Radio },
+    { id: 'parcels', label: 'Colis', icon: Package },
+    { id: 'platform-incidents', label: 'Incidents', icon: ShieldAlert },
+    { id: 'finance', label: 'Finances', icon: WalletCards },
+    { id: 'system', label: 'Système', icon: Database },
+  ];
+  const platformOpsScreens = {
+    platform: <PlatformOverview/>, operators: <PlatformOperators/>, verification: <PlatformVerification/>, users: <PlatformUsers/>,
+    services: <Services/>, parcels: <OpsParcels/>, 'platform-incidents': <PlatformIncidents/>, finance: <PlatformFinance/>, system: <PlatformSystem/>,
+    notifications: <NotificationCentre onOpen={to => navigate(to)}/>,
+  };
+  const platformOpsTitles = {
+    platform: 'Vue plateforme', operators: 'Opérateurs', verification: 'Vérifications & KYC', users: 'Utilisateurs & authentifications',
+    services: 'Services', parcels: 'Colis', 'platform-incidents': 'Incidents plateforme', finance: 'Finances & anomalies', system: 'Système & capacité', notifications: 'Notifications',
+  };
+
+  const opsNav=can.platformOps?platformOpsNav:companyOpsNav;
+  const opsScreens=can.platformOps?platformOpsScreens:companyOpsScreens;
+  const opsTitles=can.platformOps?platformOpsTitles:companyOpsTitles;
   const scoped = workspace === PASSENGER ? { nav: passengerNav, screens: passengerScreens, titles: passengerTitles, prefix: '', role: 'Voyageur' }
     : workspace === WORK ? { nav: workNav, screens: workScreens, titles: workTitles, prefix: '/work', role: can.convoyeur ? 'Convoyeur' : can.independent ? 'Chauffeur propriétaire' : 'Chauffeur' }
-      : { nav: opsNav, screens: opsScreens, titles: opsTitles, prefix: '/ops', role: 'Exploitation' };
-  const page = (workspace === PASSENGER ? segments[0] : segments[1]) ?? (workspace === PASSENGER ? '' : 'today');
-  // The privacy center is a stable account sub-route: deep-linkable, back-safe.
+      : { nav: opsNav, screens: opsScreens, titles: opsTitles, prefix: '/ops', role: can.platformOps?'Exploitation plateforme':'Exploitation compagnie' };
+  const fallbackPage=workspace===PASSENGER?'':workspace===OPS&&can.platformOps?'platform':'today';
+  const page = (workspace === PASSENGER ? segments[0] : segments[1]) ?? fallbackPage;
   const privacySub = workspace === PASSENGER && page === 'account' && segments[1] === 'privacy';
   const known = Object.hasOwn(scoped.screens, page);
 
   const shell = content => <AppShell
-    online={online} role={scoped.role} title={scoped.titles[page] ?? 'LeRoutier'} subtitle="LeRoutier · Bénin"
+    online={online} role={scoped.role} title={scoped.titles[page] ?? 'LeRoutier'} subtitle={can.platformOps&&workspace===OPS?'LeRoutier · Supervision plateforme':'LeRoutier · Bénin'}
     nav={scoped.nav} active={page} onNavigate={id => navigate(trimTrailingSlashes(`${scoped.prefix}/${id}`) || '/')}
     unread={unread} onNotifications={() => navigate(`${scoped.prefix}/notifications`)} onHome={() => navigate('/')}
     avatar={<AccountMenu/>}
@@ -194,8 +201,7 @@ export default function App() {
     {content}
   </AppShell>;
 
-  if (!known) return <Navigate to={scoped.prefix || '/'} replace/>;
-  // Authorization is advisory here and enforced by the API on every call.
+  if (!known) return <Navigate to={workspace===OPS&&can.platformOps?'/ops/platform':scoped.prefix || '/'} replace/>;
   if (workspace !== PASSENGER) {
     if (authLoading) return shell(<Card><p role="status">Vérification de votre identité…</p></Card>);
     if (!user) return shell(<SignInRequired/>);
@@ -211,12 +217,6 @@ export default function App() {
       </div>);
     }
   }
-  // Screens that need no account at all lead with the task rather than a
-  // sign-in card. Authentication is offered at the action that requires it,
-  // and from Compte.
-  // Checkout controls its own auth timing: the sign-in panel appears only
-  // after "Continuer vers le paiement", never before. Search and results are
-  // fully public too — no sign-in card merely because offers exist.
   const fullyPublic = workspace === PASSENGER && (page === '' || page === 'trips' ||
     (page === 'parcels' && segments[1] === 'track') || page === 'checkout');
   return shell(<>{user?.is_demo && <div className="notice" role="status">Espace TEST · données de démonstration · aucun paiement réel</div>}{!fullyPublic && <SessionPanel onWorkspace={navigate}/>}{privacySub ? <PrivacyCenter/> : scoped.screens[page]}</>);
