@@ -1,11 +1,16 @@
 // Production smoke validation: strictly non-financial, non-destructive checks.
 // Never charges money, never sends payouts, never mutates production data,
 // never prints secrets. Usage: PROD_API_URL=... node scripts/prod-smoke.mjs
-const api = (process.env.PROD_API_URL || 'https://api.leroutier.app').replace(/\/$/, '');
-const unified = (process.env.PROD_APP_URL || 'https://leroutier.app').replace(/\/$/, '');
+const stripTrailingSlash = value => value.endsWith('/') ? value.slice(0, -1) : value;
+const api = stripTrailingSlash(process.env.PROD_API_URL || 'https://api.leroutier.app');
+const unified = stripTrailingSlash(process.env.PROD_APP_URL || 'https://leroutier.app');
 let checks = 0, failures = 0;
 function ok(name, detail = '') { checks++; console.log(`  PASS  ${name}${detail ? ` (${detail})` : ''}`); }
 function fail(name, detail) { checks++; failures++; console.log(`  FAIL  ${name} — ${detail}`); }
+function cspHasSource(csp, directive, source) {
+  const parts = csp.split(';').map(entry => entry.trim().split(/\s+/)).find(tokens => tokens[0] === directive);
+  return Boolean(parts?.slice(1).includes(source));
+}
 async function get(path, options = {}) {
   const response = await fetch(api + path, { redirect: 'manual', ...options });
   let body = null;
@@ -44,7 +49,7 @@ for (const path of ['/privacy','/terms','/legal','/cancellations','/cookies']) {
   response.status===200 && text.length>200 && !text.includes('id="root"')
     ? ok('Firebase auth helper proxied on the app domain') : fail('Firebase auth helper proxy',`status ${response.status}`);
   const csp=response.headers.get('content-security-policy') ?? '';
-  csp.includes("frame-src 'self'") && csp.includes('https://accounts.google.com')
+  cspHasSource(csp, 'frame-src', "'self'") && cspHasSource(csp, 'frame-src', 'https://accounts.google.com')
     ? ok('PWA CSP allows same-origin auth iframe and Google') : fail('PWA CSP','auth iframe origins missing');
 }
 {
