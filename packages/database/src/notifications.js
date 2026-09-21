@@ -72,7 +72,11 @@ const AUDIENCES = {
 async function parcelParty(tx, event, role) {
   const row = await one(tx, `SELECT p.id,pp.phone FROM parcels p JOIN parcel_parties pp ON pp.parcel_id=p.id AND pp.role=$2
     WHERE p.id=$1`, [event.aggregate_id, role]);
-  return row?.phone ? [{ contact: row.phone, entityId: row.id }] : [];
+  if (!row?.phone) return [];
+  // The sender has an authenticated account; do not link a recipient's account
+  // by an unverified phone number. Receivers without an account use the gateway.
+  const sender = role === 'sender' ? await one(tx,'SELECT created_by FROM parcels WHERE id=$1',[row.id]) : null;
+  return [{ contact: row.phone, userId: sender?.created_by ?? null, entityId: row.id }];
 }
 
 // Best-effort operator lookup for events whose payload omits it.

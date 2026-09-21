@@ -5,6 +5,8 @@ import { Card, Badge, StatCard, SectionTitle, ApiState, ErrorState, SkeletonCard
 import { status, fcfa } from '@leroutier/ui';
 import { splitCommission } from '@leroutier/domain';
 import { Provisioning } from './provisioning.jsx';
+import { ParcelDocuments } from './documents.jsx';
+import { ParcelPickup } from './parcel-pickup.jsx';
 // Leaflet loads only when an operator actually opens a map.
 const TransportMap = lazy(() => import('./map.jsx'));
 import { BusFront, Armchair, Radio, ShieldAlert, WalletCards, ShieldCheck, Package, MapPin, Home, Users, Check } from 'lucide-react';
@@ -342,11 +344,13 @@ export function Parcels(){
   const rateRules=useApi(user?'/ops/parcel-rate-rules':null);
   const [error,setError]=useState(''),[notice,setNotice]=useState('');
   const [parcelQ,setParcelQ]=useState(''),[parcelsList,setParcelsList]=useState(null),[assignments,setAssignments]=useState({});
+  const [documentParcel,setDocumentParcel]=useState(null);
   const [ruleBase,setRuleBase]=useState(''),[rulePerKg,setRulePerKg]=useState(''),[ruleBp,setRuleBp]=useState(''),[ruleLevel,setRuleLevel]=useState('standard');
   async function act(path,body,onDone){setError('');setNotice('');try{await request(path,{method:'POST',body});onDone?.();setNotice('Action enregistrée.');}catch(e){setError(e.message);}}
   async function searchParcels(e){e.preventDefault();setError('');try{setParcelsList(await request('/ops/parcels?q='+encodeURIComponent(parcelQ)));}catch(e){setError(e.message);}}
   return <>
     <SectionTitle icon={Package} title="Colis & fret"/>
+    {documentParcel && <ParcelDocuments parcel={documentParcel} onClose={()=>setDocumentParcel(null)}/>}
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     <Card className="stack"><form className="between wrap" onSubmit={searchParcels}>
       <label className="grow">Numéro de suivi<input className="control" placeholder="LRP-XXXXXXXX" value={parcelQ} onChange={e=>setParcelQ(e.target.value)}/></label>
@@ -361,7 +365,8 @@ export function Parcels(){
           {p.status==='accepted' && <button className="btn btn-primary" disabled={!online || !assignments[p.id]} onClick={()=>act(`/parcels/${p.id}/assign`,{serviceId:assignments[p.id]},async()=>setParcelsList(await request('/ops/parcels?q='+encodeURIComponent(parcelQ))))}>Affecter</button>}
           {p.status==='arrived' && <button className="btn btn-primary" disabled={!online} onClick={()=>act(`/parcels/${p.id}/ready`,undefined,async()=>setParcelsList(await request('/ops/parcels?q='+encodeURIComponent(parcelQ))))}>Prêt au retrait</button>}
           {p.status==='ready_for_pickup' && <button className="btn btn-soft" disabled={!online} onClick={async()=>{try{const r=await request(`/parcels/${p.id}/pickup-code`,{method:'POST'});setNotice(`Code de retrait (15 min) : ${r.code}`);}catch(e){setError(e.message);}}}>Code de retrait</button>}
-          {p.status==='ready_for_pickup' && <button className="btn btn-primary" disabled={!online} onClick={async()=>{const code=window.prompt('Code de retrait à 6 chiffres :');if(!code)return;try{await request(`/parcels/${p.id}/pickup`,{method:'POST',body:{code}});setParcelsList(await request('/ops/parcels?q='+encodeURIComponent(parcelQ)));setNotice('Colis remis au destinataire.');}catch(e){setError(e.message);}}}>Retirer (code)</button>}
+          <button className="btn btn-soft" disabled={!online} onClick={async()=>{setError('');try{setDocumentParcel(await request(`/parcels/${p.id}/label`));}catch(e){setError(e.message);}}}>Étiquette / reçu</button>
+          {p.status==='ready_for_pickup' && <ParcelPickup parcelId={p.id} label="Retirer (code)" onComplete={async()=>{setNotice('Colis remis au destinataire.');try{setParcelsList(await request('/ops/parcels?q='+encodeURIComponent(parcelQ)));}catch(e){setError(e.message);}}}/>}
           {['created','accepted','manifested'].includes(p.status) && <button className="btn btn-soft" disabled={!online} onClick={()=>act(`/parcels/${p.id}/cancel`,undefined,async()=>setParcelsList(await request('/ops/parcels?q='+encodeURIComponent(parcelQ))))}>Annuler</button>}
         </div></div>)}
     </Card>

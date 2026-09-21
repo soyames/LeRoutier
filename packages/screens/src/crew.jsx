@@ -6,6 +6,8 @@ import { status, fcfa, time, untilLabel } from '@leroutier/ui';
 import { createSyncQueue } from '@leroutier/config/offline';
 import { useVehicleTracking } from './vehicle-gps.js';
 import { ServiceTracking } from './tracking.jsx';
+import { ParcelDocuments } from './documents.jsx';
+import { ParcelPickup } from './parcel-pickup.jsx';
 import QrScanner from 'qr-scanner';
 import { Users, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw, Package, MapPin, Navigation } from 'lucide-react';
 
@@ -403,6 +405,7 @@ export function Parcels(){
   const queue=useDriverQueue(user?.id,request);
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
   const [lookupCode,setLookupCode]=useState(''),[scannedParcel,setScannedParcel]=useState(null),[scanning,setScanning]=useState(false);
+  const [documentParcel,setDocumentParcel]=useState(null);
   const parcelScanner=useRef(null);
   const parcelVideo=useRef(null),parcelReading=useRef(false);
   useEffect(()=>()=>{parcelScanner.current?.stop();parcelScanner.current?.destroy();},[]);
@@ -421,7 +424,7 @@ export function Parcels(){
       parcelScanner.current=new QrScanner(parcelVideo.current,result=>{
         if(parcelReading.current)return;
         const value=result.data.trim();
-        if(/^LRP1\.[A-Za-z0-9_-]+$/.test(value)){
+        if(/^LRP1\.[A-Za-z0-9_-]+$/.test(value) || /^(?:https:\/\/leroutier\.app\/parcels\/track\?ref=)?LRP-[0-9A-F]{8}$/i.test(value)){
           parcelReading.current=true;parcelScanner.current?.stop();setScanning(false);lookup(value);
         }else setError('QR colis inconnu — utilisez le numéro LRP manuscrit en secours.');
       },{highlightScanRegion:true,preferredCamera:'environment'});
@@ -447,6 +450,7 @@ export function Parcels(){
   if(!s) return <><SectionTitle icon={Package} title="Fret & colis"/><Card><p role="status">Aucun service affecté — les colis du service apparaissent ici.</p></Card></>;
   return <>
     <SectionTitle icon={Package} title="Fret & colis" trailing={cargo.data?.length?<Badge>{cargo.data.length} colis</Badge>:null}/>
+    {documentParcel && <ParcelDocuments parcel={documentParcel} onClose={()=>setDocumentParcel(null)}/>}
     <QueueStatus queue={queue}/>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     <Card className="stack">
@@ -477,12 +481,8 @@ export function Parcels(){
         {p.status==='in_transit' && <button className="btn btn-primary" disabled={busy} onClick={()=>queueParcel('arrived',p.id)}>Scanner l’arrivée</button>}
         {(p.status==='loaded'||p.status==='in_transit') && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>reportProblem(p)}>Signaler un problème</button>}
         {p.status==='arrived' && <p className="small muted">L’exploitation confirme le point de retrait et prépare le code du destinataire.</p>}
-        {p.status==='ready_for_pickup' && user.role==='driver' && <button className="btn btn-primary" disabled={busy || !online} onClick={async()=>{
-          const code=window.prompt('Code de retrait du destinataire (6 chiffres) :');if(!code)return;
-          setBusy(true);setError('');
-          try{await request(`/parcels/${p.id}/pickup`,{method:'POST',body:{code}});setNotice('Colis remis au destinataire.');cargo.reload();}
-          catch(e){setError(e.message);}finally{setBusy(false);}
-        }}>Remettre avec le code</button>}
+        <button className="btn btn-soft" disabled={busy || !online} onClick={async()=>{setBusy(true);setError('');try{setDocumentParcel(await request(`/parcels/${p.id}/label`));}catch(e){setError(e.message);}finally{setBusy(false);}}}>Étiquette / reçu</button>
+        {p.status==='ready_for_pickup' && user.role==='driver' && <ParcelPickup parcelId={p.id} onComplete={()=>{setNotice('Colis remis au destinataire.');cargo.reload();}}/>}
       </div></Card>)}
   </>;
 }

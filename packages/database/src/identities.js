@@ -23,13 +23,14 @@ export async function activeIdentity(tx,id) {
   return {...user,needs_profile:user.role==='passenger' && !user.profile_completed_at && !user.is_demo};
 }
 
-export async function mapIdentity(db,{subject,issuer}) {
+export async function mapIdentity(db,{subject,issuer,notificationEmail=null}) {
   invariant(typeof subject==='string' && subject.length>0 && subject.length<=255,'UNAUTHORIZED','Invalid identity.',401);
   return db.transaction(async tx=>{
     const inserted=(await tx.query(`INSERT INTO users(auth_subject,auth_issuer,display_name,role)
       VALUES($1,$2,'','passenger') ON CONFLICT(auth_subject) DO NOTHING RETURNING id`,[subject,issuer])).rows[0];
     const user=(await tx.query('SELECT id,auth_issuer FROM users WHERE auth_subject=$1',[subject])).rows[0];
     invariant(user && user.auth_issuer===issuer,'UNAUTHORIZED','Identity is not registered with this issuer.',401);
+    await tx.query('UPDATE users SET notification_email=$2 WHERE id=$1 AND notification_email IS DISTINCT FROM $2',[user.id,notificationEmail]);
     if(inserted) {
       await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1)',[user.id]);
       await audit(tx,user.id,'identity.onboarded',user.id);

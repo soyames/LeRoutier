@@ -90,10 +90,10 @@ test('label QR identifies the parcel token and the barcode is the tracking numbe
   assert.ok(label.token.startsWith('LRP1.'));
   assert.equal(label.barcode,p.trackingNumber);
   const stored=await one('SELECT token_hash FROM parcel_labels WHERE parcel_id=$1',[p.id]);
-  assert.equal(JSON.stringify(stored).includes(label.token),false,'only digests are stored');
+  assert.equal(JSON.stringify(stored).includes(label.token),false,'scanner lookup uses digests');
   const rotated=await parcel.label(passenger,p.id);
-  assert.equal(rotated.version,2);
-  assert.notEqual(rotated.token,label.token);
+  assert.equal(rotated.version,label.version);
+  assert.equal(rotated.token,label.token,'reopening preserves a printed label');
 });
 test('assigned driver resolves phone QR and handwritten LRP reference without party data',async()=>{
   const p=await created();

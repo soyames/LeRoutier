@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { invariant, uuid } from '@leroutier/domain';
 import { transport } from './transport.js';
+import { bookingDocument } from './booking-document.js';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const one=async(tx,sql,args=[]) => (await tx.query(sql,args)).rows[0];
 const nested=tx=>({transaction:fn=>fn(tx)});
@@ -13,30 +14,37 @@ export function tickets(db){
     async issue(actor,id){
       invariant(actor.role==='passenger','FORBIDDEN','Passenger access required.',403);
       return db.transaction(async tx=>{
-        const b=await transport(nested(tx)).booking(actor,uuid(id));await payable(tx,b);
+        const b=await transport(nested(tx)).booking(actor,uuid(id));
+        invariant(b.status!=='held','TICKET_INVALID','Le paiement doit être confirmé avant l’émission du billet.',409);
+        const document=await bookingDocument(tx,id);
         const s=await one(tx,'SELECT * FROM services WHERE id=$1',[b.service_id]);
-        invariant(['scheduled','active'].includes(s.status) && s.current_sequence<=b.origin_sequence,'TICKET_INVALID','Boarding is no longer available.',409);
-        const token='LRT1.'+randomBytes(32).toString('base64url');
-        const manualCode='LR-'+randomBytes(8).toString('hex').toUpperCase().match(/.{4}/g).join('-');
-        const expires=new Date(Math.min(Date.now()+24*3600_000,new Date(s.departure_at).getTime()+24*3600_000));
-        invariant(expires>new Date(),'TICKET_EXPIRED','Ticket validity has ended.',409);
-        const ticket=await one(tx,`INSERT INTO ticket_credentials(booking_id,version,token_hash,code_hash,expires_at) VALUES($1,1,$2,$3,$4)
-          ON CONFLICT(booking_id) DO UPDATE SET version=ticket_credentials.version+1,token_hash=EXCLUDED.token_hash,code_hash=EXCLUDED.code_hash,expires_at=EXCLUDED.expires_at,issued_at=now()
-          RETURNING version,expires_at`,[id,hash(token),hash(manualCode),expires]);
-        // Operational precision: the ticket states the exact boarding and
-        // arrival locations, not only the cities.
-        // The ticket exists: the passenger is told, without the token or code.
-        await tx.query('INSERT INTO outbox(event_type,aggregate_id,payload) VALUES($1,$2,$3)',
-          ['ticket.ready',b.id,JSON.stringify({bookingId:b.id,serviceId:b.service_id})]);
-        const points=await one(tx,`SELECT bdp.name AS departure_name,bdp.description AS departure_landmark,bdp.latitude AS departure_latitude,bdp.longitude AS departure_longitude,op.name AS departure_city,
-          bap.name AS arrival_name,bap.description AS arrival_landmark,bap.latitude AS arrival_latitude,bap.longitude AS arrival_longitude,ap.name AS arrival_city
-          FROM services s LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN places op ON op.id=bdp.place_id
-          LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id LEFT JOIN places ap ON ap.id=bap.place_id WHERE s.id=$1`,[s.id]);
-        return {bookingId:b.id,serviceId:b.service_id,token,manualCode,version:ticket.version,expiresAt:ticket.expires_at,
-          departure:{name:points?.departure_name??null,city:points?.departure_city??null,landmark:points?.departure_landmark??null,
-            latitude:points?.departure_latitude??null,longitude:points?.departure_longitude??null},
-          arrival:{name:points?.arrival_name??null,city:points?.arrival_city??null,landmark:points?.arrival_landmark??null,
-            latitude:points?.arrival_latitude??null,longitude:points?.arrival_longitude??null}};
+        const canBoard=b.status==='confirmed' && document.paidMinor-document.refundedMinor===b.amount_minor &&
+          ['scheduled','active'].includes(s.status) && s.current_sequence<=b.origin_sequence;
+        let ticket=await one(tx,'SELECT * FROM ticket_credentials WHERE booking_id=$1',[id]);
+        // Viewing an archive must never depend on eligibility to board again.
+        // The service lock held above serializes concurrent issue requests.
+        if(canBoard && (!ticket?.token || new Date(ticket.expires_at)<=new Date())) {
+          const expires=new Date(new Date(s.departure_at).getTime()+24*3600_000);
+          if(expires>new Date()) {
+            const token='LRT1.'+randomBytes(32).toString('base64url');
+            const manualCode='LR-'+randomBytes(8).toString('hex').toUpperCase().match(/.{4}/g).join('-');
+            ticket=await one(tx,`INSERT INTO ticket_credentials(booking_id,version,token_hash,code_hash,expires_at,token,manual_code)
+              VALUES($1,1,$2,$3,$4,$5,$6) ON CONFLICT(booking_id) DO UPDATE SET
+              version=ticket_credentials.version+1,token_hash=EXCLUDED.token_hash,code_hash=EXCLUDED.code_hash,
+              expires_at=EXCLUDED.expires_at,token=EXCLUDED.token,manual_code=EXCLUDED.manual_code,issued_at=now() RETURNING *`,
+            [id,hash(token),hash(manualCode),expires,token,manualCode]);
+            await tx.query('INSERT INTO outbox(event_type,aggregate_id,payload) VALUES($1,$2,$3)',
+              ['ticket.ready',b.id,JSON.stringify({bookingId:b.id,serviceId:b.service_id})]);
+          }
+        }
+        const validForBoarding=!!(canBoard && ticket?.token && new Date(ticket.expires_at)>new Date());
+        return {bookingId:b.id,serviceId:b.service_id,document,validForBoarding,
+          token:validForBoarding?ticket.token:null,manualCode:validForBoarding?ticket.manual_code:null,
+          version:ticket?.version??null,expiresAt:ticket?.expires_at??null,
+          departure:{name:document.departure_point_name,city:document.departure_city,landmark:document.departure_point_landmark,
+            latitude:document.departure_point_latitude,longitude:document.departure_point_longitude},
+          arrival:{name:document.arrival_point_name,city:document.arrival_city,landmark:document.arrival_point_landmark,
+            latitude:document.arrival_point_latitude,longitude:document.arrival_point_longitude}};
       });
     },
     async verify(actor,input){
