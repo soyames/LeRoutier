@@ -39,6 +39,13 @@ export async function mapIdentity(db,{subject,issuer,notificationEmail=null}) {
     const user=(await tx.query('SELECT id,auth_issuer FROM users WHERE auth_subject=$1',[subject])).rows[0];
     invariant(user && user.auth_issuer===issuer,'UNAUTHORIZED','Identity is not registered with this issuer.',401);
     await tx.query('UPDATE users SET notification_email=$2 WHERE id=$1 AND notification_email IS DISTINCT FROM $2',[user.id,notificationEmail]);
+    // Last sign-in, refreshed at most once an hour. This runs on EVERY
+    // authenticated request, so an unconditional write would add a row update
+    // per API call to the same bounded allowance that registration capacity
+    // exists to protect. An hour is precise enough to answer "is this account
+    // still in use", which is the only question it is asked.
+    await tx.query(`UPDATE users SET last_authenticated_at=now() WHERE id=$1
+      AND (last_authenticated_at IS NULL OR last_authenticated_at < now()-interval '1 hour')`,[user.id]);
     if(inserted) {
       await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1)',[user.id]);
       await audit(tx,user.id,'identity.onboarded',user.id);

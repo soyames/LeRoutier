@@ -200,3 +200,60 @@ test('a storage that refuses to be read never breaks sign-out', () => {
   const denied = { get length() { throw new Error('private mode'); }, key: () => null, removeItem: () => {} };
   assert.equal(clearQueuedActions(denied), 0);
 });
+
+test('signing out clears the device even when no provider was configured', () => {
+  // The clearing used to hang off signOutFirebase, which only runs when
+  // /auth/config resolved. A crew member whose config fetch had failed signed
+  // out of a shared station handset and left the passengers' ticket codes in
+  // localStorage. Clearing the device is what signing out MEANS; it cannot
+  // depend on which provider happened to be in play.
+  const store = new Map();
+  /** @type {any} */
+  const storage = {
+    get length() { return store.size; },
+    key: i => [...store.keys()][i] ?? null,
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: k => { store.delete(k); },
+  };
+  createSyncQueue(storage, 'crew-1').enqueue('board',
+    { serviceId: 'svc-1', bookingId: 'bk-1', stopSequence: 0, code: 'LR-DEAD-BEEF-CAFE-0001' });
+  assert.ok(JSON.stringify([...store.values()]).includes('LR-DEAD-BEEF-CAFE-0001'));
+  assert.equal(clearQueuedActions(storage), 1);
+  assert.ok(!JSON.stringify([...store.values()]).includes('LR-DEAD-BEEF-CAFE-0001'));
+});
+
+test('a queued action is scoped to its own crew member and replays exactly once', async () => {
+  const store = new Map();
+  /** @type {any} */
+  const storage = {
+    get length() { return store.size; },
+    key: i => [...store.keys()][i] ?? null,
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: k => { store.delete(k); },
+  };
+  const mine = createSyncQueue(storage, 'crew-a');
+  const theirs = createSyncQueue(storage, 'crew-b');
+  mine.enqueue('board', { serviceId: 's1', bookingId: 'b1', stopSequence: 0 });
+  theirs.enqueue('board', { serviceId: 's1', bookingId: 'b2', stopSequence: 0 });
+  assert.equal(mine.read().length, 1, 'one crew member never sees the other queue');
+  assert.equal(theirs.read().length, 1);
+
+  // Enqueuing the identical action twice while it is still waiting returns the
+  // same row: a driver double-tapping a tile must not board somebody twice.
+  const first = mine.read()[0];
+  const again = mine.enqueue('board', { serviceId: 's1', bookingId: 'b1', stopSequence: 0 });
+  assert.equal(again.id, first.id);
+
+  // Replay is keyed on the row id, which the server uses as the idempotency
+  // key, so the same action reaching the server twice is one action.
+  const sent = [];
+  await mine.sync(async row => { sent.push(row.id); });
+  assert.deepEqual(sent, [first.id]);
+  await mine.sync(async row => { sent.push(row.id); });
+  assert.deepEqual(sent, [first.id], 'a succeeded row is never sent again');
+  // And the ticket code does not linger on the device once it has landed.
+  assert.ok(!JSON.stringify([...store.values()]).includes('b1') ||
+    !JSON.stringify(mine.read()[0].payload).includes('bookingId'));
+});

@@ -71,6 +71,15 @@ export function PlatformUsers(){
           <div className="row"><span>Téléphone</span><span>{u.passenger_phone||'–'}</span></div>
           <div className="row"><span>Fournisseur d’identité</span><span>{authProvider(u.auth_issuer)}</span></div>
           <div className="row"><span>Compte créé</span><span>{fmtDate(u.created_at)}</span></div>
+          {/* Never fabricated. Accounts that predate the measurement read as
+              not observed, because a dashboard that is confidently wrong gets
+              consulted and one that is honestly empty gets investigated. */}
+          <div className="row"><span>Dernière connexion</span>
+            <span>{u.last_authenticated_at?fmtDate(u.last_authenticated_at):'Aucune connexion observée'}</span></div>
+          <div className="row"><span>Dernière activité (réservation ou envoi)</span>
+            <span>{u.last_meaningful_activity_at?fmtDate(u.last_meaningful_activity_at):'–'}</span></div>
+          {u.status_changed_at&&<div className="row"><span>Dernier changement de statut</span>
+            <span>{u.status_changed_to==='true'?'Réactivé':'Désactivé'} · {fmtDate(u.status_changed_at)}</span></div>}
           <div className="row"><span>Profil complété</span><span>{u.profile_completed_at?'Oui':'Non'}</span></div>
           <div className="row"><span>Identifiant interne</span><span className="mono">{u.id}</span></div></div>
       </Card>)}

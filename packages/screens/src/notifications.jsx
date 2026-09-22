@@ -8,6 +8,12 @@ import { Bell, BellOff, ShieldCheck, Bus, Package as PackageIcon, Wallet, Triang
 // the client does no filtering and therefore cannot leak another role's items.
 const TEMPLATES = {
   booking_created: 'Réservation enregistrée',
+  // Verification outcomes. The rejected ones name an action, because the point
+  // of telling somebody is that they can do something about it.
+  operator_verified: 'Dossier validé : vous pouvez publier vos départs',
+  operator_verification_rejected: 'Dossier refusé : contactez LeRoutier',
+  operator_evidence_rejected: 'Un justificatif est à remplacer',
+  operator_suspended: 'Compte opérateur suspendu',
   payment_succeeded: 'Paiement confirmé',
   payment_failed: 'Paiement refusé',
   ticket_ready: 'Billet prêt',

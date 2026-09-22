@@ -621,3 +621,119 @@ test('the platform states plainly that it does not hold these documents', async 
   assert.equal(EVIDENCE_STORAGE.managed, false);
   assert.equal(EVIDENCE_STORAGE.mode, 'operator_hosted_link');
 });
+
+// ------------------------------------------ telling the operator what happened --
+// The decisions were written to the outbox and nothing consumed them. An
+// operator learned the outcome by opening the app and noticing, which makes
+// the correction loop unusable: only somebody who knows a proof was refused
+// can replace it.
+test('a refused proof reaches the operator who has to replace it', async () => {
+  const { notificationPolicies } = await import('../src/notifications.js');
+  const notify = notificationPolicies(db, { ...config, notificationProviders: {} });
+  const { operatorId, actor, userId } = await onboardIndependent();
+  const evidence = await reviewAll(operatorId, { reject: ['insurance'] });
+  const insurance = evidence.find(e => e.kind === 'insurance');
+
+  // Dispatch whatever the review produced.
+  const events = await db.transaction(async tx => (await tx.query(
+    `SELECT id,event_type,aggregate_id,payload FROM outbox WHERE event_type='operator.evidence_reviewed'
+     AND aggregate_id=$1 ORDER BY created_at`, [operatorId])).rows);
+  assert.ok(events.length, 'the review is recorded as an event at all');
+  for (const event of events) await db.transaction(tx => notify.dispatchEvent(tx, event));
+
+  const inbox = await db.transaction(async tx => (await tx.query(
+    `SELECT template,severity,category FROM notifications WHERE user_id=$1 ORDER BY created_at DESC`, [userId])).rows);
+  const refusal = inbox.find(n => n.template === 'operator_evidence_rejected');
+  assert.ok(refusal, 'the operator is told a proof was refused: ' + JSON.stringify(inbox));
+  assert.equal(refusal.severity, 'urgent');
+  assert.equal(refusal.category, 'critical', 'whether you may carry passengers is not a marketing preference');
+  // Accepting a proof is routine and does not interrupt anybody.
+  assert.ok(!inbox.some(n => n.template === 'operator_evidence_accepted'));
+
+  // And the dossier the operator opens does say which one.
+  const dossier = await onboard.dossier(actor);
+  assert.equal(dossier.correctable.length, 1);
+  assert.equal(dossier.evidence.find(e => e.id === dossier.correctable[0]).kind, 'insurance');
+  assert.ok(insurance);
+});
+
+test('a verification decision reaches an independent owner and a company alike', async () => {
+  const { notificationPolicies } = await import('../src/notifications.js');
+  const notify = notificationPolicies(db, { ...config, notificationProviders: {} });
+  const independent = await onboardIndependent();
+  const company = await onboardCompany();
+  for (const dossier of [independent, company]) {
+    await reviewAll(dossier.operatorId);
+    await onboard.verification(platformOps, dossier.operatorId, 'verified');
+  }
+  const events = await db.transaction(async tx => (await tx.query(
+    `SELECT id,event_type,aggregate_id,payload FROM outbox WHERE event_type='operator.verification_changed'
+     AND aggregate_id=ANY($1::uuid[])`, [[independent.operatorId, company.operatorId]])).rows);
+  for (const event of events) await db.transaction(tx => notify.dispatchEvent(tx, event));
+
+  // Both shapes, because the accountable person lives in a different place in
+  // each: an independent operator has an owner, a company has staff.
+  for (const dossier of [independent, company]) {
+    const inbox = await db.transaction(async tx => (await tx.query(
+      'SELECT template FROM notifications WHERE user_id=$1', [dossier.userId])).rows);
+    assert.ok(inbox.some(n => n.template === 'operator_verified'),
+      'an operator was never told it was verified: ' + JSON.stringify(inbox));
+  }
+});
+
+// ------------------------------------------------ account lifecycle, factually --
+test('last sign-in is recorded, bounded, and never invented for old accounts', async () => {
+  const { mapIdentity } = await import('../src/identities.js');
+  const subject = 'ws11-' + randomUUID();
+
+  // An account that existed before the measurement reads as not observed.
+  const legacy = randomUUID();
+  await db.transaction(tx => tx.query(
+    `INSERT INTO users(id,display_name,role,auth_subject,auth_issuer) VALUES($1,'Compte Ancien','passenger',$2,'test')`,
+    [legacy, 'legacy-' + legacy]));
+  const before = await one('SELECT last_authenticated_at FROM users WHERE id=$1', [legacy]);
+  assert.equal(before.last_authenticated_at, null, 'no login history is fabricated for an account that has none');
+
+  // Signing in records it.
+  const user = await mapIdentity(db, { subject, issuer: 'https://issuer.test.invalid' });
+  const first = await one('SELECT last_authenticated_at FROM users WHERE id=$1', [user.id]);
+  assert.ok(first.last_authenticated_at, 'signing in is observed');
+
+  // The write is bounded: identity mapping runs on EVERY authenticated
+  // request, so a second call inside the hour must not touch the row again.
+  await mapIdentity(db, { subject, issuer: 'https://issuer.test.invalid' });
+  const second = await one('SELECT last_authenticated_at FROM users WHERE id=$1', [user.id]);
+  assert.equal(second.last_authenticated_at.getTime(), first.last_authenticated_at.getTime(),
+    'a row update per API call is exactly the write amplification this platform refuses registrations to avoid');
+
+  // Once the hour has passed it does refresh, so the value stays truthful.
+  await db.transaction(tx => tx.query(
+    `UPDATE users SET last_authenticated_at=now()-interval '3 hours' WHERE id=$1`, [user.id]));
+  await mapIdentity(db, { subject, issuer: 'https://issuer.test.invalid' });
+  const third = await one('SELECT last_authenticated_at FROM users WHERE id=$1', [user.id]);
+  assert.ok(third.last_authenticated_at > second.last_authenticated_at);
+});
+
+test('the Platform Ops register reports activity and suspension without exposing a secret', async () => {
+  const { mapIdentity } = await import('../src/identities.js');
+  const subject = 'ws11-register-' + randomUUID();
+  const user = await mapIdentity(db, { subject, issuer: 'https://issuer.test.invalid' });
+  await db.transaction(tx => tx.query(
+    `INSERT INTO audit_events(actor_id,action,entity_id,details) VALUES($1,'identity.activation_changed',$1,'{"active":false}')`,
+    [user.id]));
+
+  const page = await health.users(platformOps, { q: user.id, limit: 5 });
+  const row = page.users.find(u => u.id === user.id);
+  assert.ok(row, 'the account is findable by id');
+  assert.ok(row.last_authenticated_at, 'last sign-in reaches the console');
+  assert.equal(row.status_changed_to, 'false', 'and so does the last suspension, from the audit trail');
+  assert.ok(row.status_changed_at);
+
+  // The register stays minimal. A sign-in timestamp is lifecycle information;
+  // the credential behind it is not, in any form.
+  const text = JSON.stringify(page);
+  for (const forbidden of ['auth_subject', 'token', 'password', 'refresh', 'securetoken', subject]) {
+    assert.ok(!text.includes(forbidden), `${forbidden} reached the Platform Ops register`);
+  }
+  assert.equal(row.authenticated, true, 'presence of an external identity is reported as a boolean, not as the subject');
+});

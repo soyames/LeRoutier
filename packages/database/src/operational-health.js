@@ -129,13 +129,20 @@ export function operationalHealth(db) {
           OR u.role ILIKE '%'||$1||'%' OR o.name ILIKE '%'||$1||'%' OR u.id::text=$1)`;
         const rows=(await tx.query(`SELECT u.id,u.display_name,u.role,u.active,u.is_demo,u.operator_id,u.notification_email,
           u.auth_subject IS NOT NULL AS authenticated,u.auth_issuer,u.created_at,u.updated_at,u.profile_completed_at,
+          u.last_authenticated_at,u.last_meaningful_activity_at,
           o.name AS operator_name,o.type AS operator_type,o.verification_status,
-          p.phone AS passenger_phone,d.active AS driver_active,c.active AS convoyeur_active
+          p.phone AS passenger_phone,d.active AS driver_active,c.active AS convoyeur_active,
+          status_change.created_at AS status_changed_at,status_change.details->>'active' AS status_changed_to
           FROM users u
           LEFT JOIN operators o ON o.id=u.operator_id
           LEFT JOIN passenger_profiles p ON p.user_id=u.id
           LEFT JOIN driver_profiles d ON d.user_id=u.id
           LEFT JOIN convoyeur_profiles c ON c.user_id=u.id
+          -- The most recent suspension or reactivation, from the audit trail
+          -- rather than a second column that could disagree with it.
+          LEFT JOIN LATERAL (SELECT a.created_at,a.details FROM audit_events a
+            WHERE a.entity_id=u.id AND a.action='identity.activation_changed'
+            ORDER BY a.created_at DESC LIMIT 1) status_change ON true
           WHERE ${where}
           ORDER BY u.created_at DESC LIMIT $2 OFFSET $3`,[search,size,from])).rows;
         const total=(await tx.query(`SELECT count(*)::integer AS total FROM users u

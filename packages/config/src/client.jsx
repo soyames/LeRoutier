@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { signInWithGoogle, completeRedirectSignIn, signOutFirebase, idToken, onAuthChange, takeReturnPath,
   createAccountWithEmail, signInWithEmail, sendPasswordReset } from './firebase.js';
+import { clearQueuedActions } from './offline.js';
 
 const Context=createContext(null);
 const subscribe=callback=>{window.addEventListener('online',callback);window.addEventListener('offline',callback);return()=>{window.removeEventListener('online',callback);window.removeEventListener('offline',callback);};};
@@ -139,9 +140,18 @@ export function ApiProvider({baseUrl='',role,children}) {
   },[request,role,auth.demoLogin]);
 
   const logout=useCallback(async()=>{
-    window.dispatchEvent(new Event('leroutier:logout'));
+    // No 'leroutier:logout' event is dispatched. One used to be, and nothing
+    // ever listened for it: a fired event with no subscriber reads like a
+    // cleanup path that exists. Sign-out does its clearing here, where it can
+    // be followed.
     setSession(null);
     setAuth(a=>({...a,error:''}));
+    // Clearing the device is what signing out MEANS, so it does not depend on
+    // which provider was in play. A pending board/alight row carries the
+    // passenger's ticket code; when this hung off signOutFirebase, a crew
+    // member whose /auth/config fetch had failed signed out of a shared station
+    // handset and left those codes behind in localStorage.
+    try{ clearQueuedActions(window.localStorage); }catch{ /* private mode */ }
     if(auth.firebase)await signOutFirebase(auth.firebase);
   },[auth.firebase]);
 

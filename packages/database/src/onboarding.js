@@ -168,7 +168,11 @@ export function onboarding(db){
           invariant(evidence,'NOT_FOUND','Verification evidence not found.',404);
           const row=await one(tx,`UPDATE verification_evidence SET status=$2,reviewed_at=now(),reviewed_by=$3,notes=$4 WHERE id=$1 RETURNING *`,
             [evidence.id,decision.status,actor.id,decision.notes??null]);
-          await audit(tx,actor.id,'operator.evidence_reviewed',id,null,{evidenceId:evidence.id,kind:evidence.kind,decision:decision.status});return row;
+          // The operator travels with the event. Audience resolution falls back
+          // to walking the aggregate through services, parcels and incidents —
+          // none of which an operator id matches — so a null here meant the
+          // review decision could never reach the operator it was about.
+          await audit(tx,actor.id,'operator.evidence_reviewed',id,id,{evidenceId:evidence.id,kind:evidence.kind,decision:decision.status});return row;
         });
       }
       // 'pending_verification' re-opens a file. Without it a rejected operator
