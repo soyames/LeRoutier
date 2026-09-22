@@ -79,6 +79,12 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .btn-soft{background:var(--lr-surface-low)!important;border:1px solid rgba(216,227,251,.82)!important}
 .control{min-height:46px!important;border-radius:14px!important;background:var(--lr-surface-low)!important;border:1px solid transparent!important;padding:11px 13px!important}
 .control:hover{border-color:#bec6e0!important}
+/* The selected filter chip keeps white text from the base stylesheet, but the
+   !important background above was overriding its emphasis colour — leaving
+   white on #f0f3ff at a contrast of 1.1:1, i.e. an invisible label on the one
+   chip that says which filter is active. --lr-primary-strong on white is
+   6.69:1, comfortably past AA for 12px bold. */
+.control.active{background:var(--lr-primary-strong)!important;border-color:transparent!important;color:#fff!important}
 .control:focus{background:#fff!important;border-color:var(--lr-primary)!important;outline:3px solid rgba(177,95,0,.1)!important}
 
 /* Public journey search --------------------------------------------- */
@@ -104,6 +110,13 @@ overflow:hidden}
 
 /* Search results and offer comparison ------------------------------- */
 .results-summary{position:sticky;top:116px;z-index:8;background:rgba(255,255,255,.95)!important;backdrop-filter:blur(14px)}
+/* The summary above is sticky, so anything scrolled to the top of the page
+   comes to rest underneath it — including an offer card's Choisir button,
+   which then cannot be tapped at all. scroll-margin-top parks each card below
+   the bar instead, and the list clears the fixed bottom navigation so the last
+   offer is reachable too. */
+.offer-card,.offer-card .controls{scroll-margin-top:128px;scroll-margin-bottom:104px}
+.journey-results-grid{padding-bottom:12px}
 .search-summary h2{font-size:18px;letter-spacing:-.015em}
 .offer-card{padding:16px!important;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}
 .offer-card:hover,.offer-card.selected{transform:translateY(-1px);box-shadow:0 14px 30px rgba(15,23,42,.09)!important;border-color:rgba(177,95,0,.35)!important}
@@ -131,6 +144,12 @@ overflow:hidden}
 .journey-step{border-radius:15px!important;padding:13px!important;box-shadow:0 3px 10px rgba(15,23,42,.025)}
 .journey-step.advice{background:#fff5e8!important}
 .journey-step.done{background:var(--lr-green-soft)!important}
+/* These step backgrounds are re-tinted above, and the step's time label was
+   still wearing the amber chosen against the original white: #b45309 on the
+   green 'done' tint is 4.48:1, just under AA for 12px bold. The darker
+   primary clears every one of the four step backgrounds (5.97:1 at worst),
+   so the label is fixed once rather than per state. */
+.journey-step strong.small{color:var(--lr-primary-strong)!important}
 
 /* Driver / convoyeur ------------------------------------------------ */
 .duty{border-radius:24px!important;padding:19px!important;position:relative;overflow:hidden}
@@ -177,6 +196,15 @@ overflow:hidden}
   .trip-endpoints{grid-template-columns:1fr 38px 1fr!important;padding:8px!important}
   .swap-btn{width:38px!important;height:38px!important}
   .results-summary{top:106px}
+  /* On a phone the results summary was sticky between a sticky header and a
+     fixed bottom navigation, and an offer card is taller than the band left
+     between them: the Choisir button could come to rest under one or the
+     other and simply not be tappable. A filter bar is not worth ~90px of a
+     844px viewport, so on small screens it scrolls with the list.
+     The sticky behaviour is kept where there is room for it. */
+  .results-summary{position:static;top:auto}
+  .offer-card,.offer-card .controls{scroll-margin-top:96px;scroll-margin-bottom:104px}
+  .journey-results-grid{padding-bottom:22px}
   .offer-card .controls{width:100%}
   .offer-card .controls .btn{flex:1}
   .trip-foot{display:flex!important;flex-direction:column!important;align-items:stretch!important;gap:10px!important}

@@ -49,15 +49,32 @@ test('search can be swapped and dated',async({page})=>{
   await expect(page.getByRole('button',{name:'Destination : Cotonou. Effacer'})).toBeVisible();
 });
 
-test('operator onboarding lives on its own public path with explicit choices',async({page})=>{
+test('the professional entry is public; the dossier itself needs an account',async({page})=>{
   await mockApi(page);
+  // Deciding whether to work with LeRoutier is public. Filing a dossier is
+  // not: it attaches documents to a real identity, so it asks for one.
+  await page.goto('http://127.0.0.1:4173/professionnel');
+  await expect(page.getByRole('heading',{name:'Vous travaillez dans le transport ?'})).toBeVisible();
+  await expect(page.getByText(/aucune pièce d’identité personnelle à déposer ici/)).toBeVisible();
   await page.goto('http://127.0.0.1:4173/onboarding');
-  await expect(page.getByText('Conduisez ou gérez votre compagnie.')).toBeVisible();
-  await page.getByRole('button',{name:/Chauffeur indépendant/}).click();
-  await expect(page.getByText(/votre profil conducteur et le bénéficiaire de vos recettes/)).toBeVisible();
-  await page.getByRole('button',{name:'Retour',exact:true}).click();
-  await page.getByRole('button',{name:/Compagnie de transport/}).click();
-  await expect(page.getByText(/La compagnie devient opérateur LeRoutier/)).toBeVisible();
+  await expect(page.getByText('Connexion requise')).toBeVisible();
+});
+
+test('an authenticated passenger picks between the company and independent dossiers',async({page})=>{
+  await mockApi(page);
+  await demoAs({role:'passenger'})(page);
+  await page.goto('http://127.0.0.1:4173/onboarding');
+  await page.getByRole('button',{name:'Développement : passenger'}).click();
+  await expect(page.getByRole('heading',{name:'Choisissez votre situation'})).toBeVisible();
+  // The two dossiers are not the same, and the choice page says so before
+  // anybody starts filling one in: a company is verified as a legal entity,
+  // and its employed drivers owe LeRoutier no personal identity document.
+  await expect(page.getByText(/ne transmettent pas leur pièce d’identité à LeRoutier/)).toBeVisible();
+  await page.getByRole('button',{name:'Devenir chauffeur indépendant'}).click();
+  await expect(page.getByRole('heading',{name:'Vérification du chauffeur indépendant'})).toBeVisible();
+  await page.getByRole('button',{name:'Changer',exact:true}).click();
+  await page.getByRole('button',{name:'Enregistrer ma compagnie'}).click();
+  await expect(page.getByRole('heading',{name:'Vérification de la compagnie'})).toBeVisible();
 });
 
 test('company driver sees crew navigation without revenue or fleet tools',async({page})=>{

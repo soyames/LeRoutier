@@ -31,14 +31,26 @@ async function open(page, identity, route) {
 }
 
 // ---------------------------------------------------------------- public ----
-test('public home offers product tasks, never application names', async ({ page }) => {
+test('public home leads with travel tasks and keeps professional access secondary', async ({ page }) => {
   await mockApi(page);
   await page.goto(APP + '/');
   await expect(page.getByRole('button', { name: 'Rechercher' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Envoyer un colis/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Suivre un colis/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /chauffeur indépendant/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /représente une compagnie/ })).toBeVisible();
+  // Working with LeRoutier is a real path, but it is not what a visitor came
+  // for: it is one link below the travel tasks, not a pair of buttons
+  // competing with the trip search.
+  await expect(page.getByRole('button', { name: /chauffeur indépendant/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /représente une compagnie/ })).toHaveCount(0);
+  const professional = page.getByRole('link', { name: 'Espace professionnel' }).first();
+  await expect(professional).toBeVisible();
+  const search = await page.getByRole('button', { name: 'Rechercher' }).boundingBox();
+  expect((await professional.boundingBox()).y).toBeGreaterThan(search.y);
+  // And the application names themselves never surface to a visitor.
+  const text = (await page.locator('body').textContent()) ?? '';
+  for (const internal of ['passenger-web', 'driver-web', 'ops-web', 'Platform Ops']) {
+    expect(text).not.toContain(internal);
+  }
 });
 
 test('anonymous trip search works and never offers cash', async ({ page }) => {

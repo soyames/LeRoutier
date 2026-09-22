@@ -31,7 +31,16 @@ function IndependentTrust({option,compact=false}){
 function OperatorLine({option}){
   const independent=option.operatorType==='independent';
   if(independent)return <IndependentTrust option={option} compact/>;
-  return <div className="offer-operator"><Bus size={14}/><span>Compagnie</span><strong>{option.operatorName}</strong>{option.verified&&<Badge tone="success"><ShieldCheck size={13}/>Vérifiée</Badge>}</div>;
+  // A company service leads with the verified company, and still names the
+  // vehicle: a passenger waiting at a gare routière recognises the bus they
+  // booked by its model and its plate. What a company service never publishes
+  // is the employee driving it — that is staff surveillance, not a product
+  // feature, and the API withholds it.
+  return <div className="offer-operator-block">
+    <div className="offer-operator"><Bus size={14}/><span>Compagnie</span><strong>{option.operatorName}</strong>{option.verified&&<Badge tone="success"><ShieldCheck size={13}/>Vérifiée</Badge>}</div>
+    <div className="vehicle-identity"><Car size={15}/><span>{vehicleText(option.vehicle)}</span>
+      {option.vehicle?.registration&&<strong className="vehicle-registration">{option.vehicle.registration}</strong>}</div>
+  </div>;
 }
 
 export function OfferCard({option,originLabel,destinationLabel,selected,onSelect,onView,onChoose,compact=false}){
