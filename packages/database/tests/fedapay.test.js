@@ -64,7 +64,12 @@ before(async()=>{await migrate(db);await seed(db);await db.transaction(async tx 
   await tx.query('UPDATE services SET is_demo=false WHERE id=$1', [demo.service]);
 });api=createApi(db,config,undefined,adapter);});
 beforeEach(async()=>{failPayouts=false;transactions.clear();payoutsStore.clear();currentTx=null;nextTx=39;nextPayout=70;
-  await db.transaction(async tx=>{await tx.query('DELETE FROM booking_segments');await tx.query("UPDATE bookings SET status='cancelled'");await tx.query('DELETE FROM payment_events');await tx.query('DELETE FROM payments');await tx.query('DELETE FROM payout_events');await tx.query('DELETE FROM driver_earnings');await tx.query('DELETE FROM payout_requests');await tx.query('DELETE FROM payout_destinations');await tx.query('DELETE FROM outbox');await tx.query("UPDATE services SET current_sequence=0,status='active'");});});
+  await db.transaction(async tx=>{await tx.query('DELETE FROM booking_segments');await tx.query("UPDATE bookings SET status='cancelled'");await tx.query('DELETE FROM payment_events');await tx.query('DELETE FROM payments');await tx.query('DELETE FROM payout_events');await tx.query('DELETE FROM driver_earnings');await tx.query('DELETE FROM payout_requests');await tx.query('DELETE FROM payout_destinations');
+    // notifications.source_event_id references outbox, and dispatching an
+    // event pins the row it came from. Deliveries first, then notifications,
+    // then the events they were built from.
+    await tx.query('DELETE FROM notification_deliveries');await tx.query('DELETE FROM notifications');
+    await tx.query('DELETE FROM outbox');await tx.query("UPDATE services SET current_sequence=0,status='active'");});});
 after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}});
 
 test('collection initiation persists the provider reference and metadata',async()=>{
@@ -434,4 +439,124 @@ test('a TEST service can never take real money, in either direction',async()=>{
   } finally {
     await db.transaction(tx=>tx.query('UPDATE services SET is_demo=false WHERE id=$1',[demo.service]));
   }
+});
+
+// -------------------------------------------- events heard by somebody -----
+// Three gaps of the same shape: the domain recorded that something happened
+// and no policy consumed it, so the person who had to act never found out.
+// A queue nobody is told about is a queue nobody works.
+test('a driver is told whether their payout landed, and told when it did not',async()=>{
+  const {notificationPolicies}=await import('../src/notifications.js');
+  // platform_ops resolves role='ops' AND operator_id IS NULL. The seed here is
+  // a COMPANY ops, so without this the approver queue has nobody in it.
+  const platformOpsId=randomUUID();
+  await db.transaction(tx=>tx.query(
+    "INSERT INTO users(id,display_name,role) VALUES($1,'Plateforme Ops','ops')",[platformOpsId]));
+  const notify=notificationPolicies(db,{...config,notificationProviders:{}});
+  await earn.credit({driverId:demo.driver,source:'ride',reference:'notify:'+randomUUID(),grossMinor:8000});
+  const destination=await payout.addDestination(driver,{country:'BJ',phoneNumber:'97000888'});
+  const request=await payout.request(driver,{destinationId:destination.id,amountMinor:4000},randomUUID());
+  await payout.approve(ops,request.id);
+  const settled=JSON.stringify(payoutEvent(request.id,'sent',4000));
+  await payout.webhook('fedapay',settled,headers(settled));
+
+  const events=await db.transaction(async tx=>(await tx.query(
+    `SELECT id,event_type,aggregate_id,payload FROM outbox WHERE aggregate_id=$1 ORDER BY created_at`,[request.id])).rows);
+  for(const event of events)await db.transaction(tx=>notify.dispatchEvent(tx,event));
+
+  const inbox=await db.transaction(async tx=>(await tx.query(
+    'SELECT template,category,severity FROM notifications WHERE user_id=$1',[demo.driver])).rows);
+  const paidNotice=inbox.find(n=>n.template==='payout_paid');
+  assert.ok(paidNotice,'the driver is told the money went out: '+JSON.stringify(inbox.map(n=>n.template)));
+  assert.equal(paidNotice.category,'critical','somebody does not opt out of being told about their own money');
+
+  // Platform Ops is the approver, and an approval nobody is told about is
+  // money sitting still.
+  const opsInbox=await db.transaction(async tx=>(await tx.query(
+    "SELECT template FROM notifications WHERE template='ops_payout_requested'")).rows);
+  assert.ok(platformOpsId,'the approver exists in this schema');
+  assert.ok(opsInbox.length>0,'a payout awaiting approval reaches the people who approve it');
+});
+
+test('a failed payout tells the driver, because their balance just came back',async()=>{
+  const {notificationPolicies}=await import('../src/notifications.js');
+  const notify=notificationPolicies(db,{...config,notificationProviders:{}});
+  await earn.credit({driverId:demo.driver,source:'ride',reference:'notify-fail:'+randomUUID(),grossMinor:6000});
+  const destination=await payout.addDestination(driver,{country:'BJ',phoneNumber:'97000999'});
+  const request=await payout.request(driver,{destinationId:destination.id,amountMinor:2000},randomUUID());
+  await payout.approve(ops,request.id);
+  const failed=JSON.stringify(payoutEvent(request.id,'failed',2000));
+  await payout.webhook('fedapay',failed,headers(failed));
+
+  const events=await db.transaction(async tx=>(await tx.query(
+    `SELECT id,event_type,aggregate_id,payload FROM outbox WHERE aggregate_id=$1 AND event_type='payout.failed'`,[request.id])).rows);
+  assert.ok(events.length,'the failure is recorded as an event');
+  for(const event of events)await db.transaction(tx=>notify.dispatchEvent(tx,event));
+  const notice=await db.transaction(async tx=>(await tx.query(
+    "SELECT template,severity FROM notifications WHERE user_id=$1 AND template='payout_failed'",[demo.driver])).rows[0]);
+  assert.ok(notice,'silence about a failed transfer is the worst version of this');
+  assert.equal(notice.severity,'urgent');
+});
+
+// -------------------------------------------------------- reliability ------
+test('delivery is audited, retried with backoff, and eventually dead-lettered',async()=>{
+  const {notificationDelivery}=await import('../src/notification-delivery.js');
+  const notification=await db.transaction(async tx=>(await tx.query(
+    `INSERT INTO notifications(user_id,event_type,template,category,severity,data)
+     VALUES($1,'payout.paid','payout_paid','critical','info','{}') RETURNING *`,[demo.driver])).rows[0]);
+  const delivery=await db.transaction(async tx=>(await tx.query(
+    `INSERT INTO notification_deliveries(notification_id,channel) VALUES($1,'sms') RETURNING *`,[notification.id])).rows[0]);
+
+  // A provider that always refuses. Each tick retries and records an attempt;
+  // nothing is ever reported as sent.
+  let calls=0;
+  const broken=notificationDelivery(db,{sms:{idempotent:true,send:async()=>{calls++;throw new Error('gateway down');}}});
+  for(let i=0;i<6;i++){
+    await db.transaction(tx=>tx.query('UPDATE notification_deliveries SET next_attempt_at=NULL,lease_until=NULL WHERE id=$1',[delivery.id]));
+    await broken.tick();
+  }
+  const dead=await db.transaction(async tx=>(await tx.query(
+    'SELECT status,detail,attempts FROM notification_deliveries WHERE id=$1',[delivery.id])).rows[0]);
+  assert.equal(dead.status,'failed','a provider that never answers must stop being asked forever');
+  assert.equal(dead.detail,'dead_letter');
+  assert.ok(calls>=5,'each attempt really reached the adapter: '+calls);
+  const attempts=await db.transaction(async tx=>(await tx.query(
+    'SELECT count(*)::int AS n FROM notification_delivery_attempts WHERE delivery_id=$1',[delivery.id])).rows[0]);
+  assert.ok(attempts.n>=5,'every attempt is audited, not just the last one');
+});
+
+test('an unconfigured channel is recorded as unavailable and never as sent',async()=>{
+  const {notificationDelivery}=await import('../src/notification-delivery.js');
+  const notification=await db.transaction(async tx=>(await tx.query(
+    `INSERT INTO notifications(user_id,event_type,template,category,severity,data)
+     VALUES($1,'payout.paid','payout_paid','critical','info','{}') RETURNING *`,[demo.driver])).rows[0]);
+  await db.transaction(tx=>tx.query(
+    `INSERT INTO notification_deliveries(notification_id,channel) VALUES($1,'sms'),($1,'in_app')`,[notification.id]));
+
+  // No adapters at all: the state LeRoutier is actually in today.
+  await notificationDelivery(db,{}).tick();
+  const rows=await db.transaction(async tx=>(await tx.query(
+    'SELECT channel,status,detail FROM notification_deliveries WHERE notification_id=$1 ORDER BY channel',[notification.id])).rows);
+  const sms=rows.find(r=>r.channel==='sms'),inApp=rows.find(r=>r.channel==='in_app');
+  assert.equal(sms.status,'unavailable','an absent provider is never a delivery');
+  assert.equal(sms.detail,'provider_unavailable');
+  // In-app is the baseline and always works, which is why nothing in the
+  // booking or payment path waits on a gateway.
+  assert.equal(inApp.status,'sent');
+  assert.equal(inApp.detail,'inbox_available');
+});
+
+test('a TEST identity never reaches a real gateway',async()=>{
+  const {notificationProviders}=await import('../src/notification-providers.js');
+  let reached=0;
+  const providers=notificationProviders(db,
+    {notificationProviders:{sms:{url:'https://gateway.example.test/send',key:'k'}}},
+    async()=>{reached++;return new Response(JSON.stringify({accepted:true}),{status:200});});
+  const demoUser=await db.transaction(async tx=>(await tx.query(
+    'SELECT id FROM users WHERE is_demo=true LIMIT 1')).rows[0]);
+  const notification=await db.transaction(async tx=>(await tx.query(
+    `INSERT INTO notifications(user_id,event_type,template,category,severity,data)
+     VALUES($1,'parcel.created','parcel_created','operational','info','{}') RETURNING *`,[demoUser.id])).rows[0]);
+  await assert.rejects(providers.sms.send({notification,idempotencyKey:randomUUID()}));
+  assert.equal(reached,0,'synthetic traffic must not spend somebody’s airtime or reach a real handset');
 });

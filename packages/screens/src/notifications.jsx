@@ -11,6 +11,9 @@ const TEMPLATES = {
   // Verification outcomes. The rejected ones name an action, because the point
   // of telling somebody is that they can do something about it.
   operator_verified: 'Dossier validé : vous pouvez publier vos départs',
+  ops_dossier_submitted: 'Nouveau dossier à vérifier',
+  ops_evidence_resubmitted: 'Justificatif corrigé à réexaminer',
+  ops_payout_requested: 'Retrait en attente de validation',
   operator_verification_rejected: 'Dossier refusé : contactez LeRoutier',
   operator_evidence_rejected: 'Un justificatif est à remplacer',
   operator_suspended: 'Compte opérateur suspendu',

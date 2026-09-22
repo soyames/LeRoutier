@@ -54,6 +54,24 @@ const AUDIENCES = {
     return (await rows(tx, "SELECT id FROM users WHERE role='ops' AND operator_id IS NULL"))
       .map(r => ({ userId: r.id, entityId: event.aggregate_id }));
   },
+  /**
+   * The person waiting on a payout.
+   *
+   * Reached through the payout request itself. No existing audience could walk
+   * from a payout to its beneficiary — they all start from a service, a parcel
+   * or an operator — so a driver was told nothing when their transfer
+   * completed, and nothing when it failed and their balance came back.
+   */
+  async payout_beneficiary(tx, event) {
+    const id = event.payload?.payoutRequestId ?? event.aggregate_id;
+    const driver = await one(tx, 'SELECT driver_id FROM payout_requests WHERE id=$1', [id]);
+    if (driver?.driver_id) return [{ userId: driver.driver_id, entityId: id }];
+    // An operator payout is owed to the operator, and for an independent one
+    // that is a person with an inbox. A company settles on its own terms.
+    const operator = await one(tx, `SELECT o.owner_user_id FROM operator_payout_requests r
+      JOIN operators o ON o.id=r.operator_id WHERE r.id=$1 AND o.type='independent'`, [id]);
+    return operator?.owner_user_id ? [{ userId: operator.owner_user_id, entityId: id }] : [];
+  },
   async operator_owner(tx, event) {
     const operatorId = event.payload?.operatorId ?? (await operatorOf(tx, event));
     if (!operatorId) return [];
