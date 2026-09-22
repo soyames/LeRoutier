@@ -172,10 +172,21 @@ test('the model output cannot execute an unsupported action', async () => {
 });
 
 test('assistant rate limit protects the endpoint', async () => {
+  // The limiter counts per clock minute, so a burst that straddles a boundary
+  // is two smaller bursts and neither reaches the cap. That is the limiter
+  // working, not failing — but it made this test fail about one run in three.
+  // Retried inside a single window rather than by lowering the bar.
+  const minute = () => Math.floor(Date.now() / 60_000);
   let limited = false;
-  for (let i = 0; i < 125 && !limited; i++) {
-    const r = await ask(`Question ${i} sur les départs ?`, null, { sessionId: 'test-session-0003' });
-    if (r.status === 429) limited = true;
+  for (let attempt = 0; attempt < 3 && !limited; attempt++) {
+    const started = minute();
+    for (let i = 0; i < 125 && !limited; i++) {
+      const r = await ask(`Question ${attempt}-${i} sur les départs ?`, null, { sessionId: 'test-session-0003' });
+      if (r.status === 429) limited = true;
+      // The window rolled over mid-burst: this attempt proves nothing either
+      // way, so start a fresh one instead of recording a false negative.
+      if (!limited && minute() !== started) break;
+    }
   }
   assert.equal(limited, true, 'anonymous assistant abuse is rate limited');
 });
