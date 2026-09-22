@@ -7,6 +7,7 @@ import { splitCommission } from '@leroutier/domain';
 import { Provisioning } from './provisioning.jsx';
 import { ParcelDocuments } from './documents.jsx';
 import { ParcelPickup } from './parcel-pickup.jsx';
+import { VerificationDossier } from './operator-onboarding.jsx';
 // Leaflet loads only when an operator actually opens a map.
 const TransportMap = lazy(() => import('./map.jsx'));
 import { BusFront, Armchair, Radio, ShieldAlert, WalletCards, ShieldCheck, Package, MapPin, Home, Users, Check } from 'lucide-react';
@@ -87,6 +88,9 @@ export function Today(){
     <Card className="hero stack"><span className="eyebrow">{configured?'Centre opérationnel':'Compte en attente de vérification'}</span>
       <h1>{platform?'Vue de la plateforme':user?.operator_type==='independent'?'Votre activité indépendante':user?.operator_name || 'Votre compagnie'}</h1>
       <p>{configured?'Supervision en temps réel : services, équipage, colis, paiements et incidents.':'Votre compte doit être vérifié par LeRoutier avant de créer des services ou de retirer des fonds. Préparez votre réseau en attendant.'}</p></Card>
+    {/* An operator awaiting a decision sees its own file here: which proof
+        was refused, the reviewer's reason, and the form to replace it. */}
+    {!platform && !configured && <VerificationDossier/>}
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {/* A verified company with nothing running gets a guided setup, not an
         empty dashboard. Each step opens the form that completes it. */}

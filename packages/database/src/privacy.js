@@ -204,6 +204,7 @@ export function privacyCenter(db) {
         if (pendingPayment.n) blockers.push({ kind: 'pending_payment', count: pendingPayment.n });
         const activeParcel = await one(tx, `SELECT count(*)::integer AS n FROM parcels WHERE created_by=$1 AND status NOT IN ('collected','cancelled','rejected','returned','lost','damaged')`, [actor.id]);
         if (activeParcel.n) blockers.push({ kind: 'active_parcel', count: activeParcel.n });
+        for (const found of await operatorBlockers(tx, actor.id)) blockers.push(found);
         const row = await one(tx, `INSERT INTO deletion_requests(user_id,status,blockers) VALUES($1,$2,$3) RETURNING *`,
           [actor.id, blockers.length ? 'scheduled' : 'requested', JSON.stringify(blockers)]);
         await audit(tx, actor.id, 'privacy.deletion_requested', actor.id, null, { blockers });
@@ -271,12 +272,28 @@ export function privacyCenter(db) {
           if (pendingPayment.n) blockers.push({ kind: 'pending_payment', count: pendingPayment.n });
           const activeParcel = await one(tx, `SELECT count(*)::integer AS n FROM parcels WHERE created_by=$1 AND status NOT IN ('collected','cancelled','rejected','returned','lost','damaged')`, [request.user_id]);
           if (activeParcel.n) blockers.push({ kind: 'active_parcel', count: activeParcel.n });
+          // Re-checked here and not only at request time: an account can pick
+          // up an operator role, or a running service, between asking and being
+          // processed.
+          for (const found of await operatorBlockers(tx, request.user_id)) blockers.push(found);
           if (blockers.length) {
             await tx.query(`UPDATE deletion_requests SET status='scheduled',blockers=$2,updated_at=now() WHERE id=$1`, [request.id, JSON.stringify(blockers)]);
             continue;
           }
           await tx.query(`UPDATE users SET display_name='Utilisateur supprimé',auth_subject=NULL,notification_email=NULL,active=false,updated_at=now() WHERE id=$1`, [request.user_id]);
           await tx.query('UPDATE passenger_profiles SET phone=NULL WHERE user_id=$1', [request.user_id]);
+          // A driver's photograph is published to passengers, and their
+          // identity and licence references sit in the crew record. A tombstone
+          // that leaves a face and a national ID number behind has not deleted
+          // the person; it has only renamed them.
+          // license_reference is NOT NULL by schema, so it is overwritten with
+          // a marker rather than emptied: nulling it would raise 23502 and roll
+          // back the entire deletion, leaving the account intact and the
+          // request marked as failed for reasons nobody would look for here.
+          await tx.query(`UPDATE driver_profiles SET photo_url=NULL,id_document_reference=NULL,
+            license_reference='[supprimé]',active=false WHERE user_id=$1`, [request.user_id]);
+          await tx.query(`UPDATE verification_evidence SET reference=NULL,file_url=NULL,redacted_at=now()
+            WHERE subject_user_id=$1 AND redacted_at IS NULL`, [request.user_id]);
           await tx.query(`UPDATE deletion_requests SET status='completed',processed_at=now(),blockers='[]',outcome='anonymized',updated_at=now() WHERE id=$1`, [request.id]);
           await tx.query('DELETE FROM api_sessions WHERE user_id=$1', [request.user_id]);
           // The completion notice fires before the identity is gone from the
@@ -291,6 +308,39 @@ export function privacyCenter(db) {
     },
   };
 }
+/**
+ * Why an account that runs a transport operation cannot simply disappear.
+ *
+ * Deletion blockers used to look only at what the person did as a PASSENGER.
+ * An independent owner-driver could therefore delete themselves mid-service:
+ * the user row became "Utilisateur supprimé" while their operator stayed
+ * verified, their departures stayed published, their photograph stayed on the
+ * offer passengers were about to book, and any unsettled balance belonged to a
+ * tombstone. None of that is a privacy outcome; it is a broken operator with
+ * the owner's name removed.
+ *
+ * Winding an operation down is a real decision with money and passengers in
+ * it, so it is surfaced as a blocker for a human to resolve rather than
+ * cascaded automatically.
+ *
+ * @param {{query:(sql:string,params?:unknown[])=>Promise<{rows:any[]}>}} tx
+ */
+async function operatorBlockers(tx, userId) {
+  const found = [];
+  const operator = await one(tx, `SELECT o.id,o.name,o.active,o.verification_status FROM operators o
+    WHERE (o.owner_user_id=$1 OR o.admin_user_id=$1) AND o.active`, [userId]);
+  if (operator) found.push({ kind: 'operator_ownership', operatorId: operator.id, operatorName: operator.name });
+  const crewing = await one(tx, `SELECT count(*)::integer AS n FROM service_assignments a JOIN services s ON s.id=a.service_id
+    WHERE (a.driver_id=$1 OR a.convoyeur_id=$1) AND a.ended_at IS NULL
+      AND s.status IN ('scheduled','active','disrupted')`, [userId]);
+  if (crewing.n) found.push({ kind: 'crew_assignment', count: crewing.n });
+  // Money owed to somebody is not settled by deleting them.
+  const payouts = await one(tx, `SELECT count(*)::integer AS n FROM payout_requests
+    WHERE driver_id=$1 AND status IN ('requested','approved','processing')`, [userId]);
+  if (payouts.n) found.push({ kind: 'pending_payout', count: payouts.n });
+  return found;
+}
+
 export function retentionEngine(db) {
   return {
     /** Active, enabled policies. */
@@ -336,6 +386,18 @@ export function retentionEngine(db) {
               AND data IS NOT NULL AND jsonb_typeof(data)='object' LIMIT 5000`, [policy.retention_days]);
           } else if (category === 'data_exports') {
             candidates = await rows(tx, `SELECT id FROM data_exports WHERE expires_at < now() LIMIT 5000`);
+          } else if (category === 'kyc_evidence') {
+            // Refused dossiers only. A verified or suspended operator carried
+            // passengers under a decision this file is the evidence for; a
+            // rejected applicant never became an operator, so keeping a pointer
+            // to their identity card is storage without a purpose.
+            candidates = await rows(tx, `SELECT e.id FROM verification_evidence e JOIN operators o ON o.id=e.operator_id
+              WHERE e.redacted_at IS NULL AND o.verification_status='rejected'
+                AND o.created_at < now()-make_interval(days=>$1)
+                AND NOT EXISTS(SELECT 1 FROM legal_holds h WHERE h.subject_kind='user'
+                  AND h.subject_id IN (o.owner_user_id,o.admin_user_id)
+                  AND h.released_at IS NULL AND (h.expires_at IS NULL OR h.expires_at>now()))
+              LIMIT 5000`, [policy.retention_days]);
           } else if (category === 'inactive_accounts') {
             candidates = await rows(tx, `SELECT id FROM users WHERE last_meaningful_activity_at < now()-make_interval(days=>$1)
               AND keep_confirmed_at IS NULL AND retention_due_at IS NULL AND role<>'ops' AND is_demo=false
@@ -355,6 +417,11 @@ export function retentionEngine(db) {
                 WHERE id=ANY($1::uuid[])`, [candidates.map(c => c.id)]);
             } else if (category === 'data_exports') {
               await tx.query(`UPDATE data_exports SET status='expired',payload='{}'::jsonb WHERE id=ANY($1::uuid[])`, [candidates.map(c => c.id)]);
+            } else if (category === 'kyc_evidence') {
+              // The decision survives; the copy of somebody's passport does not.
+              // kind, status, reviewed_at, reviewed_by and notes are untouched.
+              await tx.query(`UPDATE verification_evidence SET reference=NULL,file_url=NULL,redacted_at=now()
+                WHERE id=ANY($1::uuid[])`, [candidates.map(c => c.id)]);
             } else if (category === 'inactive_accounts') {
               await tx.query(`UPDATE users SET retention_due_at=now()+make_interval(days=>30) WHERE id=ANY($1::uuid[])`, [candidates.map(c => c.id)]);
             }

@@ -75,10 +75,19 @@ export function ApiProvider({baseUrl='',role,children}) {
         // A popup sign-in never left the page, so only a redirect needs
         // finishing — and only when one was actually started.
         if(data.firebase){
-          const returning=await completeRedirectSignIn(data.firebase).catch(()=>null);
-          // The provider leaves its own parameters in the URL; the user is put
-          // back on the page they asked for, with a clean address.
-          if(returning && !cancelled)window.history.replaceState({},'',takeReturnPath());
+          const outcome=await completeRedirectSignIn(data.firebase).catch(error=>({user:null,error}));
+          if(outcome && !cancelled){
+            // Either way the round trip is over, so the remembered destination
+            // is consumed rather than left to redirect a later sign-in.
+            const destination=takeReturnPath();
+            // The provider leaves its own parameters in the URL; the user is
+            // put back on the page they asked for, with a clean address.
+            if(outcome.user)window.history.replaceState({},'',destination);
+            // A redirect that failed is reported. Coming back to a page that
+            // looks untouched, signed out and silent, is the worst possible
+            // outcome of a sign-in attempt on a phone.
+            else setAuth(a=>({...a,error:outcome.error?.message ?? 'La connexion a échoué. Réessayez.'}));
+          }
         }
       }catch{
         if(!cancelled)setAuth(a=>({...a,loading:false,error:'Connexion indisponible. Réessayez ultérieurement.'}));
@@ -117,13 +126,9 @@ export function ApiProvider({baseUrl='',role,children}) {
   const login=useCallback(async()=>{
     if(!auth.firebase)throw new Error('La connexion sécurisée n’est pas encore configurée.');
     // Sign-in returns the user to the page they asked for, not to the home page.
-    try{ await signInWithGoogle(auth.firebase,window.location.pathname+window.location.search); }
-    catch(error){
-      // The provider's own message is never shown — it is developer-facing and
-      // can name internals — but it is kept as the cause for diagnosis.
-      if(error?.code==='auth/popup-closed-by-user')throw new Error('Connexion annulée.',{cause:error});
-      throw new Error('Impossible de démarrer la connexion. Réessayez.',{cause:error});
-    }
+    // Provider failures already arrive translated, with `retryable` saying
+    // whether trying again could ever help; see signInFailure in firebase.js.
+    await signInWithGoogle(auth.firebase,window.location.pathname+window.location.search);
   },[auth.firebase]);
 
   // The unified app serves every role from one identity, so development login
@@ -158,13 +163,7 @@ export function ApiProvider({baseUrl='',role,children}) {
   },[auth.firebase,updateProfile]);
   const loginEmail=useCallback(async({email,password})=>{
     if(!auth.firebase)throw new Error('La connexion sécurisée n’est pas encore configurée.');
-    try{ await signInWithEmail(auth.firebase,{email,password}); }
-    catch(error){
-      if(error?.code==='auth/invalid-credential'||error?.code==='auth/wrong-password'||error?.code==='auth/user-not-found')
-        throw new Error('Adresse e-mail ou mot de passe incorrect.',{cause:error});
-      if(error?.code==='auth/too-many-requests')throw new Error('Trop de tentatives. Patientez un instant.',{cause:error});
-      throw new Error('Impossible de vous connecter. Réessayez.',{cause:error});
-    }
+    await signInWithEmail(auth.firebase,{email,password});
   },[auth.firebase]);
   const resetPassword=useCallback(async email=>{
     if(!auth.firebase)throw new Error('La connexion sécurisée n’est pas encore configurée.');

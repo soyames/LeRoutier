@@ -487,3 +487,137 @@ test('a page size cannot be used to dump the whole register', async () => {
   assert.equal(negative.limit, 50, 'a nonsense page size falls back to the default');
   assert.equal(negative.offset, 0);
 });
+
+// ---------------------------------------------------- correcting a refusal --
+// The loop that was missing entirely. A reviewer could refuse a proof and write
+// why; the operator saw neither and had no way to submit a replacement, while
+// verification() refused to proceed until one arrived. Every dossier with a
+// single refused document was permanently stuck — for the operator AND for the
+// reviewer who refused it.
+test('an operator reads its own file, sees why a proof was refused, and replaces it', async () => {
+  const { operatorId, actor } = await onboardIndependent();
+  await reviewAll(operatorId, { reject: ['insurance'] });
+
+  const before = await onboard.dossier(actor);
+  assert.equal(before.verificationStatus, 'pending_verification');
+  const refused = before.evidence.find(e => e.kind === 'insurance');
+  assert.equal(refused.status, 'rejected');
+  assert.equal(refused.notes, 'Document illisible.', 'the operator is told what was wrong');
+  assert.deepEqual(before.correctable, [refused.id], 'and exactly which proof they may replace');
+  // Who reviewed it is internal; what they decided is the operator's business.
+  assert.ok(!Object.hasOwn(refused, 'reviewed_by'));
+
+  // Verification is genuinely blocked until it is fixed.
+  await assert.rejects(onboard.verification(platformOps, operatorId, 'verified'), { code: 'VERIFICATION_INCOMPLETE' });
+
+  const replaced = await onboard.resubmitEvidence(actor, refused.id,
+    { reference: 'ASS-2025-9001', fileUrl: doc('assurance-2025') });
+  assert.equal(replaced.status, 'pending', 'a replacement goes back into the queue, not straight to verified');
+  const after = await onboard.dossier(actor);
+  const fixed = after.evidence.find(e => e.kind === 'insurance');
+  assert.equal(fixed.notes, null, 'the old refusal no longer hangs over the new document');
+  assert.equal(fixed.reviewed_at, null);
+  assert.deepEqual(after.correctable, []);
+
+  // And now the dossier can actually complete.
+  await onboard.verification(platformOps, operatorId, { type: 'evidence', evidenceId: refused.id, status: 'verified' });
+  const decision = await onboard.verification(platformOps, operatorId, 'verified');
+  assert.equal(decision.verificationStatus, 'verified');
+});
+
+test('only a refused proof can be replaced, and only by that operator', async () => {
+  const mine = await onboardIndependent();
+  const theirs = await onboardIndependent();
+  await reviewAll(mine.operatorId, { reject: ['roadworthiness'] });
+  await reviewAll(theirs.operatorId, { reject: ['roadworthiness'] });
+  const refused = (await onboard.dossier(mine.actor)).evidence.find(e => e.kind === 'roadworthiness');
+  const accepted = (await onboard.dossier(mine.actor)).evidence.find(e => e.kind === 'identity');
+  const otherOperators = (await onboard.dossier(theirs.actor)).evidence.find(e => e.kind === 'roadworthiness');
+
+  // A proof that was accepted is not a correction opportunity.
+  await assert.rejects(onboard.resubmitEvidence(mine.actor, accepted.id, { fileUrl: doc('autre') }),
+    { code: 'EVIDENCE_NOT_REJECTED' });
+  // Another operator's evidence id is not found, not forbidden-with-detail:
+  // the scope is in the WHERE clause, so it can never become a cross-tenant write.
+  await assert.rejects(onboard.resubmitEvidence(mine.actor, otherOperators.id, { fileUrl: doc('autre') }),
+    { code: 'NOT_FOUND' });
+  // A passenger with no operator has no file at all.
+  const outsider = await newPassenger();
+  await assert.rejects(onboard.dossier({ id: outsider, role: 'passenger' }), { code: 'NOT_FOUND' });
+  await assert.rejects(onboard.resubmitEvidence({ id: outsider, role: 'passenger' }, refused.id, { fileUrl: doc('x') }),
+    { code: 'NOT_FOUND' });
+  // Re-sending the same document that was just refused is not a correction.
+  await assert.rejects(onboard.resubmitEvidence(mine.actor, refused.id,
+    { reference: refused.reference, fileUrl: refused.file_url }), { code: 'INVALID_ONBOARDING' });
+  // And a replacement link is held to the same address rules as the original.
+  for (const hostile of ['http://documents.example/x.pdf', 'https://169.254.169.254/latest/meta-data/',
+    'https://user:token@documents.example/x.pdf', 'https://10.0.0.5/x.pdf']) {
+    await assert.rejects(onboard.resubmitEvidence(mine.actor, refused.id, { fileUrl: hostile }),
+      { code: 'INVALID_ONBOARDING' }, `${hostile} was accepted as a replacement proof`);
+  }
+});
+
+test('a rejected operator cannot resurrect itself, but Platform Ops can re-open the file', async () => {
+  const { operatorId, actor } = await onboardIndependent();
+  await reviewAll(operatorId, { reject: ['identity'] });
+  const refused = (await onboard.dossier(actor)).evidence.find(e => e.kind === 'identity');
+  await onboard.verification(platformOps, operatorId, 'rejected');
+
+  // Refusing the OPERATOR is a judgement about the operator, not about a
+  // blurry photograph. Re-uploading must not undo it.
+  await assert.rejects(onboard.resubmitEvidence(actor, refused.id, { reference: 'CNI-9', fileUrl: doc('cni-2') }),
+    { code: 'VERIFICATION_CLOSED' });
+  const closed = await onboard.dossier(actor);
+  assert.equal(closed.verificationStatus, 'rejected');
+  assert.deepEqual(closed.correctable, [], 'and the console is told there is nothing to offer');
+
+  // Reconsideration is LeRoutier's decision, and it exists.
+  await onboard.verification(platformOps, operatorId, 'pending_verification');
+  assert.equal((await onboard.dossier(actor)).verificationStatus, 'pending_verification');
+  const fixed = await onboard.resubmitEvidence(actor, refused.id, { reference: 'CNI-9', fileUrl: doc('cni-2') });
+  assert.equal(fixed.status, 'pending');
+  // An ordinary operator still cannot re-open its own file.
+  await assert.rejects(onboard.verification(actor, operatorId, 'pending_verification'), { code: 'FORBIDDEN' });
+});
+
+test('a photo proof is corrected by its file alone, since it carries no reference', async () => {
+  const { operatorId, actor } = await onboardIndependent();
+  await reviewAll(operatorId, { reject: ['driver_photo'] });
+  const refused = (await onboard.dossier(actor)).evidence.find(e => e.kind === 'driver_photo');
+  assert.equal(refused.reference, null, 'a photo has no reference to retype');
+  const fixed = await onboard.resubmitEvidence(actor, refused.id, { fileUrl: 'https://photos.leroutier.app/koffi-2.jpg' });
+  assert.equal(fixed.status, 'pending');
+  assert.equal(fixed.file_url, 'https://photos.leroutier.app/koffi-2.jpg');
+});
+
+// ------------------------------------------- what a document link may be ----
+// LeRoutier does not host these files, so it cannot check a real MIME type or
+// a size. What it CAN refuse is a link that is plainly not a document — and
+// the one that matters is SVG: an image everywhere else in a product, and a
+// scripted page in a reviewer's browser.
+test('a proof link cannot be active content a reviewer would execute', async () => {
+  for (const hostile of ['https://documents.example.test/cni.svg', 'https://documents.example.test/cni.html',
+    'https://documents.example.test/cni.htm', 'https://documents.example.test/cni.xml',
+    'https://documents.example.test/payload.js', 'https://documents.example.test/dossier.zip',
+    'https://documents.example.test/app.apk', 'https://documents.example.test/run.exe']) {
+    await assert.rejects(onboardIndependent({ idDocumentUrl: hostile }), { code: 'INVALID_ONBOARDING' },
+      `${hostile} was accepted as an identity document`);
+  }
+  // And the ordinary shapes a real dossier arrives in still work.
+  for (const fine of ['https://documents.example.test/cni.pdf', 'https://documents.example.test/cni.JPG',
+    'https://documents.example.test/cni.heic', 'https://documents.example.test/cni.webp',
+    // No extension at all: plenty of legitimate hosts serve from an opaque
+    // path, and refusing those would block real document storage.
+    'https://documents.example.test/d/AbC123', 'https://documents.example.test/file?id=99']) {
+    const created = await onboardIndependent({ idDocumentUrl: fine });
+    assert.ok(created.operatorId, `${fine} was refused although it is a plausible document`);
+  }
+});
+
+test('the platform states plainly that it does not hold these documents', async () => {
+  const { EVIDENCE_STORAGE } = await import('../src/evidence-storage.js');
+  // The flag exists so no screen and no report can imply managed custody while
+  // the documents live on hosts LeRoutier neither controls nor can revoke.
+  assert.equal(EVIDENCE_STORAGE.managed, false);
+  assert.equal(EVIDENCE_STORAGE.mode, 'operator_hosted_link');
+});

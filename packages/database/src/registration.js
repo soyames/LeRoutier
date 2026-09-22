@@ -65,6 +65,15 @@ export async function registrationCapacity(tx, env = process.env) {
     registrationStopPercent: policy.threshold,
     registrationEnabled: policy.registrationEnabled,
     registrationsOpen: open,
+    // Whether the storage gate can actually fire.
+    //
+    // Without DATABASE_STORAGE_LIMIT_MB there is nothing to measure against,
+    // so `registrationsOpen` is true for the same reason an unplugged smoke
+    // alarm is silent. Platform Ops was shown that as a green "capacity
+    // available", which is the worst way to report a protection that is not
+    // running: the one screen meant to warn about it confirmed the opposite.
+    // Said out loud here so no console has to infer it from a null.
+    storageProtection: policy.limitBytes ? 'armed' : 'not_configured',
     // Why it is closed, for Platform Ops only. Never sent to the public.
     reason: open ? null : policy.registrationEnabled ? 'storage' : 'disabled',
   };

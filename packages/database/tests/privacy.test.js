@@ -258,3 +258,99 @@ test('existing booking/payment/parcel/GPS flows remain green',async()=>{
   const activity=await one('SELECT last_meaningful_activity_at FROM users WHERE id=$1',[PASSENGER.id]);
   assert.ok(activity.last_meaningful_activity_at,'booking counts as meaningful activity');
 });
+
+// ----------------------------------------- KYC evidence: the missing policy --
+// Verification evidence was the only major category with no retention rule at
+// all, and it holds the most sensitive data on the platform: national identity
+// references, licence numbers, and links to documents LeRoutier does not host
+// and cannot revoke.
+test('a refused dossier is redacted after the appeal window; the decision survives',async()=>{
+  const owner=randomUUID();
+  await sql(`INSERT INTO users(id,display_name,role) VALUES($1,'Candidat Refusé','passenger')`,[owner]);
+  const operator=await one(`INSERT INTO operators(name,type,owner_user_id,admin_user_id,verification_status,created_at)
+    VALUES('Refusé SARL','independent',$1,$1,'rejected',now()-interval '200 days') RETURNING id`,[owner]);
+  await sql(`INSERT INTO verification_evidence(operator_id,subject_user_id,kind,reference,file_url,status,notes)
+    VALUES($1,$2,'identity','CNI-REFUSE-1','https://documents.example.test/cni.pdf','rejected','Document illisible.')`,[operator.id,owner]);
+
+  const report=await retention.run({execute:true});
+  const kyc=report.report.find(r=>r.category==='kyc_evidence');
+  assert.ok(kyc,'the category is scanned at all');
+  assert.ok(kyc.eligible>=1);
+  const row=await one("SELECT reference,file_url,redacted_at,kind,status,notes FROM verification_evidence WHERE operator_id=$1",[operator.id]);
+  assert.equal(row.reference,null,'the identity reference is gone');
+  assert.equal(row.file_url,null,'and so is the pointer to the document');
+  assert.ok(row.redacted_at,'and the redaction is dated, so the scan does not keep reselecting it');
+  // What lasting value there is lives in the decision, not in the passport.
+  assert.equal(row.kind,'identity');
+  assert.equal(row.status,'rejected');
+  assert.equal(row.notes,'Document illisible.');
+  // Idempotent: a second pass finds nothing left to do for this operator.
+  const second=await retention.run({execute:true});
+  assert.ok(!(await one('SELECT id FROM verification_evidence WHERE operator_id=$1 AND redacted_at IS NULL',[operator.id])));
+  assert.ok(second.report.find(r=>r.category==='kyc_evidence'));
+});
+
+test('a verified operator’s dossier is never swept, and a legal hold stops a refused one',async()=>{
+  const keeper=randomUUID(),held=randomUUID();
+  for(const [id,name] of [[keeper,'Opérateur Vérifié'],[held,'Refusé Sous Enquête']]){
+    await sql(`INSERT INTO users(id,display_name,role) VALUES($1,$2,'passenger')`,[id,name]);
+  }
+  const verified=await one(`INSERT INTO operators(name,type,owner_user_id,admin_user_id,verification_status,created_at)
+    VALUES('Vérifié SARL','independent',$1,$1,'verified',now()-interval '400 days') RETURNING id`,[keeper]);
+  const underHold=await one(`INSERT INTO operators(name,type,owner_user_id,admin_user_id,verification_status,created_at)
+    VALUES('Enquête SARL','independent',$1,$1,'rejected',now()-interval '400 days') RETURNING id`,[held]);
+  for(const operatorId of [verified.id,underHold.id]){
+    await sql(`INSERT INTO verification_evidence(operator_id,kind,reference,file_url,status)
+      VALUES($1,'driving_license','PC-KEEP','https://documents.example.test/permis.pdf','verified')`,[operatorId]);
+  }
+  await sql(`INSERT INTO legal_holds(subject_kind,subject_id,reason,created_by) VALUES('user',$1,'Enquête en cours',$2)`,[held,PLATFORM_OPS.id]);
+
+  await retention.run({execute:true});
+  // A relationship that existed is evidence LeRoutier checked before letting
+  // somebody carry passengers; it is not swept because time passed.
+  assert.ok((await one('SELECT file_url FROM verification_evidence WHERE operator_id=$1',[verified.id])).file_url);
+  assert.ok((await one('SELECT file_url FROM verification_evidence WHERE operator_id=$1',[underHold.id])).file_url,
+    'a legal hold survives the retention scan');
+});
+
+test('deleting an account removes the face and the identity numbers, not only the name',async()=>{
+  const driver=randomUUID();
+  await sql(`INSERT INTO users(id,display_name,role,auth_subject,auth_issuer) VALUES($1,'Chauffeur Partant','driver',$2,'test')`,[driver,'sub-'+driver]);
+  await sql(`INSERT INTO driver_profiles(user_id,operator_id,license_reference,id_document_reference,photo_url,active)
+    VALUES($1,$2,'PC-BJ-0001','CNI-0001','https://photos.example.test/visage.jpg',true)`,[driver,demo.operator]);
+  await sql(`INSERT INTO verification_evidence(operator_id,subject_user_id,kind,reference,file_url,status)
+    VALUES($1,$2,'identity','CNI-0001','https://documents.example.test/cni-partant.pdf','verified')`,[demo.operator,driver]);
+  await sql(`INSERT INTO deletion_requests(user_id,status) VALUES($1,'requested')`,[driver]);
+
+  await privacy.processDueDeletions();
+  const profile=await one('SELECT photo_url,id_document_reference,license_reference,active FROM driver_profiles WHERE user_id=$1',[driver]);
+  // The photograph is published to passengers on an independent offer. A
+  // tombstone that leaves a face behind has renamed the person, not deleted them.
+  assert.equal(profile.photo_url,null);
+  assert.equal(profile.id_document_reference,null);
+  // NOT NULL by schema, so it is overwritten rather than emptied: nulling it
+  // would abort the whole deletion transaction.
+  assert.equal(profile.license_reference,'[supprimé]');
+  assert.ok(!profile.license_reference.includes('PC-BJ'),'the licence number itself is gone');
+  assert.equal(profile.active,false);
+  const evidence=await one('SELECT reference,file_url,redacted_at FROM verification_evidence WHERE subject_user_id=$1',[driver]);
+  assert.equal(evidence.file_url,null);
+  assert.ok(evidence.redacted_at);
+});
+
+test('an account that runs a transport operation cannot quietly delete itself',async()=>{
+  const owner=randomUUID();
+  await sql(`INSERT INTO users(id,display_name,role) VALUES($1,'Propriétaire Actif','driver')`,[owner]);
+  const operator=await one(`INSERT INTO operators(name,type,owner_user_id,admin_user_id,verification_status,active)
+    VALUES('Active SARL','independent',$1,$1,'verified',true) RETURNING id`,[owner]);
+  const request=await privacy.requestDeletion({id:owner,role:'driver',operator_id:operator.id});
+  // Not refused — the person keeps the right to ask — but not silently carried
+  // out either: winding down an operation is a decision with passengers and
+  // money in it.
+  assert.equal(request.status,'scheduled');
+  const kinds=(request.blockers||[]).map(b=>b.kind);
+  assert.ok(kinds.includes('operator_ownership'),'the live operator is named as the blocker: '+JSON.stringify(kinds));
+  await privacy.processDueDeletions();
+  const user=await one('SELECT display_name FROM users WHERE id=$1',[owner]);
+  assert.equal(user.display_name,'Propriétaire Actif','and the operator owner is still there');
+});

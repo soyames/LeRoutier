@@ -8,6 +8,7 @@ import { useVehicleTracking } from './vehicle-gps.js';
 import { ServiceTracking } from './tracking.jsx';
 import { ParcelDocuments } from './documents.jsx';
 import { ParcelPickup } from './parcel-pickup.jsx';
+import { VerificationDossier } from './operator-onboarding.jsx';
 import QrScanner from 'qr-scanner';
 import { Users, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw, Package, MapPin, Navigation,
   Wrench, HeartPulse, Ban, Fuel, Hourglass, Construction, TrafficCone, ShieldAlert } from 'lucide-react';
@@ -71,8 +72,11 @@ function VerificationBanner(){
     rejected:'Votre dossier a été refusé. Mettez à jour vos informations ou contactez LeRoutier.',
     suspended:'Votre compte est suspendu. Contactez LeRoutier pour le rétablir.',
     draft:'Complétez votre dossier pour lancer la vérification.'};
-  return <Card className="stack"><div className="between wrap"><strong>{state.label}</strong><Badge tone={state.tone}>{state.label}</Badge></div>
-    <p className="small">{copy[user.verification_status]||copy.pending_verification}</p></Card>;
+  return <><Card className="stack"><div className="between wrap"><strong>{state.label}</strong><Badge tone={state.tone}>{state.label}</Badge></div>
+    <p className="small">{copy[user.verification_status]||copy.pending_verification}</p></Card>
+  {/* Which proof, why, and how to replace it. The banner alone told a refused
+      driver to "update their information" without naming anything to update. */}
+  <VerificationDossier/></>;
 }
 
 // What a queued action means to the person who performed it.

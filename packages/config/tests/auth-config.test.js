@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { publicAuthConfig, serverConfig, authConfig, FIREBASE_JWKS_URL } from '../src/index.js';
-import { safeReturnPath } from '../src/firebase.js';
+import { safeReturnPath, signInFailure } from '../src/firebase.js';
 import { createSyncQueue, clearQueuedActions } from '../src/offline.js';
 
 // The gate that decides whether sign-in is offered at all.
@@ -124,6 +124,48 @@ test('the return path cannot be turned into an open redirect', () => {
 test('the callback route is never itself a return destination', () => {
   assert.equal(safeReturnPath('/auth/callback'), '/');
   assert.equal(safeReturnPath('/auth/callback?code=abc&state=xyz'), '/');
+});
+
+// ------------------------------------------------- provider failures, told --
+test('a provider failure is never shown to the user in the provider’s own words', () => {
+  // Firebase messages read "Firebase: Error (auth/email-already-in-use)." —
+  // developer-facing, and they name the provider and its internal code. This
+  // one reached the registration form verbatim before it was mapped.
+  for (const code of ['auth/email-already-in-use', 'auth/unauthorized-domain', 'auth/invalid-credential',
+    'auth/network-request-failed', 'auth/this-code-does-not-exist']) {
+    const failure = signInFailure(Object.assign(new Error('Firebase: Error (' + code + ').'), { code }));
+    assert.ok(!/firebase|auth\//i.test(failure.message), `${code} leaked the provider's wording`);
+    assert.ok(failure.message.length > 10, `${code} produced no usable message`);
+  }
+});
+
+test('a failure that retrying cannot fix does not ask the user to retry', () => {
+  // The loop this closes: an unauthorized domain is a Firebase Console setting.
+  // "Réessayez" sends somebody round it forever, and they never find out that
+  // nothing they can do will help.
+  for (const code of ['auth/unauthorized-domain', 'auth/operation-not-allowed', 'auth/invalid-api-key',
+    'auth/account-exists-with-different-credential', 'auth/user-disabled', 'auth/email-already-in-use']) {
+    const failure = signInFailure(Object.assign(new Error('x'), { code }));
+    assert.equal(failure.retryable, false, `${code} is a fact about configuration or the account`);
+    assert.ok(!/[Rr]éessayez/.test(failure.message), `${code} still tells the user to try again`);
+  }
+  // And the transient ones do say so, because there trying again is the answer.
+  for (const code of ['auth/network-request-failed', 'auth/too-many-requests', 'auth/popup-closed-by-user']) {
+    assert.equal(signInFailure(Object.assign(new Error('x'), { code })).retryable, true);
+  }
+});
+
+test('the provider error survives as the cause, for diagnosis', () => {
+  const original = Object.assign(new Error('Firebase: Error (auth/unauthorized-domain).'), { code: 'auth/unauthorized-domain' });
+  const failure = signInFailure(original);
+  assert.equal(failure.cause, original, 'the original is kept where a developer can read it');
+  assert.equal(failure.reason, 'auth/unauthorized-domain', 'and the code travels for logging');
+});
+
+test('an unrecognised failure is still answered in the product’s language', () => {
+  assert.match(signInFailure(new Error('boom')).message, /Impossible de démarrer la connexion/);
+  assert.match(signInFailure(new Error('boom'), 'password').message, /Impossible de vous connecter/);
+  assert.equal(signInFailure(undefined).reason, 'unknown');
 });
 
 // ---------------------------------------------------- crew queue on sign-out --

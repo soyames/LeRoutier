@@ -158,3 +158,38 @@ test('capacity detail is Platform Ops information, and Company Ops cannot read i
   await assert.rejects(health.read({ id: demo.ops, role: 'ops', operator_id: demo.operator }), { code: 'FORBIDDEN' });
   await assert.rejects(health.read({ id: demo.passenger, role: 'passenger' }), { code: 'FORBIDDEN' });
 });
+
+test('an unconfigured storage limit is reported as an unarmed protection, not as capacity', async () => {
+  // The failure this closes: with no DATABASE_STORAGE_LIMIT_MB there is nothing
+  // to measure against, so registrationsOpen is true for the same reason an
+  // unplugged smoke alarm is silent. Platform Ops rendered that as a green
+  // "capacity available" — the one screen meant to warn about it agreeing that
+  // everything was fine.
+  env({});
+  const unarmed = await db.transaction(tx => registrationCapacity(tx));
+  assert.equal(unarmed.storageProtection, 'not_configured');
+  assert.equal(unarmed.registrationsOpen, true, 'and it still fails open, which is the right default');
+  assert.equal(unarmed.limitBytes, null);
+
+  env({ DATABASE_STORAGE_LIMIT_MB: '4096' });
+  const armed = await db.transaction(tx => registrationCapacity(tx));
+  assert.equal(armed.storageProtection, 'armed');
+  assert.equal(typeof armed.usedPercent, 'number', 'an armed protection reports a real percentage');
+
+  // A manual close is still a closed door, but it is not the storage gate and
+  // must not be reported as one.
+  env({ REGISTRATION_ENABLED: 'false' });
+  const disabled = await db.transaction(tx => registrationCapacity(tx));
+  assert.equal(disabled.storageProtection, 'not_configured');
+  assert.equal(disabled.registrationsOpen, false);
+  assert.equal(disabled.reason, 'disabled');
+});
+
+test('Platform Ops health carries the armed state, so a console cannot infer it from a null', async () => {
+  env({});
+  const ops = { id: demo.platformOps ?? demo.ops, role: 'ops', operator_id: null };
+  const view = await health.read(ops);
+  assert.equal(view.storage.storageProtection, 'not_configured');
+  // And the public never learns any of it.
+  assert.ok(!JSON.stringify(view.storage).includes('DATABASE_URL'));
+});

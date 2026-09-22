@@ -1,5 +1,6 @@
 import { invariant, uuid, idempotencyKey } from '@leroutier/domain';
 import { audit, activeIdentity } from './identities.js';
+import { documentReference } from './evidence-storage.js';
 
 const one=(tx,sql,args=[])=>(tx.query(sql,args)).then(r=>r.rows[0]);
 const optionalRef=(value,max=200)=>{
@@ -8,54 +9,10 @@ const optionalRef=(value,max=200)=>{
   invariant(text.length>=2&&text.length<=max,'INVALID_ONBOARDING','Reference is invalid.');
   return text;
 };
-// Hosts that are never a legitimate place to keep a carte grise, and are the
-// usual target when somebody wants another person's browser to reach an
-// internal service.
-const BLOCKED_HOSTS=['localhost','metadata','metadata.google.internal','instance-data'];
-const BLOCKED_SUFFIXES=['.localhost','.local','.internal','.intranet','.home.arpa','.lan'];
-/**
- * Validate an operator-supplied document or photo reference.
- *
- * LeRoutier never fetches these URLs server-side, so this is not an SSRF
- * sandbox — it protects the party that DOES load them: a Platform Ops
- * reviewer opening a proof, and every passenger's browser rendering a
- * verified driver's photo. Accordingly it accepts only a plain,
- * credential-free, port-free https URL on a real named host.
- *
- * `https://` alone is not enough: `https://user:token@…`, `https://10.0.0.5/`,
- * `https://169.254.169.254/latest/meta-data/` and `https://2130706433/` all
- * satisfy "must use HTTPS" and none of them is a document.
- */
-const httpsUrl=(value,required=false)=>{
-  if(value===undefined||value===null||value===''){invariant(!required,'INVALID_ONBOARDING','A secure document link is required.');return null;}
-  const text=String(value).trim();
-  invariant(text.length<=2000,'INVALID_ONBOARDING','Document URL is too long.');
-  let parsed;try{parsed=new URL(text);}catch{invariant(false,'INVALID_ONBOARDING','Document URL is invalid.');}
-  const refuse=()=>invariant(false,'INVALID_ONBOARDING','Document URL must be a public HTTPS address, without credentials or an internal host.');
-  // https only: this is also what excludes javascript:, data:, blob: and file:.
-  if(parsed.protocol!=='https:')refuse();
-  // Embedded credentials become a leaked secret the moment the link is
-  // rendered, copied or logged.
-  if(parsed.username||parsed.password)refuse();
-  // An explicit port on a document link is either a mistake or a service that
-  // is not a document host.
-  if(parsed.port)refuse();
-  const host=parsed.hostname.toLowerCase();
-  if(!host||host.length>253)refuse();
-  // IPv6 literals ([::1], [fd00::1], …) are never a document host.
-  if(host.startsWith('[')||host.includes(':'))refuse();
-  if(BLOCKED_HOSTS.includes(host))refuse();
-  if(BLOCKED_SUFFIXES.some(suffix=>host.endsWith(suffix)))refuse();
-  // Any IP literal is refused, not merely the private ranges: a real document
-  // host has a name, and refusing the whole shape removes every decimal,
-  // octal and hexadecimal encoding trick at once.
-  if(/^\d{1,3}(\.\d{1,3}){3}$/.test(host))refuse();
-  // A dotted name with at least one label separator. This also rejects bare
-  // numbers (https://2130706433/) and single labels (https://intranet/).
-  if(!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(host))refuse();
-  if(/^\d+$/.test(host.replaceAll('.','')))refuse();
-  return parsed.toString();
-};
+// What a document reference may be, and the fact that LeRoutier does not hold
+// the file, live in one module. See evidence-storage.js before changing how a
+// proof is submitted, reviewed or displayed.
+const httpsUrl=documentReference;
 const addEvidence=(tx,operatorId,kind,{reference=null,fileUrl=null,subjectUserId=null,vehicleId=null}={})=>
   tx.query(`INSERT INTO verification_evidence(operator_id,subject_user_id,vehicle_id,kind,reference,file_url)
     VALUES($1,$2,$3,$4,$5,$6)`,[operatorId,subjectUserId,vehicleId,kind,reference,fileUrl]);
@@ -214,7 +171,12 @@ export function onboarding(db){
           await audit(tx,actor.id,'operator.evidence_reviewed',id,null,{evidenceId:evidence.id,kind:evidence.kind,decision:decision.status});return row;
         });
       }
-      invariant(['verified','rejected','suspended'].includes(decision),'INVALID_DECISION','Decision must be verified, rejected or suspended.');
+      // 'pending_verification' re-opens a file. Without it a rejected operator
+      // could never be reconsidered — not by themselves, and not by the people
+      // who rejected them — which turns a review decision into a permanent one
+      // and makes the appeal the product promises impossible to honour.
+      invariant(['verified','rejected','suspended','pending_verification'].includes(decision),
+        'INVALID_DECISION','Decision must be verified, rejected, suspended or returned for review.');
       return db.transaction(async tx=>{
         const operator=await one(tx,'SELECT * FROM operators WHERE id=$1 FOR UPDATE',[id]);invariant(operator,'NOT_FOUND','Operator not found.',404);
         if(decision==='verified'){
@@ -234,6 +196,92 @@ export function onboarding(db){
     },
 
     async evidence(actor,operatorId){invariant(actor?.role==='ops'&&!actor.operator_id,'FORBIDDEN','Only platform operations can review verification evidence.',403);const id=uuid(operatorId);return db.transaction(async tx=>(await tx.query(`SELECT e.*,u.display_name AS subject_name,v.registration AS vehicle_registration FROM verification_evidence e LEFT JOIN users u ON u.id=e.subject_user_id LEFT JOIN vehicles v ON v.id=e.vehicle_id WHERE e.operator_id=$1 ORDER BY e.submitted_at,e.kind`,[id])).rows);},
+
+    /**
+     * The operator's own view of its verification file.
+     *
+     * Without this an operator could be rejected and never find out why: the
+     * reviewer's notes existed only inside Platform Ops, and the only thing the
+     * operator saw was a status that never changed. Nobody can correct a proof
+     * they were never told was wrong.
+     *
+     * The reviewer's identity is NOT included. Who examined a dossier is
+     * internal; what they decided and why is the operator's business.
+     */
+    async dossier(actor){
+      return db.transaction(async tx=>{
+        const user=await activeIdentity(tx,actor.id);
+        const operator=await operatorView(tx,user);
+        invariant(operator,'NOT_FOUND','No operator membership found.',404);
+        invariant(operator.admin_user_id===user.id||operator.owner_user_id===user.id,
+          'FORBIDDEN','Only the operator owner or admin can read the verification file.',403);
+        const evidence=(await tx.query(`SELECT id,kind,reference,file_url,status,submitted_at,reviewed_at,notes
+          FROM verification_evidence WHERE operator_id=$1 ORDER BY kind`,[operator.id])).rows;
+        const approved=new Set(evidence.filter(e=>e.status==='verified').map(e=>e.kind));
+        const required=requiredEvidence(operator.type);
+        return {
+          operatorId:operator.id,operatorName:operator.name,operatorType:operator.type,
+          verificationStatus:operator.verification_status,verifiedAt:operator.verified_at,
+          required,
+          missing:required.filter(kind=>!approved.has(kind)),
+          // What the operator may act on right now. Computed here rather than
+          // in the console, so the button and the server agree about it.
+          correctable:operator.verification_status==='pending_verification'
+            ? evidence.filter(e=>e.status==='rejected').map(e=>e.id) : [],
+          evidence,
+        };
+      });
+    },
+
+    /**
+     * Replace a proof a reviewer refused.
+     *
+     * Only a rejected proof, and only while the operator is still awaiting a
+     * decision. An operator REJECTED as a whole is a platform judgement about
+     * that operator, not about a blurry photograph: re-opening that file is
+     * Platform Ops' decision (they can return it to pending_verification), and
+     * letting the operator do it by re-uploading would make the decision
+     * meaningless.
+     *
+     * The row is updated rather than duplicated: the dossier is the current
+     * state of the file, and the audit trail carries the history.
+     */
+    async resubmitEvidence(actor,evidenceId,input){
+      invariant(input&&Object.keys(input).every(k=>['reference','fileUrl'].includes(k)),
+        'INVALID_ONBOARDING','Unexpected evidence fields.');
+      const id=uuid(evidenceId);
+      return db.transaction(async tx=>{
+        const user=await activeIdentity(tx,actor.id);
+        const operator=await operatorView(tx,user);
+        invariant(operator,'NOT_FOUND','No operator membership found.',404);
+        invariant(operator.admin_user_id===user.id||operator.owner_user_id===user.id,
+          'FORBIDDEN','Only the operator owner or admin can replace a proof.',403);
+        invariant(operator.verification_status==='pending_verification','VERIFICATION_CLOSED',
+          'Ce dossier n’est plus en cours d’examen. Contactez LeRoutier.',409);
+        // Scoped by operator_id in the WHERE clause, so naming another
+        // operator's evidence id is a 404 and never a cross-tenant write.
+        const evidence=await one(tx,'SELECT * FROM verification_evidence WHERE id=$1 AND operator_id=$2 FOR UPDATE',[id,operator.id]);
+        invariant(evidence,'NOT_FOUND','Verification evidence not found.',404);
+        invariant(evidence.status==='rejected','EVIDENCE_NOT_REJECTED',
+          'Seul un justificatif refusé peut être remplacé.',409);
+        const reference=optionalRef(input.reference,200)??evidence.reference;
+        // A photo proof carries no reference, so the file is what must change;
+        // everything else needs at least one of the two to be present.
+        const fileUrl=input.fileUrl===undefined?evidence.file_url:httpsUrl(input.fileUrl,false);
+        invariant(reference||fileUrl,'INVALID_ONBOARDING','A reference or a document link is required.');
+        invariant(reference!==evidence.reference||fileUrl!==evidence.file_url,'INVALID_ONBOARDING',
+          'Fournissez un justificatif différent de celui qui a été refusé.');
+        const row=await one(tx,`UPDATE verification_evidence
+          SET reference=$2,file_url=$3,status='pending',submitted_at=now(),reviewed_at=NULL,reviewed_by=NULL,notes=NULL
+          WHERE id=$1 RETURNING id,kind,reference,file_url,status,submitted_at`,[evidence.id,reference,fileUrl]);
+        // The refused document's address is not copied into the audit trail or
+        // the event stream: the trail records that a proof was replaced, not
+        // where the document lives.
+        await audit(tx,actor.id,'operator.evidence_resubmitted',operator.id,operator.id,
+          {evidenceId:evidence.id,kind:evidence.kind});
+        return row;
+      });
+    },
 
     // A staff roster, with driving licence references, is operator-internal.
     // The guard is stated as a positive requirement rather than "refuse when

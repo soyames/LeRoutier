@@ -57,6 +57,64 @@ export function browserAuthDomain(config, location = globalThis.window?.location
   return BRANDED_AUTH_HOSTS.has(hostname) ? hostname : config?.authDomain;
 }
 
+/**
+ * What a provider failure means, in the product's language.
+ *
+ * One place interprets Firebase error codes, because the alternative is what
+ * this replaced: a little mapping at each call site, each knowing about a
+ * different two or three codes, and everything else collapsing into "réessayez"
+ * — including the failures where retrying can never work.
+ *
+ * `retryable` is the honest part. An unauthorized domain, a disabled provider
+ * and an account collision are configuration or account facts: telling somebody
+ * to try again sends them round a loop that has no exit. The provider's own
+ * message is never shown — it is developer-facing and names internals — but it
+ * is kept as the `cause` for diagnosis.
+ *
+ * @param {any} error
+ * @param {'popup'|'redirect'|'password'} [during]
+ */
+export function signInFailure(error, during = 'popup') {
+  const code = String(error?.code ?? '');
+  const fail = (message, retryable) =>
+    Object.assign(new Error(message, { cause: error }), { reason: code || 'unknown', retryable });
+  switch (code) {
+  case 'auth/popup-closed-by-user':
+  case 'auth/user-cancelled':
+    return fail('Connexion annulée.', true);
+  // Configuration, not bad luck. This is the failure a branded auth domain
+  // introduces: the host must be an authorized domain on the Firebase project,
+  // and until somebody adds it no amount of retrying helps.
+  case 'auth/unauthorized-domain':
+  case 'auth/operation-not-allowed':
+  case 'auth/invalid-api-key':
+  case 'auth/api-key-not-valid-please-pass-a-valid-api-key':
+    return fail('La connexion Google n’est pas disponible sur cette adresse. Signalez-le à LeRoutier.', false);
+  case 'auth/account-exists-with-different-credential':
+    return fail('Un compte existe déjà avec cette adresse e-mail. Connectez-vous avec votre mot de passe.', false);
+  case 'auth/user-disabled':
+    return fail('Ce compte est désactivé. Contactez LeRoutier.', false);
+  case 'auth/network-request-failed':
+    return fail('Connexion au service d’identité impossible. Vérifiez votre réseau puis réessayez.', true);
+  case 'auth/too-many-requests':
+    return fail('Trop de tentatives. Patientez un instant.', true);
+  case 'auth/invalid-credential':
+  case 'auth/wrong-password':
+  case 'auth/user-not-found':
+    return fail('Adresse e-mail ou mot de passe incorrect.', true);
+  case 'auth/email-already-in-use':
+    return fail('Cette adresse e-mail possède déjà un compte. Connectez-vous.', false);
+  case 'auth/weak-password':
+    return fail('Choisissez un mot de passe d’au moins six caractères.', true);
+  case 'auth/invalid-email':
+    return fail('Cette adresse e-mail n’est pas valide.', true);
+  default:
+    return fail(during === 'password'
+      ? 'Impossible de vous connecter. Réessayez.'
+      : 'Impossible de démarrer la connexion. Réessayez.', true);
+  }
+}
+
 let cached = null;
 
 /**
@@ -133,14 +191,26 @@ export async function signInWithGoogle(config, returnTo = '/') {
         return retried.user;
       } catch { /* the redirect fallback below still applies */ }
     }
-    if (['auth/popup-blocked', 'auth/popup-closed-by-user', 'auth/cancelled-popup-request', 'auth/operation-not-supported-in-this-environment'].includes(code)) {
-      if (code === 'auth/popup-closed-by-user') throw error;
+    // A superseded popup request. The user clicked twice and the SECOND popup
+    // is still open and still working: this rejection belongs to the first
+    // call. Falling back to a redirect here navigated the page away and killed
+    // the live popup, turning a double click into a failed sign-in.
+    if (code === 'auth/cancelled-popup-request') return null;
+    // Closing the window is a decision, not an obstacle to route around.
+    if (code === 'auth/popup-closed-by-user') throw signInFailure(error);
+    if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(code)) {
       try { window.sessionStorage.setItem(PENDING_REDIRECT, '1'); } catch { /* private mode */ }
-      await sdk.signInWithRedirect(auth, provider);
+      try {
+        await sdk.signInWithRedirect(auth, provider);
+      } catch (redirectError) {
+        // The redirect never started, so nothing will come back to finish it.
+        try { window.sessionStorage.removeItem(PENDING_REDIRECT); } catch { /* private mode */ }
+        throw signInFailure(redirectError, 'redirect');
+      }
       // The page navigates away; nothing after this runs.
       return null;
     }
-    throw error;
+    throw signInFailure(error);
   }
 }
 
@@ -149,6 +219,16 @@ export async function signInWithGoogle(config, returnTo = '/') {
  *
  * Called once on load. It asks Firebase only when a redirect was actually
  * started, so a normal visit costs nothing.
+ *
+ * A failure here is REPORTED rather than swallowed. This used to return null on
+ * any error, which meant a person who clicked "Continuer avec Google", was sent
+ * to Google, and came back to a page that looked exactly as they had left it —
+ * signed out, with no explanation and nothing to act on. The redirect path is
+ * the mobile path, so that silence fell on the users least able to work around
+ * it.
+ *
+ * @returns {Promise<{user: any, error: null} | {user: null, error: Error} | null>}
+ *   null when no redirect was in flight.
  */
 export async function completeRedirectSignIn(config) {
   let pending = false;
@@ -156,9 +236,15 @@ export async function completeRedirectSignIn(config) {
   if (!pending) return null;
   try { window.sessionStorage.removeItem(PENDING_REDIRECT); } catch { /* private mode */ }
   const ready = await firebaseAuth(config);
-  if (!ready) return null;
-  const result = await ready.sdk.getRedirectResult(ready.auth).catch(() => null);
-  return result?.user ?? null;
+  if (!ready) return { user: null, error: signInFailure(new Error('auth-unavailable'), 'redirect') };
+  try {
+    const result = await ready.sdk.getRedirectResult(ready.auth);
+    // No result means the redirect completed without a credential — the user
+    // backed out at Google. That is a cancellation, not a failure to report.
+    return result?.user ? { user: result.user, error: null } : null;
+  } catch (error) {
+    return { user: null, error: signInFailure(error, 'redirect') };
+  }
 }
 
 /**
@@ -189,14 +275,16 @@ export async function onAuthChange(config, callback) {
 export async function createAccountWithEmail(config, { email, password }) {
   const ready = await firebaseAuth(config);
   if (!ready) throw new Error('auth-unavailable');
-  return ready.sdk.createUserWithEmailAndPassword(ready.auth, String(email).trim(), String(password));
+  try { return await ready.sdk.createUserWithEmailAndPassword(ready.auth, String(email).trim(), String(password)); }
+  catch (error) { throw signInFailure(error, 'password'); }
 }
 
 /** Email/password sign-in; the same single-identity model as Google. */
 export async function signInWithEmail(config, { email, password }) {
   const ready = await firebaseAuth(config);
   if (!ready) throw new Error('auth-unavailable');
-  return ready.sdk.signInWithEmailAndPassword(ready.auth, String(email).trim(), String(password));
+  try { return await ready.sdk.signInWithEmailAndPassword(ready.auth, String(email).trim(), String(password)); }
+  catch (error) { throw signInFailure(error, 'password'); }
 }
 
 /** Firebase sends the reset email; nothing is stored or emailed by LeRoutier. */

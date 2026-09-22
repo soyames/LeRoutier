@@ -113,7 +113,8 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       '/driver/payouts': ['GET', 'POST'], '/driver/payout-destinations': ['GET', 'POST'],
       '/driver/walk-up-bookings': ['POST'], '/driver/actions': ['POST'],
       '/onboarding/me': ['GET'], '/onboarding/company': ['POST'], '/onboarding/independent': ['POST'],
-      '/onboarding/operator': ['PATCH'], '/operators': ['GET'], '/incidents': ['GET', 'POST'],
+      '/onboarding/operator': ['PATCH'], '/onboarding/evidence': ['GET'],
+      '/operators': ['GET'], '/incidents': ['GET', 'POST'],
       '/boarding-points': ['GET'], '/boarding-points/proposals': ['POST'], '/mobility/providers': ['GET'],
       '/mobility/handoff': ['POST'], '/tickets/verify': ['POST'], '/workflows': ['GET'],
       '/workflows/tick': ['POST'], '/assistant': ['POST'],
@@ -370,6 +371,13 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='POST' && path==='/onboarding/company') return onboard.startCompany(actor,await body(),req.headers.get('idempotency-key'));
     if(method==='POST' && path==='/onboarding/independent') return onboard.startIndependent(actor,await body(),req.headers.get('idempotency-key'));
     if(method==='PATCH' && path==='/onboarding/operator') return onboard.updateProfile(actor,await body());
+    // An operator reading its own verification file, and replacing a proof a
+    // reviewer refused. Without these an operator rejected for a blurry carte
+    // grise was told nothing and could do nothing: the server demanded a
+    // replacement the product had no way to submit.
+    if(method==='GET' && path==='/onboarding/evidence') return onboard.dossier(actor);
+    const evidenceResubmit=path.match(/^\/onboarding\/evidence\/([^/]+)$/);
+    if(method==='POST' && evidenceResubmit) return onboard.resubmitEvidence(actor,evidenceResubmit[1],await body());
     if(method==='GET' && path==='/operators') return onboard.listOperators(actor);
     // One operator's verification evidence, on demand. The review queue only
     // carries operators awaiting a first decision, so without this a verified
