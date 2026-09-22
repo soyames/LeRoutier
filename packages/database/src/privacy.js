@@ -17,6 +17,7 @@ import { invariant, uuid } from '@leroutier/domain';
 import { audit } from './identities.js';
 
 const one = async (tx, sql, args = []) => (await tx.query(sql, args)).rows[0];
+const rows_ = async (tx, sql, args = []) => (await tx.query(sql, args)).rows;
 const rows = async (tx, sql, args = []) => (await tx.query(sql, args)).rows;
 const hash = value => createHash('sha256').update(value).digest('hex');
 // Privacy lifecycle messages ride the existing notification pipeline as
@@ -33,7 +34,7 @@ const notifyPlatformOps = (tx, template, data = {}) => tx.query(
 
 export const CONSENT_TYPES = ['marketing', 'partner_offers', 'optional_analytics'];
 
-export function privacyCenter(db) {
+export function privacyCenter(db, store = null) {
   return {
     // ---- consent -----------------------------------------------------------
     async consents(actor) {
@@ -292,8 +293,7 @@ export function privacyCenter(db) {
           // request marked as failed for reasons nobody would look for here.
           await tx.query(`UPDATE driver_profiles SET photo_url=NULL,id_document_reference=NULL,
             license_reference='[supprimé]',active=false WHERE user_id=$1`, [request.user_id]);
-          await tx.query(`UPDATE verification_evidence SET reference=NULL,file_url=NULL,redacted_at=now()
-            WHERE subject_user_id=$1 AND redacted_at IS NULL`, [request.user_id]);
+          await redactEvidence(tx, 'subject_user_id=$1', [request.user_id], store);
           await tx.query(`UPDATE deletion_requests SET status='completed',processed_at=now(),blockers='[]',outcome='anonymized',updated_at=now() WHERE id=$1`, [request.id]);
           await tx.query('DELETE FROM api_sessions WHERE user_id=$1', [request.user_id]);
           // The completion notice fires before the identity is gone from the
@@ -341,7 +341,47 @@ async function operatorBlockers(tx, userId) {
   return found;
 }
 
-export function retentionEngine(db) {
+/**
+ * Forget a set of evidence rows, and actually delete what they point at.
+ *
+ * The ordering matters and is the whole point. The object is removed FIRST;
+ * only then is the row's pointer cleared and the redaction dated. Do it the
+ * other way round and a failed delete leaves a document sitting in the store
+ * with nothing left in the database to find it by — LeRoutier would have
+ * recorded that it forgot something it still holds. Failing here instead means
+ * the next scan tries again, which is the honest outcome.
+ *
+ * Rows that were only ever an operator-hosted link have nothing to delete;
+ * LeRoutier never held those bytes and says so elsewhere.
+ *
+ * @param {{query:(sql:string,params?:unknown[])=>Promise<{rows:any[]}>}} tx
+ * @param {string} where SQL predicate over verification_evidence
+ * @param {unknown[]} params
+ * @param {{remove:(key:string)=>Promise<void>}|null} store
+ */
+async function redactEvidence(tx, where, params, store) {
+  const rows = await rows_(tx, `SELECT id,storage_key FROM verification_evidence
+    WHERE ${where} AND redacted_at IS NULL`, params);
+  if (!rows.length) return 0;
+  const forgotten = [];
+  for (const row of rows) {
+    if (row.storage_key) {
+      // A store that cannot be reached is a reason to try later, never a
+      // reason to claim the document is gone.
+      if (!store) continue;
+      try { await store.remove(row.storage_key); } catch { continue; }
+    }
+    forgotten.push(row.id);
+  }
+  if (!forgotten.length) return 0;
+  await tx.query(`UPDATE verification_evidence
+    SET reference=NULL,file_url=NULL,storage_key=NULL,storage_provider=NULL,
+        content_type=NULL,byte_size=NULL,redacted_at=now()
+    WHERE id=ANY($1::uuid[])`, [forgotten]);
+  return forgotten.length;
+}
+
+export function retentionEngine(db, store = null) {
   return {
     /** Active, enabled policies. */
     async policies() {
@@ -419,9 +459,10 @@ export function retentionEngine(db) {
               await tx.query(`UPDATE data_exports SET status='expired',payload='{}'::jsonb WHERE id=ANY($1::uuid[])`, [candidates.map(c => c.id)]);
             } else if (category === 'kyc_evidence') {
               // The decision survives; the copy of somebody's passport does not.
-              // kind, status, reviewed_at, reviewed_by and notes are untouched.
-              await tx.query(`UPDATE verification_evidence SET reference=NULL,file_url=NULL,redacted_at=now()
-                WHERE id=ANY($1::uuid[])`, [candidates.map(c => c.id)]);
+              // kind, status, reviewed_at, reviewed_by and notes are untouched,
+              // and where LeRoutier holds the bytes they are deleted from the
+              // store before the pointer to them is dropped.
+              await redactEvidence(tx, 'id=ANY($1::uuid[])', [candidates.map(c => c.id)], store);
             } else if (category === 'inactive_accounts') {
               await tx.query(`UPDATE users SET retention_due_at=now()+make_interval(days=>30) WHERE id=ANY($1::uuid[])`, [candidates.map(c => c.id)]);
             }

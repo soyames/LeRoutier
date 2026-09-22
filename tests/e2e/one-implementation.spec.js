@@ -9,12 +9,18 @@ import path from 'node:path';
 // duplication lives. A copy does not fail a behavioural test — it passes, twice,
 // while quietly drifting from the original.
 
-/** Every tracked .js/.jsx under a directory. */
+/**
+ * Every .js/.jsx under a directory, EXCLUDING tests.
+ *
+ * A test that names a SQL fragment or constructs a stub is not a second
+ * implementation — it is the thing proving the first one. Counting test files
+ * made the duplication assertions fire on their own coverage.
+ */
 function sources(dir) {
   const out = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) { if (entry.name !== 'node_modules') out.push(...sources(full)); }
+    if (entry.isDirectory()) { if (!['node_modules', 'tests', 'dist'].includes(entry.name)) out.push(...sources(full)); }
     else if (/\.(js|jsx)$/.test(entry.name)) out.push(full);
   }
   return out;

@@ -101,7 +101,39 @@ export function PlatformUsers(){
   </div></PlatformOnly>;
 }
 
-function EvidenceRow({operator,evidence,onReview,online}){const tone=evidence.status==='verified'?'success':evidence.status==='rejected'?'danger':'warning';return <div className="card stack" style={{padding:12}}><div className="between wrap"><div><strong>{EVIDENCE_LABELS[evidence.kind]||evidence.kind}</strong>{evidence.reference&&<p className="small muted">Référence : {evidence.reference}</p>}</div><Badge tone={tone}>{evidence.status==='verified'?'Validé':evidence.status==='rejected'?'Refusé':'À examiner'}</Badge></div>{evidence.fileUrl&&<a className="btn btn-soft" href={evidence.fileUrl} target="_blank" rel="noreferrer"><ExternalLink size={14}/>Ouvrir le justificatif</a>}<div className="controls"><button className="btn btn-primary" disabled={!online||evidence.status==='verified'} onClick={()=>onReview(operator.id,evidence.id,'verified')}>Valider ce justificatif</button><button className="btn btn-soft" disabled={!online||evidence.status==='rejected'} onClick={()=>onReview(operator.id,evidence.id,'rejected')}>Refuser</button></div></div>;}
+/**
+ * Opening one proof, at the moment the reviewer opens it.
+ *
+ * The list no longer carries document addresses at all. A permanent URL sitting
+ * in a JSON payload ends up in a browser tab, in devtools, and in anything that
+ * copies a response; asking for one grant per document keeps it out of all
+ * three, makes the request auditable, and — once LeRoutier holds the bytes —
+ * lets it expire.
+ */
+function EvidenceDocument({evidence}){
+  const {request,online}=useSession();
+  const [grant,setGrant]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+  if(!evidence.hasDocument)return <p className="small muted">Aucun document joint à ce justificatif.</p>;
+  async function open(){
+    setBusy(true);setError('');
+    try{
+      const access=await request(`/ops/evidence/${evidence.id}/access`);
+      setGrant(access);
+      // noreferrer so the document host never learns which console opened it.
+      window.open(access.url,'_blank','noopener,noreferrer');
+    }catch(e){setError(e.message);}finally{setBusy(false);}
+  }
+  return <div className="stack">
+    <button className="btn btn-soft" disabled={!online||busy} onClick={open}>
+      <ExternalLink size={14}/>{busy?'Ouverture…':'Ouvrir le justificatif'}</button>
+    {grant?.expiresAt
+      ? <p className="small muted" role="status">Accès valable quelques minutes, puis il expire. Redemandez-le si nécessaire.</p>
+      : grant && <p className="small muted" role="status">Document hébergé par l’opérateur : LeRoutier ne peut ni limiter ni retirer cet accès.</p>}
+    {error&&<p role="alert" className="small">{error}</p>}
+  </div>;
+}
+
+function EvidenceRow({operator,evidence,onReview,online}){const tone=evidence.status==='verified'?'success':evidence.status==='rejected'?'danger':'warning';return <div className="card stack" style={{padding:12}}><div className="between wrap"><div><strong>{EVIDENCE_LABELS[evidence.kind]||evidence.kind}</strong>{evidence.reference&&<p className="small muted">Référence : {evidence.reference}</p>}</div><Badge tone={tone}>{evidence.status==='verified'?'Validé':evidence.status==='rejected'?'Refusé':'À examiner'}</Badge></div><EvidenceDocument evidence={evidence}/><div className="controls"><button className="btn btn-primary" disabled={!online||evidence.status==='verified'} onClick={()=>onReview(operator.id,evidence.id,'verified')}>Valider ce justificatif</button><button className="btn btn-soft" disabled={!online||evidence.status==='rejected'} onClick={()=>onReview(operator.id,evidence.id,'rejected')}>Refuser</button></div></div>;}
 
 export function PlatformVerification(){
   const health=usePlatformHealth(),{request,online}=useSession();const [notice,setNotice]=useState(''),[error,setError]=useState('');

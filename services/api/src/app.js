@@ -26,6 +26,7 @@ import { fareIntelligence } from '@leroutier/database/fare-intelligence';
 import { commercial } from '@leroutier/database/commercial';
 import { assistantService } from './assistant.js';
 import { privacyCenter, retentionEngine } from '@leroutier/database/privacy';
+import { evidenceStore, MAX_EVIDENCE_BYTES } from '@leroutier/database/evidence-storage';
 import { journeyPlanning } from '@leroutier/database/journey-planning';
 import { mobility } from '@leroutier/database/mobility';
 import { journeys } from '@leroutier/database/journeys';
@@ -46,13 +47,19 @@ class RawResponse {
 export function createApi(db, config, keyResolver=undefined, adapter=paymentAdapter(config)) {
   const providers=notificationProviders(db,config);
   config={...config,notificationProviders:providers};
+  // Private storage for KYC/KYB documents. Null when no provider is
+  // configured, which is a supported state: the product keeps accepting
+  // operator-hosted links and keeps saying plainly that it does not hold the
+  // documents. Constructed once and passed in, so no vendor call appears
+  // anywhere outside evidence-storage.js.
+  const evidence=config.evidenceStore ?? evidenceStore(config);
   const health=operationalHealth(db);
   const fares=fareIntelligence(db);
   const commerce=commercial(db);
   const domain=transport(db), auth=authentication(db,config,keyResolver),provision=provisioning(db,config);
   const pay=payments(db,adapter),ticket=tickets(db),rating=ratings(db);
   const earn=earnings(db),payout=payouts(db,adapter,config),recover=recovery(db),parcel=parcels(db);
-  const onboard=onboarding(db),loc=locations(db),settle=operatorSettlements(db,adapter),walkUp=walkUpBookings(db);
+  const onboard=onboarding(db,evidence),loc=locations(db),settle=operatorSettlements(db,adapter),walkUp=walkUpBookings(db);
   const notify=notificationPolicies(db,config),rides=mobility(db),journey=journeys(db,config);
   const router=createRouter(config),geometry=routeGeometry(db,router),track=tracking(db,config);
   const actions=createActions({db,domain,payments:pay,payouts:payout,recovery:recover,parcels:parcel});
@@ -76,8 +83,8 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   // handed the very objects every other route uses, so a capacity check or a
   // fare it sees is the one the PWA sees.
   const ussd=createUssdEngine({db,domain,parcels:parcel,payments:pay,tracking:track,config:config.ussd ?? {}});
-  const privacy=privacyCenter(db);
-  const retention=retentionEngine(db);
+  const privacy=privacyCenter(db,evidence);
+  const retention=retentionEngine(db,evidence);
   const planner=journeyPlanning(db,{boardingBufferS:config.journey?.boardingBufferS ?? 600});
   const assistant=assistantService({db,domain,parcels:parcel,fares,health,track,privacy});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
@@ -114,6 +121,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       '/driver/walk-up-bookings': ['POST'], '/driver/actions': ['POST'],
       '/onboarding/me': ['GET'], '/onboarding/company': ['POST'], '/onboarding/independent': ['POST'],
       '/onboarding/operator': ['PATCH'], '/onboarding/evidence': ['GET'], '/ops/corridors': ['GET'],
+      '/ops/evidence-storage': ['GET'],
       '/operators': ['GET'], '/incidents': ['GET', 'POST'],
       '/boarding-points': ['GET'], '/boarding-points/proposals': ['POST'], '/mobility/providers': ['GET'],
       '/mobility/handoff': ['POST'], '/tickets/verify': ['POST'], '/workflows': ['GET'],
@@ -378,6 +386,26 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='GET' && path==='/onboarding/evidence') return onboard.dossier(actor);
     const evidenceResubmit=path.match(/^\/onboarding\/evidence\/([^/]+)$/);
     if(method==='POST' && evidenceResubmit) return onboard.resubmitEvidence(actor,evidenceResubmit[1],await body());
+    // Uploading the document itself, where LeRoutier holds the bytes. Binary,
+    // so it does not go through the JSON envelope reader — and capped before
+    // anything is read into memory.
+    const evidenceUpload=path.match(/^\/onboarding\/evidence\/([^/]+)\/file$/);
+    if(method==='POST' && evidenceUpload) {
+      const declared=Number(req.headers.get('content-length')??0);
+      invariant(!Number.isFinite(declared)||declared<=MAX_EVIDENCE_BYTES,'INVALID_EVIDENCE_FILE','Le justificatif dépasse la taille maximale de 8 Mo.',413);
+      const buffer=new Uint8Array(await req.arrayBuffer());
+      invariant(buffer.length<=MAX_EVIDENCE_BYTES,'INVALID_EVIDENCE_FILE','Le justificatif dépasse la taille maximale de 8 Mo.',413);
+      return onboard.uploadEvidence(actor,evidenceUpload[1],buffer);
+    }
+    // A reviewer opening ONE proof, at the moment they open it. The list
+    // payloads carry no document address at all, so a permanent URL never sits
+    // in a console's memory, a browser log or a copied response.
+    const evidenceAccess=path.match(/^\/ops\/evidence\/([^/]+)\/access$/);
+    if(method==='GET' && evidenceAccess) return onboard.accessEvidence(actor,evidenceAccess[1]);
+    if(method==='GET' && path==='/ops/evidence-storage') {
+      invariant(actor.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
+      return onboard.storage();
+    }
     if(method==='GET' && path==='/operators') return onboard.listOperators(actor);
     // One operator's verification evidence, on demand. The review queue only
     // carries operators awaiting a first decision, so without this a verified

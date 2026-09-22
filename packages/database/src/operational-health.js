@@ -55,8 +55,15 @@ export function operationalHealth(db) {
           d.id_document_type,d.id_document_reference,d.license_reference,d.photo_url AS driver_photo_url,d.insurance_reference,d.roadworthiness_reference,
           v.id AS vehicle_id,v.registration AS vehicle_registration,v.make AS vehicle_make,v.model AS vehicle_model,v.color AS vehicle_color,
           v.model_year AS vehicle_year,v.photo_url AS vehicle_photo_url,
-          COALESCE((SELECT json_agg(json_build_object('id',e.id,'kind',e.kind,'reference',e.reference,'fileUrl',e.file_url,'status',e.status,
-            'submittedAt',e.submitted_at,'reviewedAt',e.reviewed_at,'notes',e.notes) ORDER BY e.submitted_at,e.kind)
+          -- No document address. A review queue is a list; handing every
+          -- reviewer a permanent URL for every proof in it puts those
+          -- addresses in a JSON payload, in a browser tab, in devtools and in
+          -- anything that copies a response. The console asks for one grant
+          -- when somebody actually opens a document.
+          COALESCE((SELECT json_agg(json_build_object('id',e.id,'kind',e.kind,'reference',e.reference,
+            'hasDocument',(e.file_url IS NOT NULL OR e.storage_key IS NOT NULL),
+            'storage',CASE WHEN e.storage_key IS NOT NULL THEN 'managed' WHEN e.file_url IS NOT NULL THEN 'operator_link' ELSE 'none' END,
+            'status',e.status,'submittedAt',e.submitted_at,'reviewedAt',e.reviewed_at,'notes',e.notes) ORDER BY e.submitted_at,e.kind)
             FROM verification_evidence e WHERE e.operator_id=o.id),'[]'::json) AS evidence
           FROM operators o
           LEFT JOIN users owner ON owner.id=o.owner_user_id

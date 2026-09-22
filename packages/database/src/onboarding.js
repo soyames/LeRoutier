@@ -1,6 +1,6 @@
 import { invariant, uuid, idempotencyKey } from '@leroutier/domain';
 import { audit, activeIdentity } from './identities.js';
-import { documentReference } from './evidence-storage.js';
+import { documentReference, evidenceStorageState, EVIDENCE_READ_TTL_SECONDS } from './evidence-storage.js';
 
 const one=(tx,sql,args=[])=>(tx.query(sql,args)).then(r=>r.rows[0]);
 const optionalRef=(value,max=200)=>{
@@ -20,7 +20,13 @@ export const requiredEvidence=type=>type==='company'
   ? ['company_registration','tax_registration','legal_representative_identity','transport_authorization','registered_address']
   : ['identity','driving_license','vehicle_registration','insurance','roadworthiness','transport_authorization','driver_photo'];
 
-export function onboarding(db){
+/**
+ * @param {any} db
+ * @param {{name:string,put:Function,read:Function,remove:Function}|null} [store]
+ *   Private object storage for KYC documents. Null keeps the operator-hosted
+ *   link arrangement, which is a supported state rather than a degraded one.
+ */
+export function onboarding(db,store=null){
   async function eligible(tx,actor){
     const user=await activeIdentity(tx,actor.id);
     invariant(user.role==='passenger'&&!user.is_demo,'FORBIDDEN','This account already has an operational role.',403);
@@ -199,7 +205,122 @@ export function onboarding(db){
       });
     },
 
-    async evidence(actor,operatorId){invariant(actor?.role==='ops'&&!actor.operator_id,'FORBIDDEN','Only platform operations can review verification evidence.',403);const id=uuid(operatorId);return db.transaction(async tx=>(await tx.query(`SELECT e.*,u.display_name AS subject_name,v.registration AS vehicle_registration FROM verification_evidence e LEFT JOIN users u ON u.id=e.subject_user_id LEFT JOIN vehicles v ON v.id=e.vehicle_id WHERE e.operator_id=$1 ORDER BY e.submitted_at,e.kind`,[id])).rows);},
+    /**
+     * Storage capability, for Platform Ops and for product copy.
+     * No screen may promise managed custody while this says otherwise.
+     */
+    storage: () => evidenceStorageState(store),
+
+    /**
+     * A short-lived, authorized way to look at one proof.
+     *
+     * This replaces handing every reviewer a permanent document URL inside a
+     * list payload. Two things change even where LeRoutier does not hold the
+     * bytes: the address is fetched per document at the moment somebody opens
+     * it rather than sitting in a JSON blob in a browser tab, and the request
+     * is authorized and auditable.
+     *
+     * Where LeRoutier DOES hold the bytes the grant expires, which is the
+     * property an operator-hosted link can never have.
+     */
+    async accessEvidence(actor,evidenceId){
+      invariant(actor?.role==='ops'&&!actor.operator_id,'FORBIDDEN',
+        'Only platform operations can open verification evidence.',403);
+      const id=uuid(evidenceId);
+      const row=await db.transaction(async tx=>{
+        const found=await one(tx,'SELECT * FROM verification_evidence WHERE id=$1',[id]);
+        invariant(found,'NOT_FOUND','Verification evidence not found.',404);
+        // A redacted proof is gone on purpose. Saying "not found" here would
+        // be misleading; saying it was deleted is the truth and is what a
+        // reviewer needs in order to stop looking for it.
+        invariant(!found.redacted_at,'EVIDENCE_REDACTED',
+          'Ce justificatif a été supprimé conformément à la politique de conservation.',410);
+        // Who opened which document, and when. The trail records the decision
+        // to look, never the address that was handed out.
+        await audit(tx,actor.id,'operator.evidence_opened',found.operator_id,found.operator_id,
+          {evidenceId:found.id,kind:found.kind});
+        return found;
+      });
+      if(row.storage_key){
+        invariant(store,'EVIDENCE_STORAGE_UNAVAILABLE',
+          'Le stockage des justificatifs est indisponible. Réessayez plus tard.',503);
+        const grant=await store.read(row.storage_key,{ttlSeconds:EVIDENCE_READ_TTL_SECONDS});
+        return {kind:row.kind,storage:'managed',contentType:row.content_type,byteSize:row.byte_size,
+          url:grant.url,expiresAt:grant.expiresAt};
+      }
+      // The operator hosts this one. The address is still only handed out to an
+      // authorized reviewer, but it does not expire and LeRoutier cannot revoke
+      // it — said here so no console can imply otherwise.
+      invariant(row.file_url,'NOT_FOUND','This proof has no document attached.',404);
+      return {kind:row.kind,storage:'operator_link',contentType:null,byteSize:null,
+        url:row.file_url,expiresAt:null};
+    },
+
+    /**
+     * Replace a refused proof by uploading the document itself.
+     *
+     * The managed counterpart of resubmitEvidence: same authorization, same
+     * rules about which proofs may be replaced and when, but LeRoutier takes
+     * custody of the bytes instead of recording somebody else's link.
+     *
+     * The content type is read from the file's own first bytes, never from
+     * what the uploader claimed — an SVG announced as image/png is still a
+     * scripted page when a reviewer opens it.
+     */
+    async uploadEvidence(actor,evidenceId,bytes){
+      invariant(store,'EVIDENCE_STORAGE_UNAVAILABLE',
+        'L’envoi direct de documents n’est pas encore disponible. Fournissez un lien HTTPS.',503);
+      const id=uuid(evidenceId);
+      const evidence=await db.transaction(async tx=>{
+        const user=await activeIdentity(tx,actor.id);
+        const operator=await operatorView(tx,user);
+        invariant(operator,'NOT_FOUND','No operator membership found.',404);
+        invariant(operator.admin_user_id===user.id||operator.owner_user_id===user.id,
+          'FORBIDDEN','Only the operator owner or admin can replace a proof.',403);
+        invariant(operator.verification_status==='pending_verification','VERIFICATION_CLOSED',
+          'Ce dossier n’est plus en cours d’examen. Contactez LeRoutier.',409);
+        const found=await one(tx,'SELECT * FROM verification_evidence WHERE id=$1 AND operator_id=$2',[id,operator.id]);
+        invariant(found,'NOT_FOUND','Verification evidence not found.',404);
+        invariant(found.status==='rejected','EVIDENCE_NOT_REJECTED',
+          'Seul un justificatif refusé peut être remplacé.',409);
+        return {...found,operatorId:operator.id};
+      });
+      // Provider I/O outside the transaction: an upload can be slow, and a
+      // database transaction held open across it is a lock held across it.
+      const stored=await store.put({operatorId:evidence.operatorId,kind:evidence.kind,bytes});
+      return db.transaction(async tx=>{
+        const current=await one(tx,'SELECT storage_key FROM verification_evidence WHERE id=$1 FOR UPDATE',[id]);
+        const row=await one(tx,`UPDATE verification_evidence
+          SET storage_key=$2,storage_provider=$3,content_type=$4,byte_size=$5,file_url=NULL,
+              status='pending',submitted_at=now(),reviewed_at=NULL,reviewed_by=NULL,notes=NULL
+          WHERE id=$1 RETURNING id,kind,status,content_type,byte_size,submitted_at`,
+        [id,stored.key,store.name,stored.contentType,stored.byteSize]);
+        // The key never appears in the audit trail or the event stream: the
+        // record is that a proof was replaced, not where the document lives.
+        await audit(tx,actor.id,'operator.evidence_resubmitted',evidence.operatorId,evidence.operatorId,
+          {evidenceId:id,kind:evidence.kind,storage:'managed'});
+        // The document this one replaces is no longer referenced by anything,
+        // so it is removed rather than left paid for and forgotten.
+        if(current?.storage_key&&current.storage_key!==stored.key){
+          await store.remove(current.storage_key).catch(()=>{});
+        }
+        return row;
+      });
+    },
+    // The dossier a reviewer reads. Deliberately no file_url and no
+    // storage_key: whether a document exists is list information, and where it
+    // lives is not. Opening one goes through accessEvidence, which authorizes,
+    // audits and — under managed storage — expires.
+    async evidence(actor,operatorId){
+      invariant(actor?.role==='ops'&&!actor.operator_id,'FORBIDDEN','Only platform operations can review verification evidence.',403);
+      const id=uuid(operatorId);
+      return db.transaction(async tx=>(await tx.query(`SELECT e.id,e.kind,e.reference,e.status,e.submitted_at,e.reviewed_at,e.notes,
+        e.redacted_at,e.content_type,e.byte_size,
+        (e.file_url IS NOT NULL OR e.storage_key IS NOT NULL) AS has_document,
+        CASE WHEN e.storage_key IS NOT NULL THEN 'managed' WHEN e.file_url IS NOT NULL THEN 'operator_link' ELSE 'none' END AS storage,
+        u.display_name AS subject_name,v.registration AS vehicle_registration
+        FROM verification_evidence e LEFT JOIN users u ON u.id=e.subject_user_id LEFT JOIN vehicles v ON v.id=e.vehicle_id
+        WHERE e.operator_id=$1 ORDER BY e.submitted_at,e.kind`,[id])).rows);},
 
     /**
      * The operator's own view of its verification file.
@@ -219,7 +340,9 @@ export function onboarding(db){
         invariant(operator,'NOT_FOUND','No operator membership found.',404);
         invariant(operator.admin_user_id===user.id||operator.owner_user_id===user.id,
           'FORBIDDEN','Only the operator owner or admin can read the verification file.',403);
-        const evidence=(await tx.query(`SELECT id,kind,reference,file_url,status,submitted_at,reviewed_at,notes
+        const evidence=(await tx.query(`SELECT id,kind,reference,status,submitted_at,reviewed_at,notes,
+          (file_url IS NOT NULL OR storage_key IS NOT NULL) AS has_document,
+          CASE WHEN storage_key IS NOT NULL THEN 'managed' WHEN file_url IS NOT NULL THEN 'operator_link' ELSE 'none' END AS storage
           FROM verification_evidence WHERE operator_id=$1 ORDER BY kind`,[operator.id])).rows;
         const approved=new Set(evidence.filter(e=>e.status==='verified').map(e=>e.kind));
         const required=requiredEvidence(operator.type);

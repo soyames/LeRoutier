@@ -614,12 +614,20 @@ test('a proof link cannot be active content a reviewer would execute', async () 
   }
 });
 
-test('the platform states plainly that it does not hold these documents', async () => {
-  const { EVIDENCE_STORAGE } = await import('../src/evidence-storage.js');
-  // The flag exists so no screen and no report can imply managed custody while
-  // the documents live on hosts LeRoutier neither controls nor can revoke.
-  assert.equal(EVIDENCE_STORAGE.managed, false);
-  assert.equal(EVIDENCE_STORAGE.mode, 'operator_hosted_link');
+test('the platform states plainly whether it holds these documents', async () => {
+  const { evidenceStorageState, evidenceStore, memoryEvidenceStore } = await import('../src/evidence-storage.js');
+  // With no provider configured, nothing anywhere may imply managed custody
+  // while the documents live on hosts LeRoutier neither controls nor revokes.
+  assert.equal(evidenceStore({}), null, 'an unconfigured deployment selects no store');
+  const unmanaged = evidenceStorageState(null);
+  assert.equal(unmanaged.managed, false);
+  assert.equal(unmanaged.mode, 'operator_hosted_link');
+  assert.equal(unmanaged.provider, null);
+  // And with one, the state says so and names it.
+  const managed = evidenceStorageState(memoryEvidenceStore());
+  assert.equal(managed.managed, true);
+  assert.equal(managed.mode, 'managed_private_object_store');
+  assert.equal(managed.provider, 'memory');
 });
 
 // ------------------------------------------ telling the operator what happened --
@@ -934,4 +942,217 @@ test('the corridor catalogue is for operators, not for the public', async () => 
   });
   const crew = await db.transaction(tx => import('../src/identities.js').then(m => m.activeIdentity(tx, employee)));
   await assert.rejects(provision.corridors(crew), { code: 'FORBIDDEN' });
+});
+
+// ------------------------------------------- private evidence storage ------
+// Everything below uses generated TEST fixtures. No real identity document is
+// ever uploaded, and the store is an in-memory double that no deployment can
+// select by configuration.
+const PDF = () => Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37, 0x0A, 0x25, 0xC7, 0xEC]);
+const PNG = () => Uint8Array.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13]);
+const SVG = () => Uint8Array.from([...'<svg xmlns="http://www.w3.org/2000/svg"><script/>'].map(c => c.charCodeAt(0)));
+const HTML = () => Uint8Array.from([...'<!DOCTYPE html><html><script>alert(1)</script>'].map(c => c.charCodeAt(0)));
+
+test('a proof is identified by its own bytes, never by what the uploader claimed', async () => {
+  const { detectEvidenceType, MAX_EVIDENCE_BYTES } = await import('../src/evidence-storage.js');
+  assert.equal(detectEvidenceType(PDF()), 'application/pdf');
+  assert.equal(detectEvidenceType(PNG()), 'image/png');
+  assert.equal(detectEvidenceType(Uint8Array.from([0xFF, 0xD8, 0xFF, 0xE0])), 'image/jpeg');
+
+  // The whole attack is a declaration that does not match the bytes. An SVG
+  // announced as image/png is still a scripted page in a reviewer's browser,
+  // so the declaration is never consulted.
+  for (const [label, bytes] of [['svg', SVG()], ['html', HTML()],
+    ['empty', new Uint8Array(0)], ['random', Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8])]]) {
+    assert.throws(() => detectEvidenceType(bytes), { code: 'INVALID_EVIDENCE_FILE' }, `${label} was accepted`);
+  }
+  assert.throws(() => detectEvidenceType(new Uint8Array(MAX_EVIDENCE_BYTES + 1)), { code: 'INVALID_EVIDENCE_FILE' });
+});
+
+test('managed evidence is reachable only by an authorized reviewer, and only briefly', async () => {
+  const { onboarding } = await import('../src/onboarding.js');
+  const { memoryEvidenceStore } = await import('../src/evidence-storage.js');
+  let clock = Date.UTC(2026, 0, 1);
+  const store = memoryEvidenceStore({ now: () => clock });
+  const managed = onboarding(db, store);
+
+  const { operatorId, userId } = await onboardIndependent();
+  await reviewAll(operatorId, { reject: ['insurance'] });
+  const owner = await db.transaction(tx => import('../src/identities.js').then(m => m.activeIdentity(tx, userId)));
+  const refused = (await managed.dossier(owner)).evidence.find(e => e.kind === 'insurance');
+
+  // The operator replaces it by handing LeRoutier the document itself.
+  const uploaded = await managed.uploadEvidence(owner, refused.id, PDF());
+  assert.equal(uploaded.status, 'pending');
+  assert.equal(uploaded.content_type, 'application/pdf');
+  const row = await one('SELECT storage_key,storage_provider,file_url FROM verification_evidence WHERE id=$1', [refused.id]);
+  assert.ok(row.storage_key, 'LeRoutier holds the bytes');
+  assert.equal(row.storage_provider, 'memory');
+  assert.equal(row.file_url, null, 'and no operator-hosted link is left pointing at the old document');
+
+  // A reviewer gets a grant. Nobody else gets anything.
+  const stranger = await newPassenger('Curieux');
+  await assert.rejects(managed.accessEvidence({ id: stranger, role: 'passenger' }, refused.id), { code: 'FORBIDDEN' });
+  await assert.rejects(managed.accessEvidence(owner, refused.id), { code: 'FORBIDDEN' },
+    'not even the operator who uploaded it reads it back through the review surface');
+  await assert.rejects(managed.accessEvidence({ id: randomUUID(), role: 'ops', operator_id: randomUUID() }, refused.id),
+    { code: 'FORBIDDEN' }, 'and certainly not another operator');
+
+  const grant = await managed.accessEvidence(platformOps, refused.id);
+  assert.equal(grant.storage, 'managed');
+  assert.ok(grant.expiresAt, 'a managed grant expires; an operator link never could');
+  assert.ok(store.resolve(grant.url), 'and it works while it lasts');
+
+  // The property an operator-hosted link can never have.
+  clock += 10 * 60 * 1000;
+  assert.equal(store.resolve(grant.url), null, 'the grant stopped working');
+
+  // Opening a document is recorded. What was handed out is not.
+  const opened = await db.transaction(async tx => (await tx.query(
+    `SELECT details::text AS details FROM audit_events WHERE action='operator.evidence_opened'
+     AND details->>'evidenceId'=$1`, [refused.id])).rows);
+  assert.equal(opened.length, 1);
+  assert.ok(!opened[0].details.includes(row.storage_key), 'the object key stays out of the audit trail');
+});
+
+test('no client payload carries a document address, managed or linked', async () => {
+  const { onboarding } = await import('../src/onboarding.js');
+  const { memoryEvidenceStore } = await import('../src/evidence-storage.js');
+  const store = memoryEvidenceStore();
+  const managed = onboarding(db, store);
+  const { operatorId, userId } = await onboardIndependent();
+  await reviewAll(operatorId, { reject: ['roadworthiness'] });
+  const owner = await db.transaction(tx => import('../src/identities.js').then(m => m.activeIdentity(tx, userId)));
+  const refused = (await managed.dossier(owner)).evidence.find(e => e.kind === 'roadworthiness');
+  await managed.uploadEvidence(owner, refused.id, PNG());
+  const key = (await one('SELECT storage_key FROM verification_evidence WHERE id=$1', [refused.id])).storage_key;
+
+  // Three payloads a browser receives. None may contain a key or a URL: an
+  // address in a list ends up in a tab, in devtools, and in anything that
+  // copies a response.
+  const surfaces = {
+    'reviewer dossier': await managed.evidence(platformOps, operatorId),
+    'operator dossier': await managed.dossier(owner),
+    'review queue': (await health.read(platformOps)).kycQueue,
+  };
+  for (const [name, payload] of Object.entries(surfaces)) {
+    const text = JSON.stringify(payload);
+    assert.ok(!text.includes(key), `${name} leaked the object key`);
+    assert.ok(!/documents\.leroutier|https:\/\/documents|file_url|fileUrl/.test(text), `${name} leaked a document URL`);
+  }
+  // What they DO carry is whether a document exists and under which
+  // arrangement, which is what a console needs to draw a button.
+  const listed = surfaces['reviewer dossier'].find(e => e.kind === 'roadworthiness');
+  assert.equal(listed.has_document, true);
+  assert.equal(listed.storage, 'managed');
+});
+
+test('a redacted document is deleted from the store, and cannot be opened afterwards', async () => {
+  const { onboarding } = await import('../src/onboarding.js');
+  const { memoryEvidenceStore } = await import('../src/evidence-storage.js');
+  const { retentionEngine } = await import('../src/privacy.js');
+  const store = memoryEvidenceStore();
+  const managed = onboarding(db, store);
+  const retention = retentionEngine(db, store);
+
+  const { operatorId, userId } = await onboardIndependent();
+  await reviewAll(operatorId, { reject: ['identity'] });
+  const owner = await db.transaction(tx => import('../src/identities.js').then(m => m.activeIdentity(tx, userId)));
+  const refused = (await managed.dossier(owner)).evidence.find(e => e.kind === 'identity');
+  await managed.uploadEvidence(owner, refused.id, PDF());
+  const key = (await one('SELECT storage_key FROM verification_evidence WHERE id=$1', [refused.id])).storage_key;
+  assert.ok(store.has(key), 'the document is really there first');
+
+  // The dossier is refused and ages past the appeal window.
+  await onboard.verification(platformOps, operatorId, 'rejected');
+  await db.transaction(tx => tx.query(
+    "UPDATE operators SET created_at=now()-interval '200 days' WHERE id=$1", [operatorId]));
+  await retention.run({ execute: true });
+
+  assert.equal(store.has(key), false, 'the bytes are gone, not merely the pointer to them');
+  const after = await one('SELECT storage_key,storage_provider,redacted_at FROM verification_evidence WHERE id=$1', [refused.id]);
+  assert.equal(after.storage_key, null);
+  assert.equal(after.storage_provider, null);
+  assert.ok(after.redacted_at);
+  // And a reviewer is told it was deleted rather than left hunting for it.
+  await assert.rejects(managed.accessEvidence(platformOps, refused.id), { code: 'EVIDENCE_REDACTED' });
+});
+
+test('a store that cannot delete does not let the platform claim it forgot', async () => {
+  const { onboarding } = await import('../src/onboarding.js');
+  const { memoryEvidenceStore } = await import('../src/evidence-storage.js');
+  const { retentionEngine } = await import('../src/privacy.js');
+  const store = memoryEvidenceStore();
+  const broken = { ...store, remove: async () => { throw new Error('provider down'); } };
+  const managed = onboarding(db, store);
+
+  const { operatorId, userId } = await onboardIndependent();
+  await reviewAll(operatorId, { reject: ['driving_license'] });
+  const owner = await db.transaction(tx => import('../src/identities.js').then(m => m.activeIdentity(tx, userId)));
+  const refused = (await managed.dossier(owner)).evidence.find(e => e.kind === 'driving_license');
+  await managed.uploadEvidence(owner, refused.id, PDF());
+  await onboard.verification(platformOps, operatorId, 'rejected');
+  await db.transaction(tx => tx.query(
+    "UPDATE operators SET created_at=now()-interval '200 days' WHERE id=$1", [operatorId]));
+
+  // Clearing the row while the object survives would record that LeRoutier
+  // forgot something it still holds. Failing means the next scan tries again.
+  await retentionEngine(db, broken).run({ execute: true });
+  const stuck = await one('SELECT storage_key,redacted_at FROM verification_evidence WHERE id=$1', [refused.id]);
+  assert.ok(stuck.storage_key, 'the pointer survives a failed delete');
+  assert.equal(stuck.redacted_at, null, 'and nothing claims the document was redacted');
+
+  // With a working store the same scan completes.
+  await retentionEngine(db, store).run({ execute: true });
+  const done = await one('SELECT storage_key,redacted_at FROM verification_evidence WHERE id=$1', [refused.id]);
+  assert.equal(done.storage_key, null);
+  assert.ok(done.redacted_at);
+});
+
+test('managed upload obeys the same rules as a link replacement', async () => {
+  const { onboarding } = await import('../src/onboarding.js');
+  const { memoryEvidenceStore } = await import('../src/evidence-storage.js');
+  const store = memoryEvidenceStore();
+  const managed = onboarding(db, store);
+  const mine = await onboardIndependent();
+  const theirs = await onboardIndependent();
+  await reviewAll(mine.operatorId, { reject: ['insurance'] });
+  await reviewAll(theirs.operatorId, { reject: ['insurance'] });
+  const owner = await db.transaction(tx => import('../src/identities.js').then(m => m.activeIdentity(tx, mine.userId)));
+  const dossier = await managed.dossier(owner);
+  const refused = dossier.evidence.find(e => e.kind === 'insurance');
+  const accepted = dossier.evidence.find(e => e.kind === 'identity');
+  const foreign = (await managed.evidence(platformOps, theirs.operatorId)).find(e => e.kind === 'insurance');
+
+  await assert.rejects(managed.uploadEvidence(owner, accepted.id, PDF()), { code: 'EVIDENCE_NOT_REJECTED' });
+  await assert.rejects(managed.uploadEvidence(owner, foreign.id, PDF()), { code: 'NOT_FOUND' },
+    'another operator’s evidence id is scoped out in the WHERE clause, never a cross-tenant write');
+  await assert.rejects(managed.uploadEvidence(owner, refused.id, SVG()), { code: 'INVALID_EVIDENCE_FILE' });
+
+  // And with no store configured the upload path refuses honestly rather than
+  // pretending to take custody.
+  const unmanaged = onboarding(db, null);
+  await assert.rejects(unmanaged.uploadEvidence(owner, refused.id, PDF()), { code: 'EVIDENCE_STORAGE_UNAVAILABLE' });
+});
+
+test('replacing a managed document removes the one it replaced', async () => {
+  const { onboarding } = await import('../src/onboarding.js');
+  const { memoryEvidenceStore } = await import('../src/evidence-storage.js');
+  const store = memoryEvidenceStore();
+  const managed = onboarding(db, store);
+  const { operatorId, userId } = await onboardIndependent();
+  await reviewAll(operatorId, { reject: ['transport_authorization'] });
+  const owner = await db.transaction(tx => import('../src/identities.js').then(m => m.activeIdentity(tx, userId)));
+  const refused = (await managed.dossier(owner)).evidence.find(e => e.kind === 'transport_authorization');
+
+  await managed.uploadEvidence(owner, refused.id, PDF());
+  const first = (await one('SELECT storage_key FROM verification_evidence WHERE id=$1', [refused.id])).storage_key;
+  // A reviewer refuses it again, and the operator sends another.
+  await onboard.verification(platformOps, operatorId, { type: 'evidence', evidenceId: refused.id, status: 'rejected', notes: 'Encore illisible.' });
+  await managed.uploadEvidence(owner, refused.id, PNG());
+  const second = (await one('SELECT storage_key FROM verification_evidence WHERE id=$1', [refused.id])).storage_key;
+
+  assert.notEqual(first, second);
+  assert.equal(store.has(first), false, 'the superseded document is not left paid for and forgotten');
+  assert.equal(store.has(second), true);
 });
