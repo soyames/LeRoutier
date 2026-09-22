@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { invariant, uuid, idempotencyKey, journeySegments } from '@leroutier/domain';
-import { activeIdentity, audit } from './identities.js';
+import { activeIdentity, audit, managesOperator } from './identities.js';
 import { fareIntelligence } from './fare-intelligence.js';
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -8,11 +8,27 @@ function text(value,label,max=100){invariant(typeof value==='string' && value.tr
 function only(input,keys){invariant(input && Object.keys(input).every(k=>keys.includes(k)),'INVALID_INPUT','Unexpected fields are not allowed.');}
 const row=async(tx,sql,args=[]) => (await tx.query(sql,args)).rows[0];
 
+/**
+ * Who may provision inventory for an operator.
+ *
+ * Not simply role='ops'. An independent owner-driver is registered with
+ * role='driver' — they have to be, because a service assignment names a driver
+ * — and every provisioning mutation went through a role check they could never
+ * satisfy. The effect was a dead end at the end of the onboarding funnel: an
+ * independent operator passed KYC, was verified by a human, and then could not
+ * create a route or publish a single departure. Ever.
+ *
+ * The authority comes from OWNING the operator, not from the name of the role.
+ * For a one-person independent operator, the owner IS the operations function;
+ * for a company, operations is a separate job held by role='ops'. Both end up
+ * scoped identically, because every mutation below resolves its operator
+ * through operatorScope().
+ */
 async function opsActor(tx,actor){
   invariant(actor?.id,'FORBIDDEN','Operations access required.',403);
   await tx.query('SELECT id FROM users WHERE id=$1 FOR UPDATE',[actor.id]);
   const current=await activeIdentity(tx,actor.id);
-  invariant(current.role==='ops','FORBIDDEN','Operations access required.',403);
+  invariant(managesOperator(current),'FORBIDDEN','Operations access required.',403);
   return current;
 }
 async function operatorScope(tx,actor,id){
@@ -20,7 +36,25 @@ async function operatorScope(tx,actor,id){
   invariant(await row(tx,'SELECT id FROM operators WHERE id=$1 AND active=true',[id]),'NOT_FOUND','Operator not found.',404);
   return id;
 }
+/**
+ * Creating accounts is not part of owning a one-person operator.
+ *
+ * An independent owner-driver may provision their own inventory — vehicles,
+ * routes, departures — but never people. Letting them would let them mint an
+ * ops account inside their own operator, and that account could approve their
+ * withdrawals: requesting money and releasing it would collapse into one
+ * person, which is the separation operator-settlements exists to keep. An
+ * independent operator that genuinely needs staff is becoming a company, and
+ * that is a reviewed decision rather than a form.
+ */
+function staffingActor(current){
+  invariant(current.role==='ops','FORBIDDEN',
+    'La création de comptes est réservée à l’exploitation. Contactez LeRoutier pour ajouter du personnel.',403);
+  return current;
+}
+
 async function provisionUser(tx,actor,input,role,issuer){
+  staffingActor(actor);
   const fields=role==='driver'?['subject','displayName','operatorId','licenseReference']:['subject','displayName','operatorId'];
   only(input,fields);
   invariant(issuer,'AUTH_UNAVAILABLE','Configure the identity issuer before provisioning.',503);
@@ -89,6 +123,7 @@ export function provisioning(db,{issuer}={issuer:undefined}) {
     convoyeur:(actor,input,key)=>mutate(actor,'convoyeur',input,key,(tx,current)=>provisionUser(tx,current,input,'convoyeur',issuer)),
     opsUser:(actor,input,key)=>mutate(actor,'ops-user',input,key,(tx,current)=>provisionUser(tx,current,input,'ops',issuer)),
     userStatus(actor,id,input,key){return mutate(actor,'user-status:'+id,input,key,async(tx,current)=>{
+      staffingActor(current);
       only(input,['active']);uuid(id);invariant(typeof input.active==='boolean','INVALID_INPUT','Active must be boolean.');
       const target=await row(tx,'SELECT * FROM users WHERE id=$1 FOR UPDATE',[id]);
       invariant(target,'NOT_FOUND','User not found.',404);invariant(target.id!==current.id,'FORBIDDEN','You cannot disable yourself.',403);

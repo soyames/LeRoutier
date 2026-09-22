@@ -8,10 +8,11 @@ import { useVehicleTracking } from './vehicle-gps.js';
 import { ServiceTracking } from './tracking.jsx';
 import { ParcelDocuments } from './documents.jsx';
 import { ParcelPickup } from './parcel-pickup.jsx';
+import { Provisioning } from './provisioning.jsx';
 import { VerificationDossier } from './operator-onboarding.jsx';
 import { QrCapture } from './qr-capture.jsx';
 import { Users, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw, Package, MapPin, Navigation,
-  Wrench, HeartPulse, Ban, Fuel, Hourglass, Construction, TrafficCone, ShieldAlert } from 'lucide-react';
+  Wrench, HeartPulse, Ban, Fuel, Hourglass, Construction, TrafficCone, ShieldAlert, Radio } from 'lucide-react';
 
 // Board/alight/incident actions flow through the offline queue: the server
 // deduplicates by Idempotency-Key, so retries are always safe.
@@ -525,6 +526,43 @@ export function Vehicle(){
       <p className="small muted">{s.route_name} · statut {s.status}</p>
       {s.departure_point_name && <span className="small">Embarquement : {s.departure_point_name}{s.departure_point_landmark?` (${s.departure_point_landmark})`:''}</span>}
     </Card>
+  </>;
+}
+
+/**
+ * Publishing real inventory, for an independent owner-driver.
+ *
+ * This screen is the end of the onboarding funnel that used to have no end.
+ * Every provisioning mutation required role='ops'; an independent owner is
+ * registered with role='driver', because a service assignment names a driver.
+ * So an independent operator passed KYC, was verified by a person at LeRoutier,
+ * and then had no way to create a line or publish a single departure.
+ *
+ * Staffing forms are not offered here: an ops account minted inside a
+ * one-person operator could approve that person's own withdrawals.
+ */
+export function Departures(){
+  const {user}=useSession();
+  const fleet=useApi(user?'/ops/fleet':null);
+  const services=fleet.data?.services||[];
+  const upcoming=services.filter(x=>new Date(x.departure_at)>=new Date())
+    .sort((a,b)=>Date.parse(a.departure_at)-Date.parse(b.departure_at));
+  return <>
+    <SectionTitle icon={Radio} title="Mes lignes et départs"/>
+    {user?.verification_status!=='verified'
+      ? <Card className="stack"><Badge tone="warning">Vérification en cours</Badge>
+        <p className="small">Vous pourrez publier des départs dès que votre dossier sera validé. Préparez vos arrêts et votre ligne en attendant.</p></Card>
+      : <Card className="stack"><p className="small muted">Créez votre ligne une fois, puis publiez un départ pour chaque voyage. Les voyageurs ne voient que les départs publiés.</p></Card>}
+    <Card className="stack">
+      <h3>Départs à venir</h3>
+      {fleet.loading||fleet.error||!upcoming.length
+        ? <ApiState resource={fleet} empty="Aucun départ publié. Créez une ligne puis planifiez votre premier départ ci-dessous."/>
+        : upcoming.map(x=><div className="row" key={x.id}>
+          <span>{x.route_name} · {x.registration||'sans véhicule'}</span>
+          <span className="small muted">{new Date(x.departure_at).toLocaleString('fr-FR')} · {status('service',x.status).label}</span>
+        </div>)}
+    </Card>
+    <Provisioning staffing={false} title="Publier mon offre" onSaved={()=>fleet.reload()}/>
   </>;
 }
 

@@ -5,7 +5,7 @@ import { validateVehiclePosition, distanceMetres } from '@leroutier/geo';
 import { enqueue, channelAvailability } from '@leroutier/notifications';
 import { authentication } from './auth.js';
 import { publicAuthConfig } from '@leroutier/config';
-import { updateProfile, audit } from '@leroutier/database/identities';
+import { updateProfile, audit, managesOperator } from '@leroutier/database/identities';
 import { provisioning } from '@leroutier/database/provisioning';
 import { payments } from '@leroutier/database/payments';
 import { tickets } from '@leroutier/database/tickets';
@@ -781,7 +781,10 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
         ORDER BY b.created_at DESC LIMIT 100`,[actor.operator_id]);
     }
     if(method==='GET' && path==='/ops/fleet') {
-      invariant(actor.role==='ops','FORBIDDEN','Operations access required.',403);
+      // An independent owner-driver manages their own operator, so this is
+      // their view of their own published departures. Everything below is
+      // already scoped by actor.operator_id.
+      invariant(managesOperator(actor),'FORBIDDEN','Operations access required.',403);
       const services=await list(`SELECT s.*,r.name AS route_name,v.registration,u.display_name AS driver_name FROM services s JOIN routes r ON r.id=s.route_id
         LEFT JOIN service_assignments a ON a.service_id=s.id AND a.ended_at IS NULL LEFT JOIN vehicles v ON v.id=a.vehicle_id LEFT JOIN users u ON u.id=a.driver_id
         WHERE ($1::uuid IS NULL OR s.operator_id=$1) ORDER BY departure_at DESC LIMIT 100`,[actor.operator_id]);

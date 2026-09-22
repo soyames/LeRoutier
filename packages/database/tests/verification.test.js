@@ -737,3 +737,94 @@ test('the Platform Ops register reports activity and suspension without exposing
   }
   assert.equal(row.authenticated, true, 'presence of an external identity is reported as a boolean, not as the subject');
 });
+
+// ------------------------------------------ the end of the onboarding funnel --
+// The acceptance this suite exists for: a verified operator reaches real,
+// bookable inventory without a hidden admin step. It used to stop dead for
+// every independent driver — role='driver' could not satisfy the role='ops'
+// check every provisioning mutation ran, so an operator passed KYC, was
+// verified by a person, and could then publish nothing. Ever.
+test('a verified independent owner-driver publishes a real, bookable departure', async () => {
+  const { provisioning } = await import('../src/provisioning.js');
+  const { transport } = await import('../src/transport.js');
+  const provision = provisioning(db, { issuer: 'https://issuer.test.invalid' });
+  const search = transport(db);
+
+  const { operatorId, actor, userId } = await onboardIndependent();
+  await reviewAll(operatorId);
+  await onboard.verification(platformOps, operatorId, 'verified');
+  // The identity the API would hand to the route, not a hand-made actor.
+  const owner = await db.transaction(tx => import('../src/identities.js')
+    .then(m => m.activeIdentity(tx, userId)));
+  assert.equal(owner.role, 'driver', 'they stay a driver, because a service assignment names one');
+
+  // 1. They can read the catalogue they need to build from.
+  const catalog = await provision.catalog(owner);
+  assert.ok(catalog.vehicles.length >= 1, 'the vehicle from their dossier is there');
+  assert.ok(catalog.stops.length >= 2);
+
+  // 2. A line, with its fares.
+  const [from, to] = catalog.stops.slice(0, 2);
+  const route = await provision.route(owner, { operatorId, name: 'Ma ligne',
+    stops: [{ stopId: from.id, fareToNext: 3000 }, { stopId: to.id, fareToNext: 0 }] }, randomUUID());
+  assert.ok(route.id);
+
+  // 3. A real departure, with themselves driving it.
+  const departureAt = new Date(Date.now() + 6 * 3600_000).toISOString();
+  const service = await provision.service(owner, { routeId: route.id, vehicleId: catalog.vehicles[0].id,
+    driverId: userId, departureAt }, randomUUID());
+  assert.ok(service.id);
+
+  // 4. And a passenger can actually find and hold a seat on it. Publishing that
+  //    nobody can book is not publishing.
+  const offers = await search.search({ originStopId: from.id, destinationStopId: to.id, includeDemo: false });
+  const mine = offers.find(o => o.service_id === service.id || o.id === service.id);
+  assert.ok(mine, 'the departure reaches public search: ' + JSON.stringify(offers.map(o => o.id)));
+
+  // They still cannot create accounts: an ops account inside their own
+  // operator could approve their own withdrawals.
+  await assert.rejects(provision.opsUser(owner, { operatorId, subject: 'sub-' + randomUUID(), displayName: 'Complice' }, randomUUID()),
+    { code: 'FORBIDDEN' });
+  await assert.rejects(provision.driver(owner, { operatorId, subject: 'sub-' + randomUUID(), displayName: 'Employé', licenseReference: 'PC-1' }, randomUUID()),
+    { code: 'FORBIDDEN' });
+  // Nor create another operator, nor reach into one.
+  await assert.rejects(provision.operator(owner, { name: 'Autre', key: 'autre' }, randomUUID()), { code: 'FORBIDDEN' });
+  const other = await onboardIndependent();
+  await assert.rejects(provision.route(owner, { operatorId: other.operatorId, name: 'Vol',
+    stops: [{ stopId: from.id, fareToNext: 1 }, { stopId: to.id, fareToNext: 0 }] }, randomUUID()), { code: 'FORBIDDEN' });
+  assert.ok(actor);
+});
+
+test('an unverified operator cannot publish, and a company driver never provisions', async () => {
+  const { provisioning } = await import('../src/provisioning.js');
+  const provision = provisioning(db, { issuer: 'https://issuer.test.invalid' });
+
+  // Verification is still the gate: passing KYC is what opens publishing, and
+  // nothing else does.
+  const pending = await onboardIndependent();
+  const owner = await db.transaction(tx => import('../src/identities.js')
+    .then(m => m.activeIdentity(tx, pending.userId)));
+  const catalog = await provision.catalog(owner);
+  const [from, to] = catalog.stops.slice(0, 2);
+  const route = await provision.route(owner, { operatorId: pending.operatorId, name: 'Ligne en attente',
+    stops: [{ stopId: from.id, fareToNext: 2000 }, { stopId: to.id, fareToNext: 0 }] }, randomUUID());
+  await assert.rejects(provision.service(owner, { routeId: route.id, vehicleId: catalog.vehicles[0].id,
+    driverId: pending.userId, departureAt: new Date(Date.now() + 7200_000).toISOString() }, randomUUID()),
+  { code: 'OPERATOR_NOT_VERIFIED' });
+
+  // A company's employed driver is crew, not operations, however verified the
+  // company is.
+  const company = await onboardCompany();
+  const employee = randomUUID();
+  await db.transaction(async tx => {
+    await tx.query(`INSERT INTO users(id,display_name,role,operator_id,profile_completed_at)
+      VALUES($1,'Chauffeur Salarié','driver',$2,now())`, [employee, company.operatorId]);
+    await tx.query(`INSERT INTO driver_profiles(user_id,operator_id,license_reference,active)
+      VALUES($1,$2,'PC-SAL-1',true)`, [employee, company.operatorId]);
+  });
+  const crew = await db.transaction(tx => import('../src/identities.js')
+    .then(m => m.activeIdentity(tx, employee)));
+  await assert.rejects(provision.catalog(crew), { code: 'FORBIDDEN' });
+  await assert.rejects(provision.route(crew, { operatorId: company.operatorId, name: 'Ligne pirate',
+    stops: [{ stopId: from.id, fareToNext: 1 }, { stopId: to.id, fareToNext: 0 }] }, randomUUID()), { code: 'FORBIDDEN' });
+});

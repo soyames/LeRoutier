@@ -24,6 +24,27 @@ export async function activeIdentity(tx,id) {
   return {...user,needs_profile:user.role==='passenger' && !user.profile_completed_at && !user.is_demo};
 }
 
+/**
+ * Whether an identity runs an operator's own inventory.
+ *
+ * Two shapes qualify, and the second is the one that was missing everywhere:
+ *
+ *   role='ops'  — a company's operations staff, or Platform Ops.
+ *   role='driver' AND owner of an INDEPENDENT operator — a one-person operator
+ *   where the owner is also the driver, because a service assignment names a
+ *   driver and they have to be one.
+ *
+ * Asking for role='ops' alone read as "is this person operations", and for an
+ * independent owner the honest answer is yes: there is nobody else. Every
+ * caller still scopes to a specific operator afterwards; this only decides
+ * whether the identity manages any operator at all.
+ *
+ * @param {{role?:string,operator_type?:string,owner_user_id?:string,id?:string}} user
+ */
+export const managesOperator = user =>
+  user?.role === 'ops' ||
+  (user?.role === 'driver' && user?.operator_type === 'independent' && user?.owner_user_id === user?.id);
+
 export async function mapIdentity(db,{subject,issuer,notificationEmail=null}) {
   invariant(typeof subject==='string' && subject.length>0 && subject.length<=255,'UNAUTHORIZED','Invalid identity.',401);
   return db.transaction(async tx=>{

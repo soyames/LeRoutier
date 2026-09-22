@@ -4,7 +4,7 @@ import { AppShell, Card, Badge, SectionTitle, SessionPanel, EmptyState } from '@
 import { useSession } from '@leroutier/config/client';
 import { Trips, Tickets, Stations, Tracking, Account, Parcels as PassengerParcels, ParcelTracking, OnboardingPage, PrivacyCenter } from '@leroutier/screens/passenger';
 import { Checkout } from '@leroutier/screens/checkout';
-import { Today as CrewToday, Manifest, Scanner, WalkUp, Parcels as CrewParcels, Vehicle, Points, Earnings, Profile } from '@leroutier/screens/crew';
+import { Today as CrewToday, Manifest, Scanner, WalkUp, Parcels as CrewParcels, Vehicle, Points, Earnings, Profile, Departures } from '@leroutier/screens/crew';
 import { Today as OpsToday, Services, Fleet, Crew, Stations as OpsStations, Parcels as OpsParcels, Payments, Settlements, Incidents, Alerts, Settings } from '@leroutier/screens/ops';
 import { PlatformOverview, PlatformOperators, PlatformVerification, PlatformUsers, PlatformFinance, PlatformIncidents, PlatformSystem } from '@leroutier/screens/platform-ops';
 import { JourneyTimeline } from '@leroutier/screens/journey';
@@ -130,18 +130,18 @@ export default function App() {
     { id: 'walk-up', label: 'Comptant', icon: Wallet },
     { id: 'parcels', label: 'Colis', icon: Package },
     ...(can.role === 'driver' ? [{ id: 'vehicle', label: 'Véhicule', icon: BusFront }] : []),
-    ...(can.independent ? [{ id: 'boarding-points', label: 'Points', icon: MapPin }, { id: 'earnings', label: 'Recettes', icon: Wallet }] : []),
+    ...(can.independent ? [{ id: 'departures', label: 'Mes départs', icon: Radio }, { id: 'boarding-points', label: 'Points', icon: MapPin }, { id: 'earnings', label: 'Recettes', icon: Wallet }] : []),
     { id: 'profile', label: 'Profil', icon: UserRound },
   ];
   const workScreens = {
     today: <CrewToday/>, manifest: <Manifest/>, scanner: <Scanner/>, 'walk-up': <WalkUp/>, parcels: <CrewParcels/>,
-    vehicle: <Vehicle/>, 'boarding-points': <Points/>, earnings: <Earnings/>, profile: <Profile/>,
+    vehicle: <Vehicle/>, departures: <Departures/>, 'boarding-points': <Points/>, earnings: <Earnings/>, profile: <Profile/>,
     notifications: <NotificationCentre onOpen={to => navigate(to)}/>,
   };
   const workTitles = {
     today: can.convoyeur ? 'Service & point de service' : 'Aujourd’hui', manifest: 'Manifeste passagers',
     scanner: 'Contrôle des billets', 'walk-up': 'Vente au comptant', parcels: 'Colis & fret', vehicle: 'Véhicule',
-    'boarding-points': 'Points d’embarquement', earnings: 'Recettes & retraits', profile: 'Profil', notifications: 'Notifications',
+    departures: 'Mes lignes et départs', 'boarding-points': 'Points d’embarquement', earnings: 'Recettes & retraits', profile: 'Profil', notifications: 'Notifications',
   };
 
   const companyOpsNav = [
@@ -209,7 +209,7 @@ export default function App() {
     if (authLoading) return shell(<Card><p role="status">Vérification de votre identité…</p></Card>);
     if (!user) return shell(<SignInRequired/>);
     if (!isAuthorized(workspace, user)) return shell(<NotAuthorized workspace={workspace}/>);
-    if (workspace === WORK && ((page === 'boarding-points' && !can.independent) || (page === 'vehicle' && can.convoyeur))) {
+    if (workspace === WORK && (((page === 'boarding-points' || page === 'departures') && !can.independent) || (page === 'vehicle' && can.convoyeur))) {
       return shell(<EmptyState icon={Lock} title="Action réservée" text="Cette fonction n’est pas disponible pour votre mission."
         action={<button className="btn btn-primary" onClick={()=>navigate('/work/today')}>Revenir à mon service</button>}/>);
     }

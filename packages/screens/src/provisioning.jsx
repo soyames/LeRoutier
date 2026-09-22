@@ -31,7 +31,19 @@ function ProvisionForm({title,path,children,body,onSaved,method='POST'}){
   }
   return <details><summary>{title}</summary><form className="stack" onSubmit={submit}><fieldset disabled={busy || !online} className="stack">{children}<button className="btn btn-primary">Enregistrer</button></fieldset>{error && <p role="alert">{error}</p>}</form></details>;
 }
-export function Provisioning({onSaved=()=>{}}){
+/**
+ * Network administration.
+ *
+ * `staffing` is false for an independent owner-driver. They provision their own
+ * inventory — vehicles, lines, departures — but never accounts: an ops account
+ * minted inside their own operator could approve their own withdrawals, which
+ * is the separation the settlement ledger exists to keep. The server refuses it
+ * either way; hiding the forms means they are not offered a control that
+ * always fails.
+ *
+ * @param {{onSaved?: () => void, staffing?: boolean, title?: string}} props
+ */
+export function Provisioning({onSaved=()=>{},staffing=true,title='Administration du réseau'}){
   const {user}=useSession(),catalog=useApi(user?'/ops/provisioning':null),[operator,setOperator]=useState(''),[notice,setNotice]=useState(''),[stopCount,setStopCount]=useState(2),[fareTotal,setFareTotal]=useState(null);
   function fareInput(e){
     const values=[...e.currentTarget.querySelectorAll('input[name="fare"]')].map(i=>Number(i.value||0));
@@ -43,20 +55,20 @@ export function Provisioning({onSaved=()=>{}}){
   const saved=()=>{setNotice('Création enregistrée.');catalog.reload();onSaved();};
   const formProps={onSaved:saved};
   const scope=items=>items.filter(x=>x.operator_id===operatorId);
-  return <Card className="stack"><SectionTitle title="Administration du réseau"/>
+  return <Card className="stack"><SectionTitle title={title}/>
     {notice && <p role="status">{notice}</p>}
     {catalog.loading || catalog.error || !data?<ApiState resource={catalog}/>:<>
-      {!user.operator_id && <ProvisionForm title="Créer un opérateur" path="/ops/operators" body={f=>({name:f.get('name'),key:f.get('key')})} {...formProps}><Field label="Nom de l’opérateur" name="name" maxLength={100}/><Field label="Identifiant de l’opérateur" name="key" pattern="[a-z0-9-]+" maxLength={60}/></ProvisionForm>}
+      {!user.operator_id && staffing && <ProvisionForm title="Créer un opérateur" path="/ops/operators" body={f=>({name:f.get('name'),key:f.get('key')})} {...formProps}><Field label="Nom de l’opérateur" name="name" maxLength={100}/><Field label="Identifiant de l’opérateur" name="key" pattern="[a-z0-9-]+" maxLength={60}/></ProvisionForm>}
       <label>Opérateur<select className="control" value={operatorId || ''} onChange={e=>setOperator(e.target.value)}>{data.operators.map(o=><option value={o.id} key={o.id}>{o.name}</option>)}</select></label>
-      {operatorId && <>
+      {operatorId && staffing && <>
         <ProvisionForm title="Provisionner un conducteur" path="/ops/drivers" body={f=>({operatorId,subject:f.get('subject'),displayName:f.get('name'),licenseReference:f.get('license')})} {...formProps}>
           <p className="small muted">Utilisez l’identifiant utilisateur vérifié par votre fournisseur d’identité, jamais un mot de passe.</p><Field label="Identifiant d’identité du conducteur" name="subject" maxLength={255}/><Field label="Nom du conducteur" name="name" maxLength={100}/><Field label="Référence du permis" name="license" maxLength={100}/>
         </ProvisionForm>
         <ProvisionForm title="Provisionner un convoyeur" path="/ops/convoyeurs" body={f=>({operatorId,subject:f.get('subject'),displayName:f.get('name')})} {...formProps}><Field label="Identifiant d’identité du convoyeur" name="subject" maxLength={255}/><Field label="Nom du convoyeur" name="name" maxLength={100}/><p className="small muted">Le convoyeur contrôle les billets, vend au comptant et suit les colis : il ne conduit pas.</p></ProvisionForm>
         <ProvisionForm title="Provisionner un agent Ops" path="/ops/ops-users" body={f=>({operatorId,subject:f.get('subject'),displayName:f.get('name')})} {...formProps}><Field label="Identifiant d’identité de l’agent" name="subject" maxLength={255}/><Field label="Nom de l’agent" name="name" maxLength={100}/><p className="small muted">L’agent pourra administrer uniquement cet opérateur.</p></ProvisionForm>
         <details><summary>Comptes de l’opérateur</summary><div className="stack">{scope(data.users).map(u=><div key={u.id}><p>{u.display_name} · {u.role} · {u.active && u.driver_active!==false?'Actif':'Inactif'}</p>{u.id!==user.id && <ProvisionForm title={u.active?'Désactiver le compte':'Activer le compte'} path={`/ops/users/${u.id}/status`} method="PATCH" body={()=>({active:!u.active})} {...formProps}><p>Confirmer le changement pour {u.display_name}.</p></ProvisionForm>}</div>)}</div></details>
-        <ProvisionForm title="Ajouter un véhicule" path="/ops/vehicles" body={f=>({operatorId,registration:f.get('registration'),capacity:Number(f.get('capacity'))})} {...formProps}><Field label="Immatriculation" name="registration" maxLength={40}/><Field label="Nombre de places" name="capacity" type="number" min={1} max={100}/></ProvisionForm>
       </>}
+      {operatorId && <ProvisionForm title="Ajouter un véhicule" path="/ops/vehicles" body={f=>({operatorId,registration:f.get('registration'),capacity:Number(f.get('capacity'))})} {...formProps}><Field label="Immatriculation" name="registration" maxLength={40}/><Field label="Nombre de places" name="capacity" type="number" min={1} max={100}/></ProvisionForm>}
       <ProvisionForm title="Ajouter une localité" path="/ops/places" body={f=>({name:f.get('name'),kind:'city'})} {...formProps}><Field label="Nom de la localité" name="name" maxLength={100}/></ProvisionForm>
       <ProvisionForm title="Ajouter un arrêt" path="/ops/stops" body={f=>({name:f.get('name'),placeId:f.get('place'),latitude:Number(f.get('latitude')),longitude:Number(f.get('longitude'))})} {...formProps}><Field label="Localité" name="place" options={data.places}/><Field label="Nom de l’arrêt" name="name" maxLength={100}/><Field label="Latitude" name="latitude" type="number" step="any" min={-90} max={90}/><Field label="Longitude" name="longitude" type="number" step="any" min={-180} max={180}/></ProvisionForm>
       {operatorId && <>
