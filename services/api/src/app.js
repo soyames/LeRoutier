@@ -7,6 +7,7 @@ import { authentication } from './auth.js';
 import { publicAuthConfig } from '@leroutier/config';
 import { updateProfile, audit, managesOperator } from '@leroutier/database/identities';
 import { provisioning } from '@leroutier/database/provisioning';
+import { requirePlatform } from '@leroutier/database/platform-access';
 import { payments } from '@leroutier/database/payments';
 import { tickets } from '@leroutier/database/tickets';
 import { ratings } from '@leroutier/database/ratings';
@@ -122,6 +123,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       '/onboarding/me': ['GET'], '/onboarding/company': ['POST'], '/onboarding/independent': ['POST'],
       '/onboarding/operator': ['PATCH'], '/onboarding/evidence': ['GET'], '/ops/corridors': ['GET'],
       '/ops/evidence-storage': ['GET'],
+      '/ops/platform-team': ['GET', 'POST'], '/ops/platform-capabilities': ['GET'],
       '/operators': ['GET'], '/incidents': ['GET', 'POST'],
       '/boarding-points': ['GET'], '/boarding-points/proposals': ['POST'], '/mobility/providers': ['GET'],
       '/mobility/handoff': ['POST'], '/tickets/verify': ['POST'], '/workflows': ['GET'],
@@ -413,7 +415,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     const evidenceAccess=path.match(/^\/ops\/evidence\/([^/]+)\/access$/);
     if(method==='GET' && evidenceAccess) return onboard.accessEvidence(actor,evidenceAccess[1]);
     if(method==='GET' && path==='/ops/evidence-storage') {
-      invariant(actor.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
+      requirePlatform(actor,'verification');
       return onboard.storage();
     }
     if(method==='GET' && path==='/operators') return onboard.listOperators(actor);
@@ -593,7 +595,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     const holdPath=path.match(/^\/ops\/privacy\/holds\/([^/]+)\/release$/);
     if(method==='POST' && holdPath) return privacy.releaseHold(actor,holdPath[1]);
     if(method==='GET' && path==='/ops/privacy/requests') {
-      invariant(actor?.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
+      requirePlatform(actor,'users');
       return db.transaction(async tx=>({
         deletionRequests: await (await tx.query(`SELECT d.status,d.requested_at,d.processed_at,count(*) OVER() AS total
           FROM deletion_requests d ORDER BY d.requested_at DESC LIMIT 50`)).rows,
@@ -612,6 +614,21 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       const operations={operators:'operator',drivers:'driver',convoyeurs:'convoyeur','ops-users':'opsUser',places:'place',stops:'stop',vehicles:'vehicle',routes:'route',services:'service'};
       return provision[operations[provisionPath[1]]](actor,await body(),req.headers.get('idempotency-key'));
     }
+    // ---- LeRoutier's own staff ----------------------------------------------
+    //
+    // Separate from /ops/ops-users, which provisions a transport company's
+    // operations account inside one operator. These are platform identities:
+    // no operator, and only the authorizations they are explicitly granted.
+    if(method==='GET' && path==='/ops/platform-team') return provision.platformTeam(actor);
+    if(method==='GET' && path==='/ops/platform-capabilities') {
+      requirePlatform(actor,'provisioning');
+      return {capabilities:provision.catalogCapabilities()};
+    }
+    if(method==='POST' && path==='/ops/platform-team')
+      return provision.platformUser(actor,await body(),req.headers.get('idempotency-key'));
+    const platformGrants=path.match(/^\/ops\/platform-team\/([^/]+)\/grants$/);
+    if(method==='PUT' && platformGrants)
+      return provision.platformGrants(actor,uuid(platformGrants[1]),await body(),req.headers.get('idempotency-key'));
     const activation=path.match(/^\/ops\/users\/([^/]+)\/status$/);
     if(method==='PATCH' && activation) return provision.userStatus(actor,uuid(activation[1]),await body(),req.headers.get('idempotency-key'));
     if(method==='POST' && path==='/bookings') {
@@ -758,7 +775,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     // Model provider status. Two endpoints on purpose: usage is free to poll,
     // health costs a real (tiny) call and is therefore explicit.
     if(method==='GET' && path==='/ops/model-usage') {
-      invariant(actor.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
+      requirePlatform(actor,'system');
       return reasoning.usage();
     }
     if(method==='GET' && path==='/ops/health') { const h=await health.read(actor); return { ...h, channels: channelAvailability(config) }; }
@@ -770,7 +787,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='POST' && path==='/ops/model-health') {
       // Platform Ops only: it spends quota, so an operator admin cannot drain
       // the shared budget by refreshing a dashboard.
-      invariant(actor.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform operations access required.',403);
+      requirePlatform(actor,'system');
       await limited('model-health:'+actor.id);
       // Never the key, never the Authorization header, never the raw response.
       return reasoning.health();

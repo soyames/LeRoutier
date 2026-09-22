@@ -12,6 +12,7 @@ import {notificationDelivery} from '../src/notification-delivery.js';
 import {operationalHealth} from '../src/operational-health.js';
 import {createWorkflowEngine} from '@leroutier/agents';
 import {createApi} from '../../../services/api/src/app.js';
+import { GRANTABLE } from '../src/platform-access.js';
 const config={...serverConfig(),schema:'lr_test_'+randomUUID().replaceAll('-',''),demoLogin:true};
 const db=createDatabase(config),sql=(q,p=[])=>db.transaction(tx=>tx.query(q,p));
 let api,token;
@@ -84,5 +85,5 @@ test('workflow approval and retry are tenant isolated, including direct known ID
 test('operational health exposes aggregate signals only to Platform Ops',async()=>{
  const health=operationalHealth(db);await health.record('gps_anomaly');
  await assert.rejects(health.read({role:'ops',operator_id:demo.operator}),{code:'FORBIDDEN'});
- const result=await health.read({role:'ops'});assert.equal(result.migrations.matched,true);assert.ok(result.signals.some(s=>s.signal==='gps_anomaly'));
+ const result=await health.read({role:'ops',platform_capabilities:GRANTABLE});assert.equal(result.migrations.matched,true);assert.ok(result.signals.some(s=>s.signal==='gps_anomaly'));
 });

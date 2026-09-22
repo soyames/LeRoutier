@@ -12,6 +12,7 @@ import { earnings, payouts } from '../src/payouts.js';
 import { tickets } from '../src/tickets.js';
 import { fedapayAdapter } from '../../../services/api/src/fedapay.js';
 import { createApi } from '../../../services/api/src/app.js';
+import { GRANTABLE } from '../src/platform-access.js';
 
 // FedaPay adapter against a fake HTTP transport: no live provider calls in CI.
 // All webhook payloads are signed with the official scheme (t=...,s=...).
@@ -287,7 +288,7 @@ test('one operator can never approve, read or reconcile another operator payout'
 test('a withdrawal is reserved once: approving twice cannot pay twice',async()=>{
   const {operatorSettlements}=await import('../src/operator-settlements.js');
   const settle=operatorSettlements(db,adapter);
-  const platformOps={id:demo.ops,role:'ops',operator_id:null};
+  const platformOps={id:demo.ops,role:'ops',operator_id:null,platform_capabilities:GRANTABLE};
   const owner=await db.transaction(async tx=>{
     const id=randomUUID();
     await tx.query(`INSERT INTO users(id,display_name,role,operator_id,profile_completed_at)

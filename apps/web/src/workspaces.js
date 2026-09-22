@@ -37,6 +37,12 @@ export function workspacesFor(user) {
 
 export function capabilities(user) {
   const role = user?.role === 'convoyeur' ? 'convoyeur' : user?.role === 'driver' ? 'driver' : null;
+  const platformOps = user?.role === 'ops' && !user?.operator_id;
+  // What LeRoutier's own staff are authorized to do, as the server resolved it.
+  // Filtering navigation with this hides what somebody cannot use; it does not
+  // protect anything. Every one of these surfaces asks the API again, and the
+  // API asks the database, so a typed URL still gets a refusal.
+  const grants = platformOps && Array.isArray(user.platform_capabilities) ? user.platform_capabilities : [];
   return {
     role,
     // An independent owner-driver owns the operator: revenue is theirs. A
@@ -44,7 +50,11 @@ export function capabilities(user) {
     independent: role === 'driver' && user?.operator_type === 'independent' && user?.owner_user_id === user?.id,
     convoyeur: role === 'convoyeur',
     ops: user?.role === 'ops',
-    platformOps: user?.role === 'ops' && !user?.operator_id,
+    platformOps,
+    platformGrants: grants,
+    /** Holds a named platform authorization. False for everybody else. */
+    can: capability => grants.includes(capability),
+    superadmin: grants.includes('superadmin'),
     verified: user?.verification_status === 'verified',
   };
 }

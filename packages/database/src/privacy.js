@@ -14,6 +14,7 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import { invariant, uuid } from '@leroutier/domain';
+import { requirePlatform } from './platform-access.js';
 import { audit } from './identities.js';
 
 const one = async (tx, sql, args = []) => (await tx.query(sql, args)).rows[0];
@@ -229,7 +230,7 @@ export function privacyCenter(db, store = null) {
 
     // ---- legal holds (authorized roles only) -------------------------------
     async createHold(actor, input) {
-      invariant(actor?.role === 'ops' && !actor.operator_id, 'FORBIDDEN', 'Platform Operations access required.', 403);
+      requirePlatform(actor, 'users');
       invariant(input && ['user', 'service', 'parcel', 'payment', 'incident'].includes(input.subjectKind) &&
         typeof input.reason === 'string' && input.reason.length >= 2 && input.reason.length <= 500, 'INVALID_HOLD', 'Hold fields are invalid.', 409);
       const subject = uuid(input.subjectId);
@@ -243,7 +244,7 @@ export function privacyCenter(db, store = null) {
     },
 
     async releaseHold(actor, holdId) {
-      invariant(actor?.role === 'ops' && !actor.operator_id, 'FORBIDDEN', 'Platform Operations access required.', 403);
+      requirePlatform(actor, 'users');
       return db.transaction(async tx => {
         const row = await one(tx, 'SELECT * FROM legal_holds WHERE id=$1', [uuid(holdId)]);
         invariant(row, 'NOT_FOUND', 'Hold not found.', 404);

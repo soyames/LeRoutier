@@ -8,6 +8,7 @@
     "./crew": "./src/crew.jsx",
     "./ops": "./src/ops.jsx",
     "./platform-ops": "./src/platform-ops.jsx",
+    "./platform-team": "./src/platform-team.jsx",
     "./journey": "./src/journey.jsx",
     "./notifications": "./src/notifications.jsx",
     "./map": "./src/map.jsx",

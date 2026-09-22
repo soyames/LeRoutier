@@ -1,4 +1,5 @@
 import { invariant, uuid } from '@leroutier/domain';
+import { requirePlatform } from './platform-access.js';
 import { audit, activeIdentity } from './identities.js';
 
 // Canonical operational location registry. One normalized model serves
@@ -66,7 +67,7 @@ export function locations(db) {
     },
     // Platform moderation of proposals.
     async moderate(actor, pointId, decision) {
-      invariant(actor?.role === 'ops' && !actor.operator_id, 'FORBIDDEN', 'Only platform operations can moderate locations.', 403);
+      requirePlatform(actor, 'provisioning');
       invariant(['verified', 'rejected'].includes(decision), 'INVALID_DECISION', 'Decision must be verified or rejected.');
       return db.transaction(async tx => {
         const row = await one(tx, 'SELECT * FROM boarding_points WHERE id=$1 FOR UPDATE', [uuid(pointId)]);

@@ -79,6 +79,13 @@ export async function seedTestTransport(db) {
       ($8,'TEST Platform Ops','ops',NULL,true)
       ON CONFLICT(id) DO NOTHING`,
     [TEST.passenger, TEST.driver1, TEST.driver2, TEST.driver3, TEST.driver4, TEST.companyDriver, TEST.companyOps, TEST.opsUser, TEST.companyDriver2]);
+    // TEST Platform Ops is the superadmin of a disposable database, so the
+    // local console demonstrates every platform surface including team
+    // management. Only one superadmin can exist, which is exactly why this is
+    // safe: a dev schema never runs the bootstrap, and if somebody ever does,
+    // the unique index refuses rather than quietly creating a second owner.
+    await t.query(`INSERT INTO platform_grants(user_id,capability) VALUES($1,'superadmin')
+      ON CONFLICT DO NOTHING`, [TEST.opsUser]);
     await t.query(`INSERT INTO passenger_profiles(user_id) VALUES($1) ON CONFLICT DO NOTHING`, [TEST.passenger]);
     await t.query(`INSERT INTO operators(id,name,type,owner_user_id,is_demo,verification_status) VALUES
       ($1,'TEST Compagnie LeRoutier','company',NULL,true,'verified'),

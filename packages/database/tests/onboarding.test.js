@@ -19,6 +19,7 @@ import { walkUpBookings } from '../src/walkup.js';
 import { provisioning } from '../src/provisioning.js';
 import { bootstrap, createActions, createWorkflowEngine } from '@leroutier/agents';
 import { createApi } from '../../../services/api/src/app.js';
+import { GRANTABLE } from '../src/platform-access.js';
 
 const config={...serverConfig(),schema:'lr_test_'+randomUUID().replaceAll('-',''),demoLogin:true,issuer:'https://issuer.test.invalid'};
 const db=createDatabase(config),domain=transport(db);
@@ -85,7 +86,7 @@ before(async()=>{
   api=createApi(db,config);
   sessions={};
   for(const role of ['passenger','driver','ops']){const r=await api(new Request('http://localhost/api/v1/auth/demo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({role})}));sessions[role]=(await r.json()).data.token;}
-  platformOps={id:randomUUID(),role:'ops'};
+  platformOps={id:randomUUID(),role:'ops',platform_capabilities:GRANTABLE};
   await db.transaction(async tx=>{await tx.query("INSERT INTO users(id,display_name,role) VALUES($1,'Platform Ops','ops')",[platformOps.id]);});
   // Test identities (fixtures; production onboarding uses real OIDC subjects).
   companyUser=await newUser('passenger',{displayName:'Rep Compagnie'});

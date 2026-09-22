@@ -14,12 +14,13 @@ import { walkUpBookings } from '../src/walkup.js';
 import { locations } from '../src/locations.js';
 import { reminders } from '../src/reminders.js';
 import { createActions, createWorkflowEngine } from '@leroutier/agents';
+import { GRANTABLE } from '../src/platform-access.js';
 
 const config={...serverConfig(),schema:'lr_test_'+randomUUID().replaceAll('-',''),demoLogin:true};
 const db=createDatabase(config),domain=transport(db);
 const passenger={id:demo.passenger,role:'passenger'};
 const ops={id:demo.ops,role:'ops',operator_id:demo.operator};
-const platformOps={id:demoId(5),role:'ops'};
+const platformOps={id:demoId(5),role:'ops',platform_capabilities:GRANTABLE};
 const convoyeur={id:demoId(6),role:'convoyeur'};
 const point=demoId(300);
 const one=async(sql,args=[])=>db.transaction(async tx=>(await tx.query(sql,args)).rows[0]);

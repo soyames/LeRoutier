@@ -13,6 +13,7 @@ import { recovery } from '../src/recovery.js';
 import { parcels } from '../src/parcels.js';
 import { bootstrap, authenticate, createActions, createWorkflowEngine } from '@leroutier/agents';
 import { createApi } from '../../../services/api/src/app.js';
+import { GRANTABLE } from '../src/platform-access.js';
 
 const config={...serverConfig(),schema:'lr_test_'+randomUUID().replaceAll('-',''),demoLogin:true};
 const db=createDatabase(config),domain=transport(db);
@@ -65,7 +66,7 @@ test('payout privilege escalation is rejected for drivers and passengers',async(
 
 test('workflow approvals cannot be bypassed or decided by non-Ops actors',async()=>{
   const run=await engine.runAction(hardeningAgent,'payment.reconcile',{paymentId:randomUUID()});
-  const platformOps={...ops,operator_id:null};
+  const platformOps={...ops,operator_id:null,platform_capabilities:GRANTABLE};
   const approval=(await engine.listApprovals(platformOps))[0];
   assert.ok(approval);
   await assert.rejects(engine.approve(driver,approval.id,'approved'),{code:'FORBIDDEN'});

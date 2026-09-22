@@ -1,5 +1,6 @@
 import { invariant, uuid, idempotencyKey } from '@leroutier/domain';
 import { audit, activeIdentity } from './identities.js';
+import { requirePlatform, holds } from './platform-access.js';
 import { documentReference, evidenceStorageState, EVIDENCE_READ_TTL_SECONDS } from './evidence-storage.js';
 
 const one=(tx,sql,args=[])=>(tx.query(sql,args)).then(r=>r.rows[0]);
@@ -163,7 +164,7 @@ export function onboarding(db,store=null){
     // evidence review command. This keeps one audited platform-only control
     // surface while allowing every proof to be reviewed before final approval.
     async verification(actor,operatorId,decision){
-      invariant(actor?.role==='ops'&&!actor.operator_id,'FORBIDDEN','Only platform operations can change verification.',403);
+      requirePlatform(actor,'verification');
       const id=uuid(operatorId);
       if(decision&&typeof decision==='object'){
         invariant(decision.type==='evidence','INVALID_DECISION','Unknown verification operation.');
@@ -224,8 +225,7 @@ export function onboarding(db,store=null){
      * property an operator-hosted link can never have.
      */
     async accessEvidence(actor,evidenceId){
-      invariant(actor?.role==='ops'&&!actor.operator_id,'FORBIDDEN',
-        'Only platform operations can open verification evidence.',403);
+      requirePlatform(actor,'verification');
       const id=uuid(evidenceId);
       const row=await db.transaction(async tx=>{
         const found=await one(tx,'SELECT * FROM verification_evidence WHERE id=$1',[id]);
@@ -312,7 +312,7 @@ export function onboarding(db,store=null){
     // lives is not. Opening one goes through accessEvidence, which authorizes,
     // audits and — under managed storage — expires.
     async evidence(actor,operatorId){
-      invariant(actor?.role==='ops'&&!actor.operator_id,'FORBIDDEN','Only platform operations can review verification evidence.',403);
+      requirePlatform(actor,'verification');
       const id=uuid(operatorId);
       return db.transaction(async tx=>(await tx.query(`SELECT e.id,e.kind,e.reference,e.status,e.submitted_at,e.reviewed_at,e.notes,
         e.redacted_at,e.content_type,e.byte_size,
@@ -416,7 +416,7 @@ export function onboarding(db,store=null){
     // every passenger on the platform — satisfies that negative form and used
     // to read any operator's crew list, licence numbers included. Only the
     // operator's own management and Platform Ops may read it.
-    async members(actor,operatorId){const id=uuid(operatorId);return db.transaction(async tx=>{const user=await activeIdentity(tx,actor.id);invariant(user.role==='ops'&&(user.operator_id===id||!user.operator_id),'FORBIDDEN','Operation is not permitted.',403);return (await tx.query(`SELECT u.id,u.display_name,u.role,u.active,u.operator_id,d.license_reference,d.active AS driver_active,c.active AS convoyeur_active,o.type AS operator_type,o.verification_status,o.owner_user_id,o.admin_user_id FROM users u JOIN operators o ON o.id=u.operator_id LEFT JOIN driver_profiles d ON d.user_id=u.id LEFT JOIN convoyeur_profiles c ON c.user_id=u.id WHERE u.operator_id=$1 AND u.role IN ('ops','driver','convoyeur') ORDER BY u.display_name`,[id])).rows;});},
-    async listOperators(actor){invariant(actor?.role==='ops'&&!actor.operator_id,'FORBIDDEN','Only platform operations can list operators.',403);return db.transaction(async tx=>(await tx.query(`SELECT id,name,legal_name,type,verification_status,contact_phone,country,active,owner_user_id,admin_user_id,registration_ref,tax_reference,representative_name,representative_id_reference,transport_authorization_reference,registered_address,verified_at,verified_by,created_at FROM operators ORDER BY created_at DESC LIMIT 200`)).rows);},
+    async members(actor,operatorId){const id=uuid(operatorId);return db.transaction(async tx=>{const user=await activeIdentity(tx,actor.id);invariant(user.role==='ops'&&(user.operator_id===id||holds(user,'verification')),'FORBIDDEN','Operation is not permitted.',403);return (await tx.query(`SELECT u.id,u.display_name,u.role,u.active,u.operator_id,d.license_reference,d.active AS driver_active,c.active AS convoyeur_active,o.type AS operator_type,o.verification_status,o.owner_user_id,o.admin_user_id FROM users u JOIN operators o ON o.id=u.operator_id LEFT JOIN driver_profiles d ON d.user_id=u.id LEFT JOIN convoyeur_profiles c ON c.user_id=u.id WHERE u.operator_id=$1 AND u.role IN ('ops','driver','convoyeur') ORDER BY u.display_name`,[id])).rows;});},
+    async listOperators(actor){requirePlatform(actor,'verification');return db.transaction(async tx=>(await tx.query(`SELECT id,name,legal_name,type,verification_status,contact_phone,country,active,owner_user_id,admin_user_id,registration_ref,tax_reference,representative_name,representative_id_reference,transport_authorization_reference,registered_address,verified_at,verified_by,created_at FROM operators ORDER BY created_at DESC LIMIT 200`)).rows);},
   };
 }

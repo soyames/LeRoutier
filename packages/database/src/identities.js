@@ -1,5 +1,6 @@
 import { invariant } from '@leroutier/domain';
 import { assertRegistrationOpen } from './registration.js';
+import { platformCapabilities } from './platform-access.js';
 
 export async function audit(tx,actorId,action,entityId,operatorId=null,details={}) {
   await tx.query('INSERT INTO audit_events(actor_id,action,entity_id,operator_id,details) VALUES($1,$2,$3,$4,$5)',
@@ -21,7 +22,13 @@ export async function activeIdentity(tx,id) {
   invariant(user && user.active && (!user.operator_id || user.operator_active) &&
     (user.role!=='driver' || user.driver_active) && (user.role!=='convoyeur' || user.convoyeur_active),
   'ACCOUNT_DISABLED','This account is inactive. Contact an administrator.',403);
-  return {...user,needs_profile:user.role==='passenger' && !user.profile_completed_at && !user.is_demo};
+  // Platform capabilities are resolved HERE, on every request, so revoking a
+  // grant takes effect at the next call rather than at the next deployment or
+  // the next sign-in. Empty for everybody who is not LeRoutier staff, which is
+  // almost everybody — see platform-access.js.
+  const platform_capabilities=await platformCapabilities(tx,user);
+  return {...user,platform_capabilities,
+    needs_profile:user.role==='passenger' && !user.profile_completed_at && !user.is_demo};
 }
 
 /**

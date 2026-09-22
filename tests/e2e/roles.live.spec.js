@@ -17,7 +17,7 @@ const profiles=[
   ['Conducteur de compagnie','/work/today',['Aujourd’hui','Manifeste','Scanner','Comptant','Colis','Véhicule','Profil']],
   ['Convoyeur','/work/today',['Service','Manifeste','Scanner','Comptant','Colis','Profil']],
   ['Exploitation compagnie','/ops/today',['Aujourd’hui','Services','Flotte','Équipage','Stations','Colis','Paiements','Règlements','Incidents','Alertes','Paramètres']],
-  ['Exploitation plateforme','/ops/platform',['Vue plateforme','Opérateurs','Vérifications','Utilisateurs','Services','Colis','Incidents','Finances','Système']],
+  ['Exploitation plateforme','/ops/platform',['Vue plateforme','Opérateurs','Vérifications','Utilisateurs','Services','Colis','Incidents','Finances','Système','Administration','Équipe']],
 ];
 for(const [label,path,links] of profiles) test(`TEST ${label}: mobile login, workspace and every navigation destination`,async({page})=>{
   test.setTimeout(120_000);
@@ -215,4 +215,39 @@ test('the platform summary lays its cards out as a grid, not one per line', asyn
   const narrow=await rowsAt();
   expect(narrow.rows).toBeLessThan(narrow.cards);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);
+});
+
+
+// Platform authorizations decide what a member of LeRoutier's staff is OFFERED.
+//
+// The refusals themselves are proven against the database and the API, where
+// they are actually enforced (packages/database/tests/platform-access.test.js).
+// What this adds is the wiring: that the console reads the capabilities the
+// server resolved, and that the two destinations gated behind `provisioning`
+// exist at all. "Administration" in particular was written for Platform Ops —
+// its "Créer un opérateur" form is gated on having no operator — and was
+// unreachable for the entire life of the unified app, because the platform
+// screen map simply had no entry for it.
+test('the platform console offers the destinations the identity is authorized for', async ({page}) => {
+  await page.setViewportSize({width:1280,height:900});
+  await login(page,'Exploitation plateforme');
+
+  const labels = async () => page.getByRole('navigation').getByRole('button').allTextContents();
+  const offered = (await labels()).map(s => s.trim());
+  // The TEST platform profile is the superadmin of a disposable database, so
+  // every destination is offered — including the two that need `provisioning`.
+  for (const destination of ['Vérifications','Finances','Système','Administration','Équipe']) {
+    expect(offered, `${destination} must be offered to a superadmin`).toContain(destination);
+  }
+
+  // The team console loads, names the single seat, and says it cannot be moved.
+  await page.getByRole('navigation').getByRole('button',{name:'Équipe',exact:true}).click();
+  await expect(page.getByText('Équipe plateforme',{exact:true}).first()).toBeVisible();
+  await expect(page.getByText('Super-administrateur',{exact:true}).first()).toBeVisible();
+  await expect(page.getByText(/ne peut être ni attribué ni retiré/)).toBeVisible();
+
+  // And the provisioning screen a platform identity could never reach is there,
+  // offering the operator form written for exactly this identity shape.
+  await page.getByRole('navigation').getByRole('button',{name:'Administration',exact:true}).click();
+  await expect(page.getByText('Créer un opérateur',{exact:true})).toBeVisible();
 });

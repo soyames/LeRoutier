@@ -11,10 +11,46 @@ const fmtBytes=value=>{if(!Number.isFinite(Number(value)))return '–';const n=N
 const fmtDate=value=>value?new Date(value).toLocaleString('fr-FR'):'–';
 const authProvider=issuer=>issuer?.includes('securetoken.google.com')?'Firebase / Google':issuer?'Fournisseur externe':'Aucune identité externe';
 
-function PlatformOnly({children}){const {user}=useSession();if(!user||user.role!=='ops'||user.operator_id)return <EmptyState icon={ShieldCheck} title="Accès plateforme requis" text="Cette page est réservée à l’exploitation de la plateforme LeRoutier."/>;return children;}
+/**
+ * The platform gate, now asking for a NAMED authorization.
+ *
+ * Navigation already hides what somebody cannot open, so reaching this refusal
+ * means a typed URL, a bookmark, or a grant revoked while the tab was open —
+ * and in all three the honest answer is that the authorization is missing,
+ * not that the page is broken. The API refuses the same work regardless; this
+ * only decides what the person reads.
+ */
+function PlatformOnly({children,grant=null}){
+  const {user}=useSession();
+  if(!user||user.role!=='ops'||user.operator_id)
+    return <EmptyState icon={ShieldCheck} title="Accès plateforme requis" text="Cette page est réservée à l’exploitation de la plateforme LeRoutier."/>;
+  if(grant&&!(user.platform_capabilities??[]).includes(grant))
+    return <EmptyState icon={ShieldCheck} title="Autorisation requise"
+      text="Votre compte plateforme ne dispose pas de l’autorisation nécessaire pour cette page. Demandez-la au super-administrateur."/>;
+  return children;
+}
 function usePlatformHealth(){return useApi('/ops/health');}
 
-export function PlatformOverview(){const health=usePlatformHealth();return <PlatformOnly><div className="stack"><SectionTitle title="Vue plateforme" icon={ShieldCheck}/>{health.loading?<SkeletonCards count={3}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<><div className="stats-grid"><Card className="stat-card"><span>Utilisateurs</span><strong>{health.data.counts.users_total}</strong><small>{health.data.counts.users_authenticated} avec identité authentifiée</small></Card><Card className="stat-card"><span>Vérifications en attente</span><strong>{health.data.counts.kyc_pending}</strong><small>opérateurs à examiner</small></Card><Card className="stat-card"><span>Incidents ouverts</span><strong>{health.data.counts.incidents_open}</strong><small>toute la plateforme</small></Card><Card className="stat-card"><span>Anomalies financières</span><strong>{health.data.counts.payments_failed_total+health.data.counts.payouts_failed_total}</strong><small>paiements et versements</small></Card></div><StorageCard storage={health.data.storage}/></>}</div></PlatformOnly>;}
+export function PlatformOverview(){
+  const health=usePlatformHealth(),{user}=useSession();
+  const held=user?.platform_capabilities??[],can=capability=>held.includes(capability);
+  return <PlatformOnly><div className="stack"><SectionTitle title="Vue plateforme" icon={ShieldCheck}/>
+    {/* A platform account with no grants is a real state, not an error: it is
+        what somebody looks at between being added to the team and being given
+        anything to do. Saying so beats rendering a 403 as a broken dashboard. */}
+    {!held.length?<Card><p role="status">Votre compte plateforme ne possède encore aucune autorisation.
+      Demandez au super-administrateur les accès dont vous avez besoin.</p></Card>
+    :health.loading?<SkeletonCards count={3}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<>
+      <div className="stats-grid">
+        {can('users')&&<Card className="stat-card"><span>Utilisateurs</span><strong>{health.data.counts.users_total}</strong><small>{health.data.counts.users_authenticated} avec identité authentifiée</small></Card>}
+        {can('verification')&&<Card className="stat-card"><span>Vérifications en attente</span><strong>{health.data.counts.kyc_pending}</strong><small>opérateurs à examiner</small></Card>}
+        {can('incidents')&&<Card className="stat-card"><span>Incidents ouverts</span><strong>{health.data.counts.incidents_open}</strong><small>toute la plateforme</small></Card>}
+        {can('finance')&&<Card className="stat-card"><span>Anomalies financières</span><strong>{health.data.counts.payments_failed_total+health.data.counts.payouts_failed_total}</strong><small>paiements et versements</small></Card>}
+      </div>
+      {can('system')&&<StorageCard storage={health.data.storage}/>}
+    </>}
+  </div></PlatformOnly>;
+}
 
 /**
  * Database capacity, and whether the protection around it is actually running.
@@ -66,7 +102,7 @@ export function PlatformUsers(){
   function submit(event){event.preventDefault();setPage(0);setTerm(query.trim());}
   const data=result.data,users=data?.users||[],total=data?.total??0;
   const shown=page*size+users.length,more=shown<total;
-  return <PlatformOnly><div className="stack"><SectionTitle title="Utilisateurs & authentifications" icon={CircleUserRound}/>
+  return <PlatformOnly grant='users'><div className="stack"><SectionTitle title="Utilisateurs & authentifications" icon={CircleUserRound}/>
     <Card className="stack"><p className="small muted">Vue administrative des comptes LeRoutier. Les mots de passe, jetons Firebase et secrets d’authentification ne sont jamais exposés.</p>
       <form className="stack" onSubmit={submit}><label>Rechercher un utilisateur
         <input className="control" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Nom, e-mail, rôle, opérateur ou identifiant"/></label>
@@ -139,7 +175,7 @@ export function PlatformVerification(){
   const health=usePlatformHealth(),{request,online}=useSession();const [notice,setNotice]=useState(''),[error,setError]=useState('');
   async function decide(id,decision){setNotice('');setError('');try{await request(`/operators/${id}/verification`,{method:'POST',body:{decision}});setNotice('Décision enregistrée.');health.reload();}catch(e){setError(e.message);}}
   async function review(operatorId,evidenceId,status){await decide(operatorId,{type:'evidence',evidenceId,status});}
-  return <PlatformOnly><div className="stack"><SectionTitle title="Vérifications & KYC" icon={ShieldCheck}/>
+  return <PlatformOnly grant='verification'><div className="stack"><SectionTitle title="Vérifications & KYC" icon={ShieldCheck}/>
     <Card className="stack"><p><strong>Deux règles différentes.</strong></p><p className="small muted">Compagnie : LeRoutier vérifie l’entreprise, son représentant légal, son immatriculation, sa situation fiscale, son adresse et son autorisation de transport. Les chauffeurs salariés de cette compagnie ne fournissent pas leur pièce d’identité individuelle à LeRoutier pour cette vérification.</p><p className="small muted">Chauffeur indépendant : LeRoutier vérifie personnellement son identité, son permis, son autorisation, son assurance, son contrôle technique et son véhicule. Aucune biométrie ni validation gouvernementale automatique n’est prétendue : la décision est humaine et auditée.</p></Card>
     {notice&&<p role="status">{notice}</p>}{error&&<p role="alert">{error}</p>}
     {health.loading?<SkeletonCards count={3}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:(health.data.kycQueue||[]).length?health.data.kycQueue.map(o=>{const complete=o.evidenceComplete===true,missing=o.evidenceMissing||[];return <Card key={o.id} className="stack">
@@ -159,9 +195,9 @@ export function PlatformVerification(){
   </div></PlatformOnly>;
 }
 
-export function PlatformFinance(){const health=usePlatformHealth();return <PlatformOnly><div className="stack"><SectionTitle title="Finances & anomalies" icon={WalletCards}/>{health.loading?<SkeletonCards count={3}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<><Card className="stack"><h3>Paiements échoués</h3>{(health.data.paymentAnomalies||[]).length?health.data.paymentAnomalies.map(x=><div className="row" key={x.id}><span>{x.operator_name} · {x.amount_minor} {x.currency}</span><span>{fmtDate(x.created_at)}</span></div>):<p className="small muted">Aucun paiement échoué enregistré.</p>}</Card><Card className="stack"><h3>Versements échoués ou renversés</h3>{(health.data.payoutAnomalies||[]).length?health.data.payoutAnomalies.map(x=><div className="row" key={x.id}><span>{x.operator_name||'Opérateur'} · {x.beneficiary||'Bénéficiaire'} · {x.amount_minor} {x.currency}</span><span>{x.status} · {fmtDate(x.created_at)}</span></div>):<p className="small muted">Aucune anomalie de versement enregistrée.</p>}</Card></>}</div></PlatformOnly>;}
-export function PlatformIncidents(){const health=usePlatformHealth();return <PlatformOnly><div className="stack"><SectionTitle title="Incidents plateforme" icon={TriangleAlert}/>{health.loading?<SkeletonCards count={3}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:(health.data.incidents||[]).length?health.data.incidents.map(i=><Card key={i.id} className="stack"><div className="between wrap"><strong>{i.operator_name} · {i.kind}</strong><Badge tone={i.severity==='high'?'danger':'warning'}>{i.severity}</Badge></div><p>{i.description||'Aucune description.'}</p><p className="small muted">{i.status} · {fmtDate(i.created_at)} · service {i.service_id}</p></Card>):<EmptyState icon={TriangleAlert} title="Aucun incident ouvert" text="Les incidents actifs de tous les opérateurs apparaîtront ici."/>}</div></PlatformOnly>;}
-export function PlatformSystem(){const health=usePlatformHealth();return <PlatformOnly><div className="stack"><SectionTitle title="Système & capacité" icon={Database}/>{health.loading?<SkeletonCards count={2}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<><StorageCard storage={health.data.storage}/><Card className="stack"><strong>Base de données</strong><div className="summary"><div className="row"><span>Stockage utilisé</span><span>{fmtBytes(health.data.storage.usedBytes)}</span></div><div className="row"><span>Limite appliquée</span><span>{health.data.storage.limitBytes?fmtBytes(health.data.storage.limitBytes):'Aucune'}</span></div><div className="row"><span>Limite configurée (DATABASE_STORAGE_LIMIT_MB)</span><span>{health.data.storage.configuredLimitBytes?fmtBytes(health.data.storage.configuredLimitBytes):'Non configurée'}</span></div><div className="row"><span>Limite imposée par la base</span><span>{health.data.storage.providerLimitBytes?fmtBytes(health.data.storage.providerLimitBytes):'Non publiée'}</span></div><div className="row"><span>Utilisation</span><span>{health.data.storage.usedPercent===null?'–':`${health.data.storage.usedPercent} %`}</span></div><div className="row"><span>Seuil d’arrêt des inscriptions</span><span>{health.data.storage.registrationStopPercent} %</span></div><div className="row"><span>Protection stockage</span><span>{health.data.storage.storageProtection==='armed'?'Armée':'Non armée'}</span></div><div className="row"><span>Inscriptions</span><span>{health.data.storage.registrationsOpen?'Ouvertes':'Suspendues'}</span></div></div></Card><Card className="stack"><h3>État technique</h3><div className="summary"><div className="row"><span>Migrations</span><span>{health.data.migrations.matched?'À jour':'À vérifier'}</span></div><div className="row"><span>Notifications en échec</span><span>{health.data.counts.notification_failed}</span></div><div className="row"><span>Canaux indisponibles</span><span>{health.data.counts.notification_unavailable}</span></div><div className="row"><span>Événements à reprendre</span><span>{health.data.counts.dispatch_dead}</span></div><div className="row"><span>Échecs de routage (24h)</span><span>{health.data.counts.routing_failed}</span></div></div></Card></>}</div></PlatformOnly>;}
+export function PlatformFinance(){const health=usePlatformHealth();return <PlatformOnly grant='finance'><div className="stack"><SectionTitle title="Finances & anomalies" icon={WalletCards}/>{health.loading?<SkeletonCards count={3}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<><Card className="stack"><h3>Paiements échoués</h3>{(health.data.paymentAnomalies||[]).length?health.data.paymentAnomalies.map(x=><div className="row" key={x.id}><span>{x.operator_name} · {x.amount_minor} {x.currency}</span><span>{fmtDate(x.created_at)}</span></div>):<p className="small muted">Aucun paiement échoué enregistré.</p>}</Card><Card className="stack"><h3>Versements échoués ou renversés</h3>{(health.data.payoutAnomalies||[]).length?health.data.payoutAnomalies.map(x=><div className="row" key={x.id}><span>{x.operator_name||'Opérateur'} · {x.beneficiary||'Bénéficiaire'} · {x.amount_minor} {x.currency}</span><span>{x.status} · {fmtDate(x.created_at)}</span></div>):<p className="small muted">Aucune anomalie de versement enregistrée.</p>}</Card></>}</div></PlatformOnly>;}
+export function PlatformIncidents(){const health=usePlatformHealth();return <PlatformOnly grant='incidents'><div className="stack"><SectionTitle title="Incidents plateforme" icon={TriangleAlert}/>{health.loading?<SkeletonCards count={3}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:(health.data.incidents||[]).length?health.data.incidents.map(i=><Card key={i.id} className="stack"><div className="between wrap"><strong>{i.operator_name} · {i.kind}</strong><Badge tone={i.severity==='high'?'danger':'warning'}>{i.severity}</Badge></div><p>{i.description||'Aucune description.'}</p><p className="small muted">{i.status} · {fmtDate(i.created_at)} · service {i.service_id}</p></Card>):<EmptyState icon={TriangleAlert} title="Aucun incident ouvert" text="Les incidents actifs de tous les opérateurs apparaîtront ici."/>}</div></PlatformOnly>;}
+export function PlatformSystem(){const health=usePlatformHealth();return <PlatformOnly grant='system'><div className="stack"><SectionTitle title="Système & capacité" icon={Database}/>{health.loading?<SkeletonCards count={2}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<><StorageCard storage={health.data.storage}/><Card className="stack"><strong>Base de données</strong><div className="summary"><div className="row"><span>Stockage utilisé</span><span>{fmtBytes(health.data.storage.usedBytes)}</span></div><div className="row"><span>Limite appliquée</span><span>{health.data.storage.limitBytes?fmtBytes(health.data.storage.limitBytes):'Aucune'}</span></div><div className="row"><span>Limite configurée (DATABASE_STORAGE_LIMIT_MB)</span><span>{health.data.storage.configuredLimitBytes?fmtBytes(health.data.storage.configuredLimitBytes):'Non configurée'}</span></div><div className="row"><span>Limite imposée par la base</span><span>{health.data.storage.providerLimitBytes?fmtBytes(health.data.storage.providerLimitBytes):'Non publiée'}</span></div><div className="row"><span>Utilisation</span><span>{health.data.storage.usedPercent===null?'–':`${health.data.storage.usedPercent} %`}</span></div><div className="row"><span>Seuil d’arrêt des inscriptions</span><span>{health.data.storage.registrationStopPercent} %</span></div><div className="row"><span>Protection stockage</span><span>{health.data.storage.storageProtection==='armed'?'Armée':'Non armée'}</span></div><div className="row"><span>Inscriptions</span><span>{health.data.storage.registrationsOpen?'Ouvertes':'Suspendues'}</span></div></div></Card><Card className="stack"><h3>État technique</h3><div className="summary"><div className="row"><span>Migrations</span><span>{health.data.migrations.matched?'À jour':'À vérifier'}</span></div><div className="row"><span>Notifications en échec</span><span>{health.data.counts.notification_failed}</span></div><div className="row"><span>Canaux indisponibles</span><span>{health.data.counts.notification_unavailable}</span></div><div className="row"><span>Événements à reprendre</span><span>{health.data.counts.dispatch_dead}</span></div><div className="row"><span>Échecs de routage (24h)</span><span>{health.data.counts.routing_failed}</span></div></div></Card></>}</div></PlatformOnly>;}
 // Any operator's dossier stays re-readable, not only the ones still queued
 // for a first decision: re-opening a verified company's file is exactly what
 // oversight means. The evidence is fetched on demand rather than shipped with
@@ -179,7 +215,7 @@ function OperatorDossier({operatorId}){
 }
 export function PlatformOperators(){
   const operators=useApi('/operators');const [open,setOpen]=useState(null);
-  return <PlatformOnly><div className="stack"><SectionTitle title="Opérateurs" icon={Building2}/>
+  return <PlatformOnly grant='verification'><div className="stack"><SectionTitle title="Opérateurs" icon={Building2}/>
     {operators.loading?<SkeletonCards count={4}/>:operators.error?<Card><p role="alert">{operators.error}</p></Card>:(operators.data||[]).length?operators.data.map(o=><Card key={o.id} className="stack">
       <div className="between wrap"><div><strong>{o.name}</strong><p className="small muted">{o.type==='independent'?'Chauffeur indépendant':'Compagnie'} · {o.country?.toUpperCase()||'–'} · créé le {new Date(o.created_at).toLocaleDateString('fr-FR')}</p></div>
         <Badge tone={status('verification',o.verification_status).tone}>{status('verification',o.verification_status).label}</Badge></div>

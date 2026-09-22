@@ -16,6 +16,7 @@ import { mapIdentity } from '../src/identities.js';
 import { registrationCapacity, registrationPolicy } from '../src/registration.js';
 import { transport } from '../src/transport.js';
 import { operationalHealth } from '../src/operational-health.js';
+import { GRANTABLE } from '../src/platform-access.js';
 
 const config = { ...serverConfig(), schema: 'lr_test_' + randomUUID().replaceAll('-', ''), demoLogin: true };
 const db = createDatabase(config);
@@ -146,7 +147,7 @@ test('a closed door does not stop travelling: existing passengers still book', a
 
 test('capacity detail is Platform Ops information, and Company Ops cannot read it', async () => {
   env({ DATABASE_STORAGE_LIMIT_MB: '4096', REGISTRATION_STORAGE_STOP_PERCENT: '85' });
-  const platform = { id: demo.ops, role: 'ops', operator_id: null };
+  const platform = { id: demo.ops, role: 'ops', operator_id: null, platform_capabilities: GRANTABLE };
   const report = await health.read(platform);
   assert.equal(typeof report.storage.usedBytes, 'number');
   assert.equal(report.storage.registrationStopPercent, 85);
@@ -187,7 +188,7 @@ test('an unconfigured storage limit is reported as an unarmed protection, not as
 
 test('Platform Ops health carries the armed state, so a console cannot infer it from a null', async () => {
   env({});
-  const ops = { id: demo.platformOps ?? demo.ops, role: 'ops', operator_id: null };
+  const ops = { id: demo.platformOps ?? demo.ops, role: 'ops', operator_id: null, platform_capabilities: GRANTABLE };
   const view = await health.read(ops);
   assert.equal(view.storage.storageProtection, 'not_configured');
   // And the public never learns any of it.

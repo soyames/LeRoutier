@@ -25,6 +25,7 @@ import { onboarding } from '../src/onboarding.js';
 import { transport } from '../src/transport.js';
 import { journeyPlanning } from '../src/journey-planning.js';
 import { operationalHealth } from '../src/operational-health.js';
+import { GRANTABLE } from '../src/platform-access.js';
 
 const config = { ...serverConfig(), schema: 'lr_test_' + randomUUID().replaceAll('-', ''), demoLogin: true };
 const db = createDatabase(config);
@@ -97,7 +98,7 @@ async function reviewAll(operatorId, { reject = [], skip = [] } = {}) {
 
 before(async () => {
   await migrate(db); await seed(db);
-  platformOps = { id: randomUUID(), role: 'ops', operator_id: null };
+  platformOps = { id: randomUUID(), role: 'ops', operator_id: null, platform_capabilities: GRANTABLE };
   await db.transaction(async tx => {
     await tx.query("INSERT INTO users(id,display_name,role) VALUES($1,'Platform Ops','ops')", [platformOps.id]);
   });

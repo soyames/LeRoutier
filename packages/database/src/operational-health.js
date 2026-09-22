@@ -4,6 +4,7 @@ import {invariant} from '@leroutier/domain';
 // accounts. Two implementations would eventually disagree, and Platform Ops
 // would be reading a number that is not the one enforcing anything.
 import {registrationCapacity} from './registration.js';
+import {requirePlatform, holds, isPlatformIdentity} from './platform-access.js';
 // What a dossier must contain is a product rule, and it is decided in exactly
 // one place. The review queue reports completeness computed from THAT rule, so
 // a console can never enable "verify" for a dossier the server will refuse.
@@ -19,7 +20,18 @@ export function operationalHealth(db) {
       }).catch(()=>{});
     },
     async read(actor) {
-      invariant(actor?.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
+      // The platform dashboard is ASSEMBLED FROM WHAT THE CALLER MAY SEE, and
+      // that is not cosmetic: kycQueue carries national identity references,
+      // driving licence numbers and driver photographs. Returning it to
+      // somebody granted only `finance` would hand them a dossier the console
+      // simply declines to draw — the leak would be in the payload, which is
+      // where leaks actually live.
+      //
+      // Each section is also SKIPPED rather than fetched and discarded, so an
+      // unauthorized section costs no query at all.
+      invariant(isPlatformIdentity(actor) && (actor.platform_capabilities ?? []).length,
+        'FORBIDDEN','Platform Operations access required.',403);
+      const can=capability=>holds(actor,capability);
       const expected=(await readdir(new URL('../migrations/',import.meta.url))).filter(f=>/^\d+.*\.sql$/.test(f)).length;
       return db.transaction(async tx=>{
         const counts=(await tx.query(`SELECT
@@ -37,8 +49,8 @@ export function operationalHealth(db) {
           (SELECT count(*) FROM payments WHERE status='failed')::integer AS payments_failed_total,
           (SELECT count(*) FROM payout_requests WHERE status IN ('failed','reversed'))::integer AS payouts_failed_total,
           (SELECT count(*) FROM incidents WHERE status<>'resolved')::integer AS incidents_open`)).rows[0];
-        const signals=(await tx.query("SELECT signal,sum(count)::integer AS count FROM operational_signals WHERE minute>now()-interval '15 minutes' GROUP BY signal")).rows;
-        const capacity=await registrationCapacity(tx);
+        const signals=!can('system')?[]:(await tx.query("SELECT signal,sum(count)::integer AS count FROM operational_signals WHERE minute>now()-interval '15 minutes' GROUP BY signal")).rows;
+        const capacity=can('system')?await registrationCapacity(tx):null;
 
         // The user register is NOT returned here. Six Platform Ops screens poll
         // this endpoint, and shipping hundreds of names, e-mails and phone
@@ -49,7 +61,7 @@ export function operationalHealth(db) {
         // contains references and evidence URLs needed for manual KYC/KYB but
         // never authentication tokens/passwords. Company employees are not
         // individually KYC'd; independent owner-drivers are.
-        const kycQueue=(await tx.query(`SELECT o.id,o.name,o.legal_name,o.type,o.verification_status,o.contact_phone,o.country,o.registration_ref,o.tax_reference,
+        const kycQueue=!can('verification')?[]:(await tx.query(`SELECT o.id,o.name,o.legal_name,o.type,o.verification_status,o.contact_phone,o.country,o.registration_ref,o.tax_reference,
           o.representative_name,o.representative_id_reference,o.transport_authorization_reference,o.registered_address,o.created_at,o.verified_at,
           owner.display_name AS owner_name,admin.display_name AS admin_name,
           d.id_document_type,d.id_document_reference,d.license_reference,d.photo_url AS driver_photo_url,d.insurance_reference,d.roadworthiness_reference,
@@ -85,23 +97,38 @@ export function operationalHealth(db) {
           operator.evidenceComplete=operator.evidenceMissing.length===0 && rejected.length===0;
         }
 
-        const paymentAnomalies=(await tx.query(`SELECT p.id,p.status,p.amount_minor,p.currency,p.created_at,b.id AS booking_id,
+        const paymentAnomalies=!can('finance')?[]:(await tx.query(`SELECT p.id,p.status,p.amount_minor,p.currency,p.created_at,b.id AS booking_id,
           s.id AS service_id,o.id AS operator_id,o.name AS operator_name
           FROM payments p JOIN bookings b ON b.id=p.booking_id JOIN services s ON s.id=b.service_id JOIN operators o ON o.id=s.operator_id
           WHERE p.status='failed' ORDER BY p.created_at DESC LIMIT 100`)).rows;
-        const payoutAnomalies=(await tx.query(`SELECT r.id,r.status,r.amount_minor,r.currency,r.created_at,u.display_name AS beneficiary,
+        const payoutAnomalies=!can('finance')?[]:(await tx.query(`SELECT r.id,r.status,r.amount_minor,r.currency,r.created_at,u.display_name AS beneficiary,
           dp.operator_id,o.name AS operator_name
           FROM payout_requests r JOIN users u ON u.id=r.driver_id LEFT JOIN driver_profiles dp ON dp.user_id=r.driver_id
           LEFT JOIN operators o ON o.id=dp.operator_id
           WHERE r.status IN ('failed','reversed') ORDER BY r.created_at DESC LIMIT 100`)).rows;
-        const incidents=(await tx.query(`SELECT i.id,i.kind,i.severity,i.status,i.description,i.created_at,s.id AS service_id,
+        const incidents=!can('incidents')?[]:(await tx.query(`SELECT i.id,i.kind,i.severity,i.status,i.description,i.created_at,s.id AS service_id,
           o.id AS operator_id,o.name AS operator_name
           FROM incidents i JOIN services s ON s.id=i.service_id JOIN operators o ON o.id=s.operator_id
           WHERE i.status<>'resolved' ORDER BY i.created_at DESC LIMIT 100`)).rows;
 
-        return {database:'ok',migrations:{applied:counts.migrations,expected,matched:counts.migrations===expected},
-          signals,counts,pool:db.poolStats?.()??null,alertTransport:'internal_ops_only',
+        // Counts are filtered the same way. A number is small, but "0 anomalies
+        // financières" on the screen of somebody with no finance grant is still
+        // a fact about the platform they were not given.
+        const VISIBLE_COUNTS={users:['users_total','users_active','users_authenticated'],
+          verification:['kyc_pending'],incidents:['incidents_open'],
+          finance:['payments_failed_total','payouts_failed_total'],
+          system:['migrations','notification_failed','notification_unavailable','dispatch_dead',
+            'model_cooldowns','model_rejected','routing_failed']};
+        const visibleCounts={};
+        for(const [capability,fields] of Object.entries(VISIBLE_COUNTS))
+          if(can(capability)) for(const field of fields) visibleCounts[field]=counts[field];
+
+        return {database:'ok',
+          migrations:can('system')?{applied:counts.migrations,expected,matched:counts.migrations===expected}:null,
+          signals,counts:visibleCounts,pool:can('system')?(db.poolStats?.()??null):null,
+          alertTransport:'internal_ops_only',
           storage:capacity,
+          capabilities:actor.platform_capabilities??[],
           kycQueue,paymentAnomalies,payoutAnomalies,incidents};
       });
     },
@@ -121,7 +148,7 @@ export function operationalHealth(db) {
      * is not a reason to hand it out.
      */
     async users(actor,{q=null,limit=50,offset=0}={}) {
-      invariant(actor?.role==='ops' && !actor.operator_id,'FORBIDDEN','Platform Operations access required.',403);
+      requirePlatform(actor,'users');
       const search=typeof q==='string' && q.trim() ? q.trim().slice(0,100) : null;
       // A nonsense page size falls back to the default rather than to 1: a
       // negative number is a caller mistake, not a request for one row.

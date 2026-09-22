@@ -10,6 +10,7 @@ import {privacyCenter,retentionEngine} from '../src/privacy.js';
 import {transport} from '../src/transport.js';
 import {parcels} from '../src/parcels.js';
 import {createApi} from '../../../services/api/src/app.js';
+import { GRANTABLE } from '../src/platform-access.js';
 
 // Integrated privacy: consents, exports, deletion lifecycle, retention and
 // holds — over the same users/notifications/audit domain as everything else.
@@ -19,7 +20,7 @@ const sql=(q,p=[])=>db.transaction(tx=>tx.query(q,p));
 const one=(q,p=[])=>sql(q,p).then(r=>r.rows[0]);
 let api,privacy,retention,domain,parcel,passengerToken,secondPassenger;
 const PASSENGER={id:demo.passenger,role:'passenger'};
-const PLATFORM_OPS={id:demoId(50),role:'ops',operator_id:null};
+const PLATFORM_OPS={id:demoId(50),role:'ops',operator_id:null,platform_capabilities:GRANTABLE};
 
 before(async()=>{
   await migrate(db);await seed(db);

@@ -33,6 +33,7 @@ const PlatformUsers = lazy(() => platform().then(m => ({ default: m.PlatformUser
 const PlatformFinance = lazy(() => platform().then(m => ({ default: m.PlatformFinance })));
 const PlatformIncidents = lazy(() => platform().then(m => ({ default: m.PlatformIncidents })));
 const PlatformSystem = lazy(() => platform().then(m => ({ default: m.PlatformSystem })));
+const PlatformTeam = lazy(() => import('@leroutier/screens/platform-team').then(m => ({ default: m.PlatformTeam })));
 import { JourneyTimeline } from '@leroutier/screens/journey';
 import { JourneyTracking } from '@leroutier/screens/tracking';
 import { NotificationCentre, useUnreadCount } from '@leroutier/screens/notifications';
@@ -189,28 +190,37 @@ export default function App() {
     incidents: 'Incidents', alerts: 'Alertes & approbations', settings: 'Paramètres', notifications: 'Notifications',
   };
 
+  // Every platform destination names the authorization that opens it. This
+  // filters what is OFFERED; the API refuses the same work independently, so a
+  // typed URL or a stale bundle grants nothing.
   const platformOpsNav = [
-    { id: 'platform', label: 'Vue plateforme', icon: HomeIcon },
-    { id: 'operators', label: 'Opérateurs', icon: Building2 },
-    { id: 'verification', label: 'Vérifications', icon: ShieldCheck },
-    { id: 'users', label: 'Utilisateurs', icon: Users },
-    { id: 'services', label: 'Services', icon: Radio },
-    { id: 'parcels', label: 'Colis', icon: Package },
-    { id: 'platform-incidents', label: 'Incidents', icon: ShieldAlert },
-    { id: 'finance', label: 'Finances', icon: WalletCards },
-    { id: 'system', label: 'Système', icon: Database },
+    { id: 'platform', label: 'Vue plateforme', icon: HomeIcon, grant: null },
+    { id: 'operators', label: 'Opérateurs', icon: Building2, grant: 'verification' },
+    { id: 'verification', label: 'Vérifications', icon: ShieldCheck, grant: 'verification' },
+    { id: 'users', label: 'Utilisateurs', icon: Users, grant: 'users' },
+    { id: 'services', label: 'Services', icon: Radio, grant: 'operations' },
+    { id: 'parcels', label: 'Colis', icon: Package, grant: 'operations' },
+    { id: 'platform-incidents', label: 'Incidents', icon: ShieldAlert, grant: 'incidents' },
+    { id: 'finance', label: 'Finances', icon: WalletCards, grant: 'finance' },
+    { id: 'system', label: 'Système', icon: Database, grant: 'system' },
+    { id: 'settings', label: 'Administration', icon: SettingsIcon, grant: 'provisioning' },
+    { id: 'team', label: 'Équipe', icon: Users, grant: 'provisioning' },
   ];
   const platformOpsScreens = {
     platform: <PlatformOverview/>, operators: <PlatformOperators/>, verification: <PlatformVerification/>, users: <PlatformUsers/>,
     services: <Services/>, parcels: <OpsParcels/>, 'platform-incidents': <PlatformIncidents/>, finance: <PlatformFinance/>, system: <PlatformSystem/>,
+    settings: <Settings/>, team: <PlatformTeam/>,
     notifications: <NotificationCentre onOpen={to => navigate(to)}/>,
   };
   const platformOpsTitles = {
     platform: 'Vue plateforme', operators: 'Opérateurs', verification: 'Vérifications & KYC', users: 'Utilisateurs & authentifications',
-    services: 'Services', parcels: 'Colis', 'platform-incidents': 'Incidents plateforme', finance: 'Finances & anomalies', system: 'Système & capacité', notifications: 'Notifications',
+    services: 'Services', parcels: 'Colis', 'platform-incidents': 'Incidents plateforme', finance: 'Finances & anomalies', system: 'Système & capacité',
+    settings: 'Administration du réseau', team: 'Équipe plateforme', notifications: 'Notifications',
   };
 
-  const opsNav=can.platformOps?platformOpsNav:companyOpsNav;
+  // A destination with a `grant` is offered only to an identity holding it.
+  // `grant: null` is the landing page, offered to any platform identity.
+  const opsNav=can.platformOps?platformOpsNav.filter(item=>!item.grant||can.can(item.grant)):companyOpsNav;
   const opsScreens=can.platformOps?platformOpsScreens:companyOpsScreens;
   const opsTitles=can.platformOps?platformOpsTitles:companyOpsTitles;
   const scoped = workspace === PASSENGER ? { nav: passengerNav, screens: passengerScreens, titles: passengerTitles, prefix: '', role: 'Voyageur' }

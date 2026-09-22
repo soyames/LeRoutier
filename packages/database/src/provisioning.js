@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { invariant, uuid, idempotencyKey, journeySegments } from '@leroutier/domain';
 import { activeIdentity, audit, managesOperator } from './identities.js';
+import { requirePlatform, requireSuperadmin, normaliseCapabilities,
+  PLATFORM_CAPABILITIES } from './platform-access.js';
 import { fareIntelligence } from './fare-intelligence.js';
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -82,6 +84,24 @@ async function provisionUser(tx,actor,input,role,issuer){
   return user;
 }
 
+
+/**
+ * Replace somebody's platform authorizations.
+ *
+ * Superadmin rows are never touched. The seat is single, it came from the
+ * reviewed one-time bootstrap, and a console able to move it would make the
+ * database's unique index the only thing between a misclick and a second owner
+ * of the platform. Revoking is a DELETE, so it takes effect on the target's
+ * next request rather than at their next sign-in.
+ */
+async function applyGrants(tx,current,userId,capabilities){
+  await tx.query("DELETE FROM platform_grants WHERE user_id=$1 AND capability<>'superadmin'",[userId]);
+  for(const capability of capabilities){
+    await tx.query(`INSERT INTO platform_grants(user_id,capability,granted_by) VALUES($1,$2,$3)
+      ON CONFLICT DO NOTHING`,[userId,capability,current.id]);
+  }
+}
+
 export function provisioning(db,{issuer}={issuer:undefined}) {
   const fares = fareIntelligence(db);
   async function mutate(actor,kind,input,key,fn){
@@ -132,7 +152,7 @@ export function provisioning(db,{issuer}={issuer:undefined}) {
       };
     });},
     operator(actor,input,key){return mutate(actor,'operator',input,key,async(tx,current)=>{
-      only(input,['name','key']);invariant(!current.operator_id,'FORBIDDEN','Only platform operations can create operators.',403);
+      only(input,['name','key']);requirePlatform(current,'provisioning');
       const name=text(input.name,'Operator name'),provisioningKey=text(input.key,'Operator key',60);
       invariant(/^[a-z0-9-]+$/.test(provisioningKey),'INVALID_INPUT','Use a lowercase operator key.');
       // Platform provisioning is a reviewed human action: the operator starts
@@ -143,13 +163,84 @@ export function provisioning(db,{issuer}={issuer:undefined}) {
     driver:(actor,input,key)=>mutate(actor,'driver',input,key,(tx,current)=>provisionUser(tx,current,input,'driver',issuer)),
     convoyeur:(actor,input,key)=>mutate(actor,'convoyeur',input,key,(tx,current)=>provisionUser(tx,current,input,'convoyeur',issuer)),
     opsUser:(actor,input,key)=>mutate(actor,'ops-user',input,key,(tx,current)=>provisionUser(tx,current,input,'ops',issuer)),
+
+    /**
+     * LeRoutier's OWN staff, and the authorizations they hold.
+     *
+     * Deliberately a separate member from `opsUser`. That one provisions a
+     * transport company's operations account and requires an operator id;
+     * this one creates a platform identity, which has no operator at all. One
+     * function taking an optional operator id would mean the difference
+     * between "administers one company" and "administers LeRoutier" was a
+     * field somebody could forget to send.
+     */
+    async platformTeam(actor){return db.transaction(async tx=>{
+      const current=await opsActor(tx,actor);
+      requirePlatform(current,'provisioning');
+      return (await tx.query(`SELECT u.id,u.display_name,u.active,u.created_at,u.last_authenticated_at,
+        COALESCE((SELECT array_agg(g.capability ORDER BY g.capability)
+          FROM platform_grants g WHERE g.user_id=u.id),'{}') AS capabilities
+        FROM users u WHERE u.role='ops' AND u.operator_id IS NULL ORDER BY u.created_at`)).rows;
+    });},
+
+    /** Everything that can be granted, so a console never hard-codes the list. */
+    catalogCapabilities(){return PLATFORM_CAPABILITIES;},
+
+    platformUser(actor,input,key){return mutate(actor,'platform-user',input,key,async(tx,current)=>{
+      requireSuperadmin(current);
+      only(input,['subject','displayName','capabilities']);
+      invariant(issuer,'AUTH_UNAVAILABLE','Configure the identity issuer before provisioning.',503);
+      const subject=text(input.subject,'Identity subject',255),name=text(input.displayName,'Name');
+      const capabilities=normaliseCapabilities(input.capabilities??[]);
+      await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',['identity:'+subject]);
+      let user=await row(tx,'SELECT * FROM users WHERE auth_subject=$1 FOR UPDATE',[subject]);
+      if(user){
+        invariant(user.auth_issuer===issuer,'IDENTITY_CONFLICT','Identity is associated with another issuer.',409);
+        invariant(user.id!==current.id,'FORBIDDEN','You cannot change your own privileged account.',403);
+        // Moving an operator's staff onto the platform would silently widen
+        // somebody hired by a transport company into somebody who reviews it.
+        invariant(!user.operator_id,'FORBIDDEN','Cette identité appartient déjà à un opérateur.',403);
+        invariant(user.role==='passenger'||user.role==='ops','ROLE_CONFLICT','Use an explicit reviewed role change for this account.',409);
+        invariant(user.active,'ACCOUNT_DISABLED','Reactivate an existing account explicitly.',409);
+        user=await row(tx,`UPDATE users SET role='ops',operator_id=NULL,display_name=$2,
+          profile_completed_at=now(),updated_at=now() WHERE id=$1 RETURNING id,role,operator_id,display_name`,[user.id,name]);
+      }else{
+        user=await row(tx,`INSERT INTO users(auth_subject,auth_issuer,display_name,role,operator_id,profile_completed_at)
+          VALUES($1,$2,$3,'ops',NULL,now()) RETURNING id,role,operator_id,display_name`,[subject,issuer,name]);
+      }
+      await applyGrants(tx,current,user.id,capabilities);
+      await audit(tx,current.id,'identity.platform_provisioned',user.id,null,{capabilities});
+      return {...user,capabilities};
+    });},
+
+    platformGrants(actor,id,input,key){return mutate(actor,'platform-grants:'+id,input,key,async(tx,current)=>{
+      requireSuperadmin(current);
+      only(input,['capabilities']);uuid(id);
+      const capabilities=normaliseCapabilities(input.capabilities??[]);
+      const target=await row(tx,'SELECT * FROM users WHERE id=$1 FOR UPDATE',[id]);
+      invariant(target,'NOT_FOUND','User not found.',404);
+      invariant(target.id!==current.id,'FORBIDDEN','Vous ne pouvez pas modifier vos propres autorisations.',403);
+      invariant(target.role==='ops'&&!target.operator_id,'FORBIDDEN','Cette identité n’est pas un compte plateforme.',403);
+      await applyGrants(tx,current,id,capabilities);
+      await audit(tx,current.id,'identity.platform_grants_changed',id,null,{capabilities});
+      return {id,capabilities};
+    });},
     userStatus(actor,id,input,key){return mutate(actor,'user-status:'+id,input,key,async(tx,current)=>{
       staffingActor(current);
       only(input,['active']);uuid(id);invariant(typeof input.active==='boolean','INVALID_INPUT','Active must be boolean.');
       const target=await row(tx,'SELECT * FROM users WHERE id=$1 FOR UPDATE',[id]);
       invariant(target,'NOT_FOUND','User not found.',404);invariant(target.id!==current.id,'FORBIDDEN','You cannot disable yourself.',403);
       if(current.operator_id)invariant(target.operator_id===current.operator_id,'FORBIDDEN','Operator access denied.',403);
-      invariant(target.role!=='ops' || target.operator_id!==null,'FORBIDDEN','Platform operators require database-administrator review.',403);
+      // A platform identity may be enabled or disabled by the superadmin and by
+      // nobody else — including by another platform identity holding every other
+      // grant. The superadmin's own seat is never disabled through the API: the
+      // one account that can restore everybody else's access must not be
+      // lockable out of the console it would need to do it from.
+      if(target.role==='ops' && target.operator_id===null){
+        requireSuperadmin(current);
+        invariant(!await row(tx,"SELECT 1 FROM platform_grants WHERE user_id=$1 AND capability='superadmin'",[target.id]),
+          'FORBIDDEN','Le compte super-administrateur ne peut pas être désactivé.',403);
+      }
       if(!input.active)invariant(!await row(tx,'SELECT id FROM service_assignments WHERE driver_id=$1 AND ended_at IS NULL',[id]),'DRIVER_ASSIGNED','Reassign the active service before disabling this driver.',409);
       await tx.query('UPDATE users SET active=$2,updated_at=now() WHERE id=$1',[id,input.active]);
       if(target.role==='driver')await tx.query('UPDATE driver_profiles SET active=$2 WHERE user_id=$1',[id,input.active]);
@@ -263,6 +354,18 @@ export async function bootstrap(db,input){
     const operatorId=input.platformOps?null:operator.id;
     user=user?await row(tx,"UPDATE users SET role='ops',operator_id=$2,display_name=$3,profile_completed_at=now(),updated_at=now() WHERE id=$1 RETURNING *",[user.id,operatorId,opsName]):
       await row(tx,"INSERT INTO users(auth_subject,auth_issuer,display_name,role,operator_id,profile_completed_at) VALUES($1,$2,$3,'ops',$4,now()) RETURNING *",[opsSubject,issuer,opsName,operatorId]);
+    // A bootstrapped PLATFORM identity is the superadmin, and is granted the
+    // seat here rather than by migration 034's backfill. The backfill exists
+    // for databases that already had a platform account when capabilities were
+    // introduced; a fresh install bootstraps afterwards, and without this it
+    // would mint a platform account holding no capability whatsoever — an
+    // owner locked out of their own console by the feature meant to secure it.
+    //
+    // The unique index makes a second superadmin impossible, so a bootstrap
+    // attempted against a database that already has one fails loudly instead
+    // of quietly creating a rival.
+    if(input.platformOps)
+      await tx.query("INSERT INTO platform_grants(user_id,capability) VALUES($1,'superadmin')",[user.id]);
     await audit(tx,null,'operator.bootstrapped',operator.id,operator.id);
     await audit(tx,null,'identity.ops_bootstrapped',user.id,operatorId,{platformOps:!!input.platformOps});
     if(input.driver)await provisionUser(tx,user,{...input.driver,operatorId:operator.id},'driver',issuer);
