@@ -85,26 +85,44 @@ export function assistantService({ db, domain, parcels, fares, health, track = n
 
   // ---- tools (deterministic, identity-bound, minimal structured output) -----
   async function toolTripSearch(_actor, query) {
+    // NOT s.is_demo: the synthetic TEST inventory is not part of the public
+    // product, and naming a TEST stop to a real passenger is the same leak as
+    // offering them a TEST departure. This was invisible while a demo stop was
+    // the only stop in its city; adding a real stop per commune exposed it.
     const stops = await db.transaction(async tx => (await tx.query(
       `SELECT s.id,s.name,p.name AS city FROM stops s JOIN places p ON p.id=s.place_id
-       WHERE s.name ILIKE $1 OR p.name ILIKE $1 ORDER BY s.name LIMIT 5`, [`%${query.slice(0, 40)}%`])).rows);
+       WHERE NOT s.is_demo AND (s.name ILIKE $1 OR p.name ILIKE $1) ORDER BY s.name LIMIT 5`, [`%${query.slice(0, 40)}%`])).rows);
     if (!stops.length) return { reply: `Je n’ai trouvé aucun arrêt correspondant à « ${query.slice(0, 40)} ». Essayez le nom d’une ville comme Cotonou, Bohicon, Dassa-Zoumè ou Parakou.`, data: null };
-    if (stops.length === 1) {
-      const origin = stops[0];
-      // Departures from one stop, with the segment fare published for it.
+    // Somebody who names a town means the TOWN, not one shelter inside it.
+    // Every commune now has a stop of its own, so a city like Cotonou has
+    // several boarding points. Answering "which Cotonou did you mean?" to a
+    // question that named Cotonou is a worse answer than the departures — and
+    // picking one of its stops would hide every departure leaving from the
+    // others. So departures are searched across all stops in the named city.
+    const wanted = query.trim().toLowerCase();
+    const named = [...new Set(stops.map(s => s.city))].filter(name => String(name).toLowerCase() === wanted);
+    const group = named.length === 1 ? stops.filter(s => s.city === named[0]) : stops;
+    const label = named.length === 1 ? named[0] : (group.length === 1 ? STOP_NAME(group[0]) : null);
+    if (label) {
+      const ids = group.map(s => s.id);
       const services = await db.transaction(async tx => (await tx.query(
         `SELECT s.id,r.name AS route_name,s.departure_at,
           (SELECT ss.fare_minor FROM service_stops o JOIN service_segments ss ON ss.service_id=o.service_id AND ss.sequence=o.sequence
-           WHERE o.service_id=s.id AND o.stop_id=$1 LIMIT 1) AS fare_minor
-         FROM services s JOIN routes r ON r.id=s.route_id
+           WHERE o.service_id=s.id AND o.stop_id=ANY($1::uuid[]) LIMIT 1) AS fare_minor
+         FROM services s JOIN routes r ON r.id=s.route_id JOIN operators o ON o.id=s.operator_id
          WHERE s.status IN ('scheduled','active') AND (s.departure_at>now() OR s.status='active')
-           AND EXISTS(SELECT 1 FROM service_stops ss WHERE ss.service_id=s.id AND ss.stop_id=$1 AND ss.sequence>=s.current_sequence)
-         ORDER BY s.departure_at LIMIT 5`, [origin.id])).rows);
-      if (!services.length) return { reply: `Aucun départ programmé n’est publié depuis ${STOP_NAME(origin)} pour le moment.`, data: null };
+           -- The same two rules public search applies: no TEST inventory, and
+           -- no operator who is not verified. An assistant that answers from a
+           -- wider set than the search results is telling people about
+           -- departures they cannot book.
+           AND NOT s.is_demo AND o.verification_status='verified'
+           AND EXISTS(SELECT 1 FROM service_stops ss WHERE ss.service_id=s.id AND ss.stop_id=ANY($1::uuid[]) AND ss.sequence>=s.current_sequence)
+         ORDER BY s.departure_at LIMIT 5`, [ids])).rows);
+      if (!services.length) return { reply: `Aucun départ programmé n’est publié depuis ${label} pour le moment.`, data: null };
       const lines = services.map(s => `• ${s.route_name} — départ ${when(s.departure_at)}${s.fare_minor !== null ? `, à partir de ${MONEY(s.fare_minor)}` : ''}`).join('\n');
-      return { reply: `Départs publiés depuis ${STOP_NAME(origin)} :\n${lines}\nVérifiez les disponibilités dans l’application avant de réserver.`, data: null };
+      return { reply: `Départs publiés depuis ${label} :\n${lines}\nVérifiez les disponibilités dans l’application avant de réserver.`, data: null };
     }
-    return { reply: `Arrêts correspondants : ${stops.map(STOP_NAME).join(' · ')}. Précisez votre départ et votre destination, par exemple « Cotonou vers Parakou ».`, data: null };
+    return { reply: `Arrêts correspondants : ${group.map(STOP_NAME).join(' · ')}. Précisez votre départ et votre destination, par exemple « Cotonou vers Parakou ».`, data: null };
   }
 
   async function toolSearchBetween(_actor, match) {
@@ -113,7 +131,7 @@ export function assistantService({ db, domain, parcels, fares, health, track = n
     if (!from) return null;
     const stops = await db.transaction(async tx => (await tx.query(
       `SELECT s.id,s.name,p.name AS city FROM stops s JOIN places p ON p.id=s.place_id
-       WHERE s.name ILIKE $1 OR p.name ILIKE $1 ORDER BY s.name LIMIT 8`, [`%${from.slice(0, 40)}%`])).rows);
+       WHERE NOT s.is_demo AND (s.name ILIKE $1 OR p.name ILIKE $1) ORDER BY s.name LIMIT 8`, [`%${from.slice(0, 40)}%`])).rows);
     if (!stops.length) return null;
     const result = [];
     const destinationId = to ? (stops.find(s => s.city?.toLowerCase() === to.toLowerCase())?.id ?? null) : null;

@@ -43,9 +43,24 @@ export function createUssdEngine({ db, domain, parcels, payments, tracking, conf
 
   const rows = async (sql, args = []) => db.transaction(async tx => (await tx.query(sql, args)).rows);
 
-  /** Bookable points, labelled by city — the same stops the PWA offers. */
+  /**
+   * Points a caller can actually board from, labelled by city.
+   *
+   * Restricted to stops on an active route, and that restriction is the whole
+   * point of this query. The catalogue now carries a stop for every commune in
+   * Benin so operators can build a line without inventing geography — but a
+   * caller paying by the second to page through eighty-one communes, most of
+   * which nobody serves, is being charged to read a map. A USSD menu is a
+   * narrow window and belongs to the traveller, not to the database.
+   *
+   * If nothing is served the list is empty, and the caller is told so plainly
+   * rather than shown a country's worth of places they cannot go.
+   */
   const stops = () => rows(`SELECT s.id, s.name, p.name AS city FROM stops s
-    JOIN places p ON p.id = s.place_id ORDER BY p.name, s.name LIMIT 200`);
+    JOIN places p ON p.id = s.place_id
+    WHERE EXISTS(SELECT 1 FROM route_stops rs JOIN routes r ON r.id=rs.route_id
+      WHERE rs.stop_id = s.id AND r.active)
+    ORDER BY p.name, s.name LIMIT 200`);
 
   // A city name alone, unless the city has a stop whose name adds something —
   // "Cotonou" is what a caller is looking for, "Cotonou – Gare de Jonquet"

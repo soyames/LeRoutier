@@ -113,7 +113,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       '/driver/payouts': ['GET', 'POST'], '/driver/payout-destinations': ['GET', 'POST'],
       '/driver/walk-up-bookings': ['POST'], '/driver/actions': ['POST'],
       '/onboarding/me': ['GET'], '/onboarding/company': ['POST'], '/onboarding/independent': ['POST'],
-      '/onboarding/operator': ['PATCH'], '/onboarding/evidence': ['GET'],
+      '/onboarding/operator': ['PATCH'], '/onboarding/evidence': ['GET'], '/ops/corridors': ['GET'],
       '/operators': ['GET'], '/incidents': ['GET', 'POST'],
       '/boarding-points': ['GET'], '/boarding-points/proposals': ['POST'], '/mobility/providers': ['GET'],
       '/mobility/handoff': ['POST'], '/tickets/verify': ['POST'], '/workflows': ['GET'],
@@ -566,6 +566,9 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       }));
     }
     if(method==='GET' && path==='/ops/provisioning') return provision.catalog(actor);
+    // Known corridors, so an operator does not have to invent a road thousands
+    // of people already travel. A corridor is never a service.
+    if(method==='GET' && path==='/ops/corridors') return provision.corridors(actor);
     const provisionPath=path.match(/^\/ops\/(operators|drivers|convoyeurs|ops-users|places|stops|vehicles|routes|services)$/);
     if(method==='POST' && provisionPath) {
       const operations={operators:'operator',drivers:'driver',convoyeurs:'convoyeur','ops-users':'opsUser',places:'place',stops:'stop',vehicles:'vehicle',routes:'route',services:'service'};

@@ -97,6 +97,27 @@ export function provisioning(db,{issuer}={issuer:undefined}) {
     });
   }
   return {
+    /**
+     * Known corridors, as a starting point for a route.
+     *
+     * A corridor is a road people travel. It says nothing about whether
+     * anybody is driving it today, it belongs to no operator, and it carries
+     * no fares — adopting one pre-fills the stop sequence of a NEW route that
+     * is then entirely the operator's, fares included. A passenger never sees
+     * a corridor; only published services reach search.
+     *
+     * Public to any operator manager, because it is public knowledge: these
+     * are the roads, not anybody's commercial plan.
+     */
+    async corridors(actor){return db.transaction(async tx=>{
+      await opsActor(tx,actor);
+      return (await tx.query(`SELECT c.id,c.name,c.description,c.country_codes AS "countryCodes",
+        coalesce((SELECT json_agg(json_build_object('sequence',cs.sequence-1,'stopId',s.id,'name',s.name,'city',p.name)
+          ORDER BY cs.sequence) FROM corridor_stops cs JOIN stops s ON s.id=cs.stop_id JOIN places p ON p.id=s.place_id
+          WHERE cs.corridor_id=c.id),'[]') AS stops
+        FROM corridors c WHERE c.active ORDER BY c.name`)).rows;
+    });},
+
     async catalog(actor){return db.transaction(async tx=>{
       const current=await opsActor(tx,actor),scope=[current.operator_id];
       return {

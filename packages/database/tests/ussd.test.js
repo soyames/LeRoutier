@@ -117,7 +117,11 @@ test('trip search offers real stops and real departures', async () => {
 });
 
 test('a departure list shows the fare the domain reports, not a local guess', async () => {
-  const stops = await all(`SELECT s.id, p.name AS city FROM stops s JOIN places p ON p.id=s.place_id ORDER BY p.name, s.name`);
+  // The same list the engine offers: a caller only ever sees stops that are on
+  // an active route, not every commune in the country.
+  const stops = await all(`SELECT s.id, p.name AS city FROM stops s JOIN places p ON p.id=s.place_id
+    WHERE EXISTS(SELECT 1 FROM route_stops rs JOIN routes r ON r.id=rs.route_id WHERE rs.stop_id=s.id AND r.active)
+    ORDER BY p.name, s.name`);
   const originIndex = stops.findIndex(s => s.city === 'Cotonou');
   const destinationIndex = stops.findIndex(s => s.city === 'Parakou');
   assert.ok(originIndex >= 0 && destinationIndex >= 0, 'the seed provides the pilot corridor');
@@ -152,6 +156,7 @@ test('choosing the same stop twice is refused', async () => {
 /** Drives the flow to a created booking and returns the final screen. */
 async function bookOneSeat(options = {}) {
   const stops = await all(`SELECT s.id, p.name AS city FROM stops s JOIN places p ON p.id=s.place_id
+    WHERE EXISTS(SELECT 1 FROM route_stops rs JOIN routes r ON r.id=rs.route_id WHERE rs.stop_id=s.id AND r.active)
     ORDER BY p.name, s.name`);
   // Pick the pair the seeded service actually serves.
   const sessionId = `sess-${randomUUID()}`;

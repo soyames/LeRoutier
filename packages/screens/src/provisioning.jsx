@@ -45,6 +45,16 @@ function ProvisionForm({title,path,children,body,onSaved,method='POST'}){
  */
 export function Provisioning({onSaved=()=>{},staffing=true,title='Administration du réseau'}){
   const {user}=useSession(),catalog=useApi(user?'/ops/provisioning':null),[operator,setOperator]=useState(''),[notice,setNotice]=useState(''),[stopCount,setStopCount]=useState(2),[fareTotal,setFareTotal]=useState(null);
+  // A corridor pre-fills the stop sequence of a NEW route. It is a road, not a
+  // service: nothing here is published, nobody is driving it, and the fares
+  // below are entirely the operator's own.
+  const corridors=useApi(user?'/ops/corridors':null);
+  const [adopted,setAdopted]=useState(null);
+  function adopt(corridor){
+    setAdopted(corridor);
+    setStopCount(Math.max(2,corridor.stops.length));
+    setFareTotal(null);
+  }
   function fareInput(e){
     const values=[...e.currentTarget.querySelectorAll('input[name="fare"]')].map(i=>Number(i.value||0));
     const sum=values.reduce((a,b)=>a+b,0);
@@ -72,10 +82,19 @@ export function Provisioning({onSaved=()=>{},staffing=true,title='Administration
       <ProvisionForm title="Ajouter une localité" path="/ops/places" body={f=>({name:f.get('name'),kind:'city'})} {...formProps}><Field label="Nom de la localité" name="name" maxLength={100}/></ProvisionForm>
       <ProvisionForm title="Ajouter un arrêt" path="/ops/stops" body={f=>({name:f.get('name'),placeId:f.get('place'),latitude:Number(f.get('latitude')),longitude:Number(f.get('longitude'))})} {...formProps}><Field label="Localité" name="place" options={data.places}/><Field label="Nom de l’arrêt" name="name" maxLength={100}/><Field label="Latitude" name="latitude" type="number" step="any" min={-90} max={90}/><Field label="Longitude" name="longitude" type="number" step="any" min={-180} max={180}/></ProvisionForm>
       {operatorId && <>
+        <details><summary>Partir d’un corridor connu</summary><div className="stack">
+          <p className="small muted">Un corridor est une route que les voyageurs empruntent déjà. Le choisir pré-remplit les arrêts de votre ligne : vous pouvez ensuite en retirer, en ajouter, et vous fixez vos propres tarifs. Un corridor n’est pas un départ et n’est jamais visible des voyageurs.</p>
+          {corridors.loading||corridors.error||!corridors.data?.length
+            ? <ApiState resource={corridors} empty="Aucun corridor au catalogue."/>
+            : <div className="controls">{corridors.data.map(c=><button type="button" key={c.id}
+              className={adopted?.id===c.id?'control active':'control'} onClick={()=>adopt(c)}>
+              {c.name} · {c.stops.length} arrêts</button>)}</div>}
+          {adopted&&<p role="status" className="small">Corridor « {adopted.name} » repris : {adopted.stops.map(x=>x.city).join(' → ')}. Ajustez les arrêts et saisissez vos tarifs.</p>}
+        </div></details>
         <ProvisionForm title="Créer une ligne et ses tarifs" path="/ops/routes" body={f=>({operatorId,name:f.get('name'),stops:f.getAll('stop').map((stopId,i)=>({stopId,fareToNext:i===stopCount-1?0:Number(f.getAll('fare')[i])}))})} {...formProps}>
           <div className="stack" onInput={fareInput}>
-            <Field label="Nom de la ligne" name="name" maxLength={200}/><p className="small muted">Ajoutez les arrêts dans l’ordre du voyage. Le tarif de chaque tronçon est exprimé en FCFA.</p>
-            {Array.from({length:stopCount},(_,i)=><div className="stack" key={i}><Field label={`Arrêt ${i+1}`} name="stop" options={data.stops}/>{i<stopCount-1 && <Field label={`Tarif de l’arrêt ${i+1} au suivant`} name="fare" type="number" min={0} max={1000000}/>}</div>)}
+            <Field label="Nom de la ligne" name="name" maxLength={200} defaultValue={adopted?.name??''} key={adopted?.id??'blank'}/><p className="small muted">Ajoutez les arrêts dans l’ordre du voyage. Le tarif de chaque tronçon est exprimé en FCFA.</p>
+            {Array.from({length:stopCount},(_,i)=><div className="stack" key={(adopted?.id??'blank')+':'+i}><Field label={`Arrêt ${i+1}`} name="stop" options={data.stops} defaultValue={adopted?.stops[i]?.stopId??''}/>{i<stopCount-1 && <Field label={`Tarif de l’arrêt ${i+1} au suivant`} name="fare" type="number" min={0} max={1000000}/>}</div>)}
             <div className="controls"><button type="button" className="btn btn-soft" disabled={stopCount>=100} onClick={()=>setStopCount(n=>n+1)}>Ajouter un arrêt à la ligne</button><button type="button" className="btn btn-soft" disabled={stopCount<=2} onClick={()=>setStopCount(n=>n-1)}>Retirer le dernier arrêt</button></div>
             <FareBreakdown total={fareTotal}/>
           </div>

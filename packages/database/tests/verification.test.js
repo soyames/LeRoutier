@@ -828,3 +828,110 @@ test('an unverified operator cannot publish, and a company driver never provisio
   await assert.rejects(provision.route(crew, { operatorId: company.operatorId, name: 'Ligne pirate',
     stops: [{ stopId: from.id, fareToNext: 1 }, { stopId: to.id, fareToNext: 0 }] }, randomUUID()), { code: 'FORBIDDEN' });
 });
+
+// ------------------------------------------------------- corridor catalogue --
+// The distinction the whole table exists to protect: a corridor is a road
+// people travel. It belongs to nobody, carries no fare, and says nothing about
+// whether anybody is driving it today.
+test('a corridor is a road, never a service, and reaches no passenger', async () => {
+  const { provisioning } = await import('../src/provisioning.js');
+  const { transport } = await import('../src/transport.js');
+  const provision = provisioning(db, { issuer: 'https://issuer.test.invalid' });
+  const search = transport(db);
+
+  const { operatorId, userId } = await onboardIndependent();
+  await reviewAll(operatorId);
+  await onboard.verification(platformOps, operatorId, 'verified');
+  const owner = await db.transaction(tx => import('../src/identities.js').then(m => m.activeIdentity(tx, userId)));
+
+  const corridors = await provision.corridors(owner);
+  assert.ok(corridors.length >= 5, 'the catalogue is populated: ' + corridors.length);
+  const central = corridors.find(c => c.name === 'Cotonou → Parakou');
+  assert.ok(central, 'the corridor people actually ask for is in it');
+  assert.deepEqual(central.stops.map(s => s.city),
+    ['Cotonou', 'Allada', 'Bohicon', 'Dassa-Zoumè', 'Savè', 'Tchaourou', 'Parakou']);
+  // Sequences are zero-based and contiguous, because a route consumes them
+  // directly and journeySegments() counts from zero.
+  assert.deepEqual(central.stops.map(s => s.sequence), [0, 1, 2, 3, 4, 5, 6]);
+
+  // A corridor carries no fare and no operator. Those are the route's, and the
+  // route does not exist until somebody creates one.
+  const text = JSON.stringify(central);
+  for (const leak of ['fare', 'price', 'operator', 'departure', 'vehicle']) {
+    assert.ok(!text.toLowerCase().includes(leak), `a corridor must not carry ${leak}`);
+  }
+  // Nothing in the catalogue is bookable. Adopting one changes that only once
+  // a real departure is published.
+  const offers = await search.search({ originStopId: central.stops[0].stopId,
+    destinationStopId: central.stops.at(-1).stopId, includeDemo: false });
+  assert.equal(offers.length, 0, 'a known road is not an offer: ' + JSON.stringify(offers));
+});
+
+test('adopting a corridor produces the operator’s own route, with the operator’s own fares', async () => {
+  const { provisioning } = await import('../src/provisioning.js');
+  const provision = provisioning(db, { issuer: 'https://issuer.test.invalid' });
+  const { operatorId, userId } = await onboardIndependent();
+  await reviewAll(operatorId);
+  await onboard.verification(platformOps, operatorId, 'verified');
+  const owner = await db.transaction(tx => import('../src/identities.js').then(m => m.activeIdentity(tx, userId)));
+
+  const corridor = (await provision.corridors(owner)).find(c => c.name === 'Cotonou → Lokossa');
+  assert.ok(corridor);
+  // The operator takes the sequence, drops a stop they do not serve, and sets
+  // their own prices. None of that touches the catalogue.
+  const kept = corridor.stops.filter(s => s.city !== 'Comè');
+  const route = await provision.route(owner, { operatorId, name: 'Cotonou – Lokossa direct',
+    stops: kept.map((s, i) => ({ stopId: s.stopId, fareToNext: i === kept.length - 1 ? 0 : 2500 })) }, randomUUID());
+
+  const stored = await db.transaction(async tx => (await tx.query(
+    `SELECT rs.sequence,p.name AS city FROM route_stops rs JOIN stops s ON s.id=rs.stop_id
+     JOIN places p ON p.id=s.place_id WHERE rs.route_id=$1 ORDER BY rs.sequence`, [route.id])).rows);
+  assert.deepEqual(stored.map(r => r.city), ['Cotonou', 'Ouidah', 'Lokossa']);
+  const owned = await one('SELECT operator_id FROM routes WHERE id=$1', [route.id]);
+  assert.equal(owned.operator_id, operatorId, 'the route is the operator’s, not the catalogue’s');
+  // And the catalogue is untouched: the next operator still sees Comè.
+  const after = (await provision.corridors(owner)).find(c => c.name === 'Cotonou → Lokossa');
+  assert.ok(after.stops.some(s => s.city === 'Comè'), 'one operator’s choices do not edit the shared catalogue');
+});
+
+test('every commune has somewhere to board, and a passenger never sees the catalogue', async () => {
+  // Thirteen stops existed for seventy-seven communes, so building a line meant
+  // inventing every stop by hand, with coordinates, on a phone.
+  const communes = await one(`SELECT count(*)::int AS n FROM places WHERE kind='city' AND source='benin-geography'`);
+  const served = await one(`SELECT count(DISTINCT p.id)::int AS n FROM places p JOIN stops s ON s.place_id=p.id
+    WHERE p.kind='city' AND p.source='benin-geography' AND NOT s.is_demo`);
+  assert.equal(served.n, communes.n, 'every commune has a real boarding stop');
+
+  // The stop is commune-level on purpose: LeRoutier does not know where the
+  // gare routière in Bantè is, and a precise address it cannot verify is a
+  // place it would be sending somebody to for nothing.
+  const sample = await one(`SELECT s.name,s.latitude,s.longitude,p.latitude AS place_lat FROM stops s
+    JOIN places p ON p.id=s.place_id WHERE p.name='Savalou' AND NOT s.is_demo`);
+  assert.equal(sample.name, 'Savalou');
+  assert.equal(Number(sample.latitude), Number(sample.place_lat));
+
+  // Cross-border corridors are marked as such. Whether an operator may legally
+  // run one is their transport authorization's business, never inferred here.
+  const crossing = await db.transaction(async tx => (await tx.query(
+    "SELECT name,country_codes FROM corridors WHERE array_length(country_codes,1)>1 ORDER BY name")).rows);
+  assert.ok(crossing.length >= 2, 'border corridors are represented: ' + JSON.stringify(crossing));
+  assert.ok(crossing.every(c => c.country_codes.includes('BJ')));
+});
+
+test('the corridor catalogue is for operators, not for the public', async () => {
+  const { provisioning } = await import('../src/provisioning.js');
+  const provision = provisioning(db, { issuer: 'https://issuer.test.invalid' });
+  const passenger = await newPassenger('Curieux');
+  await assert.rejects(provision.corridors({ id: passenger, role: 'passenger' }), { code: 'FORBIDDEN' });
+  // A company's employed driver is crew and does not plan the network either.
+  const company = await onboardCompany();
+  const employee = randomUUID();
+  await db.transaction(async tx => {
+    await tx.query(`INSERT INTO users(id,display_name,role,operator_id,profile_completed_at)
+      VALUES($1,'Salarié','driver',$2,now())`, [employee, company.operatorId]);
+    await tx.query(`INSERT INTO driver_profiles(user_id,operator_id,license_reference,active)
+      VALUES($1,$2,'PC-C-1',true)`, [employee, company.operatorId]);
+  });
+  const crew = await db.transaction(tx => import('../src/identities.js').then(m => m.activeIdentity(tx, employee)));
+  await assert.rejects(provision.corridors(crew), { code: 'FORBIDDEN' });
+});
