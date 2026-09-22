@@ -267,6 +267,20 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       const includeDemo = await testInventoryVisible();
       return domain.search({originStopId:url.searchParams.get('originStopId'),destinationStopId:url.searchParams.get('destinationStopId'),includeDemo});
     }
+    // The seat map for one span. Public: choosing a seat is part of comparing
+    // an offer, and asking somebody to sign in to see whether a window seat is
+    // free would be the auth-timing regression this product keeps avoiding.
+    const seatPlan=path.match(/^\/services\/([^/]+)\/seats$/);
+    if(method==='GET' && seatPlan) {
+      const serviceId=uuid(seatPlan[1]);
+      await meterAnonymous();
+      const testService=(await list('SELECT is_demo FROM services WHERE id=$1',[serviceId]))[0];
+      if(testService?.is_demo) {
+        const tester=await auth.authenticate(req).catch(()=>null);
+        invariant(url.searchParams.get('testMode')==='1' && ((config.allowTestInventory===true && !config.production) || tester?.is_demo===true),'NOT_FOUND','Service not found.',404);
+      }
+      return domain.seats(serviceId,url.searchParams.get('origin'),url.searchParams.get('destination'));
+    }
     const available=path.match(/^\/services\/([^/]+)\/availability$/);
     // Metered after validation: rejecting a malformed identifier must stay free,
     // or the limiter becomes its own amplifier — one bad request, one DB write.
@@ -546,7 +560,10 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='PATCH' && activation) return provision.userStatus(actor,uuid(activation[1]),await body(),req.headers.get('idempotency-key'));
     if(method==='POST' && path==='/bookings') {
       invariant(!actor.needs_profile,'PROFILE_REQUIRED','Complete your passenger profile before booking.',409);
-      return domain.hold(actor,await body(),req.headers.get('idempotency-key'));
+      const booking=await body();
+      invariant(booking && Object.keys(booking).every(k=>['serviceId','origin','destination','seatNumber'].includes(k)),
+        'INVALID_BOOKING','Unexpected booking fields.');
+      return domain.hold(actor,booking,req.headers.get('idempotency-key'));
     }
     if(method==='GET' && path==='/me/bookings') return domain.passengerBookings(actor);
     // In-app notification centre. Role-aware by construction: a user only ever

@@ -60,6 +60,33 @@ export function transport(db) {
       capacity: service.capacity, segments: segments.map(s => ({...s, available: service.capacity - s.occupied})), stops,
       fare: { amountMinor: affected.reduce((sum, seq) => sum + segments[seq].fare_minor, 0), currency: 'XOF' } };
   }
+  /**
+   * Every seat on a service, with whether it is free for ONE span.
+   *
+   * Availability is per segment, so a seat is not simply taken: it is taken
+   * between two stops. A seat occupied Cotonou->Bohicon is genuinely free for
+   * Bohicon->Parakou, and the map says so rather than greying it out, because
+   * that spare capacity is the product.
+   */
+  async function seatMap(tx, service, origin, destination) {
+    const { rows } = await tx.query(`SELECT seats.seat_number,
+      EXISTS(SELECT 1 FROM booking_segments bs WHERE bs.service_id=seats.service_id
+        AND bs.seat_number=seats.seat_number AND bs.sequence>=$2 AND bs.sequence<$3) AS taken,
+      EXISTS(SELECT 1 FROM booking_segments bs WHERE bs.service_id=seats.service_id
+        AND bs.seat_number=seats.seat_number) AS busy_elsewhere
+      FROM service_seats seats WHERE seats.service_id=$1 ORDER BY seats.seat_number`,
+    [service.id, origin, destination]);
+    const closed = origin < service.current_sequence;
+    return rows.map(row => ({
+      seatNumber: row.seat_number,
+      available: !closed && !row.taken,
+      // Free for this leg while carrying somebody on another part of the
+      // route: shown differently so a passenger understands why a busy coach
+      // still has seats for them.
+      freedForThisLeg: !closed && !row.taken && row.busy_elsewhere,
+    }));
+  }
+
   async function txHold(tx, actor, input, key) {
     invariant(actor?.role === 'passenger', 'FORBIDDEN', 'Passenger access required.', 403);
     const { serviceId, origin, destination } = input;
@@ -79,9 +106,23 @@ export function transport(db) {
       'SERVICE_UNAVAILABLE', 'Departure has passed.', 409);
     const quote = await availability(tx, service, origin, destination);
     invariant(quote.available > 0, 'SOLD_OUT', 'No seat is available on every requested segment.', 409);
-    const seat = await one(tx, `SELECT seat_number FROM service_seats seats WHERE service_id=$1 AND NOT EXISTS
-      (SELECT 1 FROM booking_segments bs WHERE bs.service_id=seats.service_id AND bs.seat_number=seats.seat_number AND bs.sequence >=$2 AND bs.sequence<$3)
-      ORDER BY seat_number LIMIT 1`, [serviceId, origin, destination]);
+    // A chosen seat is honoured when it is genuinely free across every segment
+    // of this journey; otherwise the first seat that is. The same predicate
+    // decides both, inside the transaction holding the service lock, so two
+    // passengers choosing the same seat cannot both win it.
+    const requested = input.seatNumber === undefined || input.seatNumber === null ? null : Number(input.seatNumber);
+    invariant(requested === null || (Number.isInteger(requested) && requested > 0),
+      'INVALID_SEAT', 'Le numéro de siège est invalide.');
+    const free = `SELECT seat_number FROM service_seats seats WHERE service_id=$1 AND NOT EXISTS
+      (SELECT 1 FROM booking_segments bs WHERE bs.service_id=seats.service_id AND bs.seat_number=seats.seat_number AND bs.sequence >=$2 AND bs.sequence<$3)`;
+    const seat = requested === null
+      ? await one(tx, free + ' ORDER BY seat_number LIMIT 1', [serviceId, origin, destination])
+      : await one(tx, free + ' AND seats.seat_number=$4', [serviceId, origin, destination, requested]);
+    // Refusing by name matters: "complet" and "ce siège vient d’être pris" are
+    // different problems, and a passenger can act on the second one.
+    invariant(seat, requested === null ? 'SOLD_OUT' : 'SEAT_TAKEN',
+      requested === null ? 'No seat is available on every requested segment.'
+        : 'Ce siège vient d’être pris. Choisissez-en un autre.', 409);
     const booking = await one(tx, `INSERT INTO bookings(service_id,passenger_id,origin_sequence,destination_sequence,seat_number,status,amount_minor,expires_at,idempotency_key,request_fingerprint)
       VALUES($1,$2,$3,$4,$5,'held',$6,now()+interval '10 minutes',$7,$8) RETURNING *`,
     [serviceId, actor.id, origin, destination, seat.seat_number, quote.fare.amountMinor, key, hash]);
@@ -176,6 +217,18 @@ export function transport(db) {
 
     async availability(id, origin, destination) {
       return db.transaction(async tx => availability(tx, await serviceLock(tx, id), origin, destination));
+    },
+    /** The seat map for one span, for a passenger choosing where to sit. */
+    async seats(id, origin, destination) {
+      return db.transaction(async tx => {
+        const service = await serviceLock(tx, uuid(id));
+        const stops = (await tx.query('SELECT max(sequence)::integer AS last FROM service_stops WHERE service_id=$1', [service.id])).rows[0];
+        const from = Number.isInteger(Number(origin)) ? Number(origin) : 0;
+        const to = Number.isInteger(Number(destination)) ? Number(destination) : stops.last;
+        invariant(from >= 0 && to > from && to <= stops.last, 'INVALID_JOURNEY', 'Le trajet demandé est invalide.', 409);
+        return { serviceId: service.id, origin: from, destination: to, capacity: service.capacity,
+          seats: await seatMap(tx, service, from, to) };
+      });
     },
     async hold(actor, input, key) {
       return db.transaction(async tx => txHold(tx, actor, input, key));
