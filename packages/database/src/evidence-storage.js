@@ -51,12 +51,30 @@ import { invariant } from '@leroutier/domain';
  *
  * @param {{name?:string}|null} [adapter]
  */
-export const evidenceStorageState = (adapter = null) => ({
+export const evidenceStorageState = (adapter = null, health = null) => ({
   /** True only when LeRoutier holds the bytes and authorizes each read. */
   managed: Boolean(adapter),
   mode: adapter ? 'managed_private_object_store' : 'operator_hosted_link',
   provider: adapter?.name ?? null,
+  // Everything below is what a live check PROVED, or null because it was not
+  // checked. Never a credential, never a bucket id, never an object key, never
+  // a signed URL: this is read by a console, and a console is a screen
+  // somebody photographs.
+  health: health ?? null,
 });
+
+/**
+ * Ask the configured store whether it is actually reachable.
+ *
+ * Separate from `evidenceStorageState` because that one is pure and is called
+ * from product copy; this one makes a network call. Returns null when no
+ * provider is configured — an unconfigured deployment has nothing to check and
+ * says so rather than reporting a failure.
+ */
+export async function evidenceStorageHealth(adapter = null) {
+  if (!adapter || typeof adapter.health !== 'function') return null;
+  return adapter.health();
+}
 
 /**
  * What a document REALLY is, read from its first bytes.
@@ -309,8 +327,56 @@ export function backblazeEvidenceStore(settings, http = fetch) {
     invariant(api?.apiUrl && api?.downloadUrl && body.authorizationToken, 'EVIDENCE_STORAGE_UNAVAILABLE',
       'Le stockage des justificatifs est indisponible. Réessayez plus tard.', 503);
     session = { token: body.authorizationToken, apiUrl: api.apiUrl, downloadUrl: api.downloadUrl,
+      // What B2 says this key may do and where it may do it. Present on the
+      // authorize response itself, so describing the credential's scope costs
+      // no extra call and needs no capability the production key lacks.
+      scopedBucket: api.bucketName ?? null,
+      capabilities: Array.isArray(api.capabilities) ? api.capabilities : [],
+      s3ApiUrl: api.s3ApiUrl ?? null,
       until: Date.now() + 12 * 3600_000 };
     return session;
+  }
+
+  /**
+   * Is the store actually reachable, and with what scope.
+   *
+   * Deliberately cheap and cached. A console that health-checks on every page
+   * load spends the bucket's class-C transaction allowance on drawing a badge,
+   * and that allowance is set low on purpose.
+   *
+   * It reports only what it can PROVE from the authorize response and one
+   * listing: that the credentials work, the region, and that the key is
+   * confined to one bucket. Bucket privacy is a provider-side setting made at
+   * provisioning and is not asserted here — claiming "private" from a call
+   * that never tested it would be exactly the kind of green badge this project
+   * refuses elsewhere.
+   */
+  let cachedHealth = null;
+  async function health() {
+    if (cachedHealth && cachedHealth.until > Date.now()) return cachedHealth.value;
+    const checkedAt = new Date().toISOString();
+    let value;
+    try {
+      const current = await authorize();
+      // One listing, one file: proves the key can actually read this bucket
+      // rather than merely authenticate.
+      await call('b2_list_file_versions', { bucketId, maxFileCount: 1 });
+      value = {
+        reachable: true,
+        // "https://s3.eu-central-003.backblazeb2.com" -> "eu-central-003".
+        region: current.s3ApiUrl?.match(/s3\.([a-z0-9-]+)\.backblazeb2\.com/)?.[1] ?? null,
+        // The production key is confined to one bucket and cannot manage
+        // buckets or mint further keys. Saying so is the point.
+        bucketScoped: current.scopedBucket === bucketName,
+        capabilities: [...current.capabilities].sort(),
+        checkedAt,
+      };
+    } catch {
+      // Never the key, never the bucket id, never the provider's message.
+      value = { reachable: false, region: null, bucketScoped: null, capabilities: [], checkedAt };
+    }
+    cachedHealth = { value, until: Date.now() + 5 * 60_000 };
+    return value;
   }
 
   /**
@@ -340,6 +406,7 @@ export function backblazeEvidenceStore(settings, http = fetch) {
 
   return {
     name: 'b2',
+    health,
 
     async put({ operatorId, kind, bytes }) {
       const contentType = detectEvidenceType(bytes);

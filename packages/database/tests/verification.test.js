@@ -1179,7 +1179,10 @@ function fakeB2({ failAuthOnce = false, deleteFailure = null } = {}) {
       if (failAuthOnce && state.authorizations === 1) return json({ code: 'bad_auth' }, 401);
       // v3 nests the storage API; the adapter must read it from there.
       return json({ authorizationToken: 'acct-' + state.authorizations,
-        apiInfo: { storageApi: { apiUrl: 'https://api003.example.test', downloadUrl: 'https://f003.example.test' } } });
+        apiInfo: { storageApi: { apiUrl: 'https://api003.example.test', downloadUrl: 'https://f003.example.test',
+          s3ApiUrl: 'https://s3.eu-central-003.backblazeb2.com',
+          bucketName: 'leroutier-kyc-evidence-eu',
+          capabilities: ['listFiles','readFiles','writeFiles','deleteFiles','shareFiles'] } } });
     }
     if (String(url).includes('b2_get_upload_url')) {
       return json({ uploadUrl: 'https://pod-upload.example.test/upload', authorizationToken: 'upl-1' });
@@ -1389,4 +1392,46 @@ test('the credential never appears in anything the adapter hands back', async ()
   // The account token goes in a header, never in a returned URL.
   assert.ok(b2.state.sentAuthHeader.some(h => h.startsWith('Basic ')), 'the key is sent as Basic auth, once');
   assert.ok(!grant.url.includes('Basic'));
+});
+
+
+test('storage health reports what it proved, and nothing it did not', async () => {
+  const { backblazeEvidenceStore, evidenceStorageState } =
+    await import('../src/evidence-storage.js');
+  const b2 = fakeB2();
+  const store = backblazeEvidenceStore(B2_SETTINGS, b2.http);
+
+  const health = await store.health();
+  assert.equal(health.reachable, true);
+  assert.equal(health.region, 'eu-central-003', 'region comes from the S3 endpoint B2 already returned');
+  assert.equal(health.bucketScoped, true, 'the production key is confined to one bucket');
+  assert.ok(!health.capabilities.includes('writeKeys'), 'a request-handler key must not mint keys');
+  assert.ok(!health.capabilities.includes('deleteBuckets'));
+  assert.ok(health.checkedAt);
+
+  // Nothing a console may not display. This is read by a screen somebody
+  // photographs: no credential, no bucket id, no object key, no signed URL.
+  const surface = JSON.stringify(evidenceStorageState(store, health));
+  for (const secret of [B2_SETTINGS.applicationKey, B2_SETTINGS.keyId, B2_SETTINGS.bucketId]) {
+    assert.ok(!surface.includes(secret), 'storage status leaked a credential or bucket id');
+  }
+  assert.ok(!surface.includes('Authorization='), 'storage status must never carry a signed URL');
+
+  // Cached: a console that health-checks on every page load spends the
+  // bucket's deliberately low transaction allowance on drawing a badge.
+  const before = b2.state.authorizations;
+  await store.health();
+  assert.equal(b2.state.authorizations, before, 'health must be cached between calls');
+});
+
+test('an unreachable provider is reported as unreachable, not as healthy or as a crash', async () => {
+  const { backblazeEvidenceStore, evidenceStorageHealth } = await import('../src/evidence-storage.js');
+  const dead = backblazeEvidenceStore(B2_SETTINGS, async () => new Response('nope', { status: 500 }));
+  const health = await dead.health();
+  assert.equal(health.reachable, false);
+  assert.equal(health.region, null);
+  assert.equal(health.bucketScoped, null);
+  assert.ok(health.checkedAt, 'a failed check is still a check, and says when');
+  // No provider at all is a supported state with nothing to check, not a failure.
+  assert.equal(await evidenceStorageHealth(null), null);
 });

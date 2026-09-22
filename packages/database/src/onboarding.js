@@ -1,7 +1,7 @@
 import { invariant, uuid, idempotencyKey } from '@leroutier/domain';
 import { audit, activeIdentity } from './identities.js';
 import { requirePlatform, holds } from './platform-access.js';
-import { documentReference, evidenceStorageState, EVIDENCE_READ_TTL_SECONDS } from './evidence-storage.js';
+import { documentReference, evidenceStorageState, evidenceStorageHealth, EVIDENCE_READ_TTL_SECONDS } from './evidence-storage.js';
 
 const one=(tx,sql,args=[])=>(tx.query(sql,args)).then(r=>r.rows[0]);
 const optionalRef=(value,max=200)=>{
@@ -210,7 +210,11 @@ export function onboarding(db,store=null){
      * Storage capability, for Platform Ops and for product copy.
      * No screen may promise managed custody while this says otherwise.
      */
-    storage: () => evidenceStorageState(store),
+    // Two shapes on purpose. `storageState()` is pure and is what product copy
+    // asks; `storage()` additionally makes one cached provider call, and is
+    // what the Platform Ops console asks.
+    storageState: () => evidenceStorageState(store),
+    storage: async () => evidenceStorageState(store, await evidenceStorageHealth(store)),
 
     /**
      * A short-lived, authorized way to look at one proof.

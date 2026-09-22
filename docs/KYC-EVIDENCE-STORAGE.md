@@ -125,17 +125,85 @@ The key is scoped to this one bucket with exactly `listFiles`, `readFiles`,
 used and must never be:** it can delete buckets and mint further keys, and has
 no business in a request handler.
 
+## Bucket state, read from B2 rather than from memory
+
+Verified against the live bucket on 2026-09-22 with `b2_list_buckets`:
+
+| Setting | Value | Why it matters |
+|---|---|---|
+| `bucketType` | `allPrivate` | the expiring grant IS the access control |
+| `defaultServerSideEncryption` | `SSE-B2` / `AES256` | encrypted at rest by the provider |
+| `fileLockConfiguration` | `isFileLockEnabled: false` | Object Lock off, so a redaction can actually delete |
+| `corsRules` | `[]` | none needed; see above |
+| `lifecycleRules` | `daysFromUploadingToHiding: null`, `daysFromHidingToDeleting: 1` | see below |
+
+### The lifecycle rule, and why it is that one
+
+`daysFromUploadingToHiding: null` means **the current version is never hidden
+and never expires.** That is deliberate: a blanket provider-side expiry would
+delete a live operator's carte grise out from under a verified account, and
+LeRoutier — not Backblaze — decides when evidence has reached the end of its
+90-day retention. The application remains authoritative for deletion.
+
+`daysFromHidingToDeleting: 1` means a version that has been superseded or
+hidden is **permanently deleted** a day later, rather than kept forever or
+merely hidden. Old KYC bytes do not accumulate.
+
+An earlier note in the downloaded bucket export says "Keep all versions". That
+export is stale; the rule above is what B2 reports today, and B2 is the
+authority. **Do not enable Object Lock** — it would make redaction impossible,
+which is the opposite of what a retention policy needs.
+
+### Verified: replacement leaves nothing recoverable
+
+Checked end to end against the real bucket with generated TEST fixtures (a PDF
+header, never anybody's document), using a temporary bucket-scoped key that was
+deleted afterwards:
+
+```
+PASS  upload original        versions=1
+PASS  upload replacement     versions=1
+PASS  old version removed    remaining=0
+INFO  same-name versions     2 (older is hidden; lifecycle deletes it after 1 day)
+PASS  fixtures cleaned up    remaining=0
+```
+
+The important line is the third. LeRoutier never overwrites an object name —
+every `put` uses a fresh random key — so replacing a proof uploads a new object
+and **explicitly deletes the old one immediately**, rather than leaving it to
+the lifecycle rule. The rule is the safety net for the case the application
+does not produce; the application is the guarantee.
+
 ## External action still required
 
-1. **Delete or rotate the master application key** if it has been in a
-   downloaded file or pasted anywhere. A bucket-scoped key now does the work.
-2. Decide the bucket's lifecycle policy. It currently keeps all versions, which
-   the adapter handles by deleting every version on redaction — but a lifecycle
-   rule that hides rather than deletes would undermine that.
-3. Watch the daily caps. They are set low (10 GB storage, 1 GB download,
+1. **Rotate the master application key.** It is LIVE — it authorizes today,
+   scoped to the entire account, with 38 capabilities including `writeKeys`,
+   `deleteKeys`, `deleteBuckets` and `bypassGovernance` — and it sits in a
+   downloaded file. Production does not use it: `b2_list_keys` shows exactly
+   one application key, `leroutier-kyc-evidence-api`, confined to this bucket
+   with five capabilities and nothing privileged.
+
+   Backblaze has **no API for regenerating the master key**; it is a console
+   action, which is why this cannot be done for you:
+
+   1. B2 console → *Account* → *Application Keys*
+   2. *Regenerate Master Application Key*, and confirm
+   3. Do **not** put the new master key in Vercel, this repository, a script,
+      a log, or a document. Production has no use for it.
+   4. Delete the downloaded export, or store it somewhere a `git add` can
+      never reach. `.gitignore` now refuses `Backblaze-*.txt` by name, which
+      stops an accident, not a decision.
+   5. Confirm nothing broke: the Platform Ops **Système** screen's *Justificatifs
+      KYC* card should still read *Stockage privé actif*.
+
+   Rotating it does not touch `leroutier-kyc-evidence-api`, so production keeps
+   working throughout.
+
+2. Watch the daily caps. They are set low (10 GB storage, 1 GB download,
    2,500 class B/C transactions) with alerts to the project mailbox; a pilot
    should stay far inside them, and a reviewer session costs one class B
-   transaction per document opened.
+   transaction per document opened. The Système card's health check is cached
+   for five minutes for the same reason.
 
 ## Testing
 

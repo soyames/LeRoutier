@@ -38,6 +38,54 @@ const schemaAlert=m=>m.status==='behind'
     ? 'Le schéma ne correspond plus aux migrations déclarées : empreinte modifiée ou table absente. Ne déployez pas davantage avant vérification.'
     : 'La base contient des migrations que ce déploiement ne déclare pas (retour arrière probable).';
 
+
+/**
+ * Where KYC documents live, on the screen that already carries system state.
+ *
+ * /ops/evidence-storage has existed, authorized and tested, since managed
+ * storage landed — and nothing rendered it, so nobody could see at a glance
+ * whether identity documents were held privately by LeRoutier or merely linked
+ * from an operator's own hosting. That is the single most consequential fact
+ * about this platform's handling of personal data.
+ *
+ * Deliberately narrow. Provider, region, reachability, credential scope, last
+ * check. Never a credential, never a bucket identifier, never an object key,
+ * never a signed URL, never a filename — a console is a screen somebody
+ * photographs.
+ */
+function EvidenceStorageCard(){
+  const storage=useApi('/ops/evidence-storage');
+  if(storage.loading) return <SkeletonCards count={1}/>;
+  if(storage.error) return <Card><p role="alert">{storage.error}</p></Card>;
+  const s=storage.data,h=s.health;
+  const tone=!s.managed?'warning':h?.reachable?'success':'danger';
+  const label=!s.managed?'Liens opérateurs':h?.reachable?'Stockage privé actif':h?'Fournisseur injoignable':'Configuré';
+  return <Card className="stack">
+    <div className="between wrap"><strong>Justificatifs KYC</strong><Badge tone={tone}>{label}</Badge></div>
+    {!s.managed
+      ? <p role="alert">Aucun fournisseur de stockage n’est configuré. Les justificatifs restent hébergés par
+        les opérateurs : LeRoutier ne peut ni limiter, ni expirer, ni retirer l’accès à ces documents.</p>
+      : h && !h.reachable
+        ? <p role="alert">Le fournisseur n’a pas répondu au dernier contrôle. Les nouveaux envois et l’ouverture
+          des justificatifs peuvent échouer ; la suppression au titre de la rétention sera réessayée.</p>
+        : <p className="small muted">LeRoutier détient les documents. Chaque ouverture est autorisée, tracée et
+          expire ; une suppression retire réellement l’objet.</p>}
+    <div className="summary">
+      <div className="row"><span>Fournisseur</span><span>{s.provider ?? 'Aucun'}</span></div>
+      <div className="row"><span>Mode</span><span>{s.managed?'Stockage privé géré':'Lien hébergé par l’opérateur'}</span></div>
+      {h && <>
+        <div className="row"><span>Région</span><span>{h.region ?? 'Non publiée'}</span></div>
+        <div className="row"><span>Clé limitée au bucket</span>
+          <span>{h.bucketScoped===null?'Inconnu':h.bucketScoped?'Oui':'Non — à corriger'}</span></div>
+        <div className="row"><span>Autorisations de la clé</span><span>{h.capabilities.length||'–'}</span></div>
+        <div className="row"><span>Dernier contrôle</span><span>{fmtDate(h.checkedAt)}</span></div>
+      </>}
+    </div>
+    {h?.bucketScoped===false && <p role="alert">Cette clé n’est pas limitée au bucket des justificatifs.
+      Une clé de production ne doit pouvoir ni gérer les buckets ni créer d’autres clés.</p>}
+  </Card>;
+}
+
 function PlatformOnly({children,grant=null}){
   const {user}=useSession();
   if(!user||user.role!=='ops'||user.operator_id)
@@ -215,7 +263,7 @@ export function PlatformVerification(){
 
 export function PlatformFinance(){const health=usePlatformHealth();return <PlatformOnly grant='finance'><div className="stack"><SectionTitle title="Finances & anomalies" icon={WalletCards}/>{health.loading?<SkeletonCards count={3}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<><Card className="stack"><h3>Paiements échoués</h3>{(health.data.paymentAnomalies||[]).length?health.data.paymentAnomalies.map(x=><div className="row" key={x.id}><span>{x.operator_name} · {x.amount_minor} {x.currency}</span><span>{fmtDate(x.created_at)}</span></div>):<p className="small muted">Aucun paiement échoué enregistré.</p>}</Card><Card className="stack"><h3>Versements échoués ou renversés</h3>{(health.data.payoutAnomalies||[]).length?health.data.payoutAnomalies.map(x=><div className="row" key={x.id}><span>{x.operator_name||'Opérateur'} · {x.beneficiary||'Bénéficiaire'} · {x.amount_minor} {x.currency}</span><span>{x.status} · {fmtDate(x.created_at)}</span></div>):<p className="small muted">Aucune anomalie de versement enregistrée.</p>}</Card></>}</div></PlatformOnly>;}
 export function PlatformIncidents(){const health=usePlatformHealth();return <PlatformOnly grant='incidents'><div className="stack"><SectionTitle title="Incidents plateforme" icon={TriangleAlert}/>{health.loading?<SkeletonCards count={3}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:(health.data.incidents||[]).length?health.data.incidents.map(i=><Card key={i.id} className="stack"><div className="between wrap"><strong>{i.operator_name} · {i.kind}</strong><Badge tone={i.severity==='high'?'danger':'warning'}>{i.severity}</Badge></div><p>{i.description||'Aucune description.'}</p><p className="small muted">{i.status} · {fmtDate(i.created_at)} · service {i.service_id}</p></Card>):<EmptyState icon={TriangleAlert} title="Aucun incident ouvert" text="Les incidents actifs de tous les opérateurs apparaîtront ici."/>}</div></PlatformOnly>;}
-export function PlatformSystem(){const health=usePlatformHealth();return <PlatformOnly grant='system'><div className="stack"><SectionTitle title="Système & capacité" icon={Database}/>{health.data?.migrations&&health.data.migrations.status!=='current'&&<Card><p role="alert">{schemaAlert(health.data.migrations)}</p></Card>}{health.loading?<SkeletonCards count={2}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<><StorageCard storage={health.data.storage}/><Card className="stack"><strong>Base de données</strong><div className="summary"><div className="row"><span>Stockage utilisé</span><span>{fmtBytes(health.data.storage.usedBytes)}</span></div><div className="row"><span>Limite appliquée</span><span>{health.data.storage.limitBytes?fmtBytes(health.data.storage.limitBytes):'Aucune'}</span></div><div className="row"><span>Limite configurée (DATABASE_STORAGE_LIMIT_MB)</span><span>{health.data.storage.configuredLimitBytes?fmtBytes(health.data.storage.configuredLimitBytes):'Non configurée'}</span></div><div className="row"><span>Limite imposée par la base</span><span>{health.data.storage.providerLimitBytes?fmtBytes(health.data.storage.providerLimitBytes):'Non publiée'}</span></div><div className="row"><span>Utilisation</span><span>{health.data.storage.usedPercent===null?'–':`${health.data.storage.usedPercent} %`}</span></div><div className="row"><span>Seuil d’arrêt des inscriptions</span><span>{health.data.storage.registrationStopPercent} %</span></div><div className="row"><span>Protection stockage</span><span>{health.data.storage.storageProtection==='armed'?'Armée':'Non armée'}</span></div><div className="row"><span>Inscriptions</span><span>{health.data.storage.registrationsOpen?'Ouvertes':'Suspendues'}</span></div></div></Card><Card className="stack"><h3>État technique</h3><div className="summary"><div className="row"><span>Migrations</span><span>{schemaLabel(health.data.migrations)}</span></div><div className="row"><span>Appliquées</span><span>{health.data.migrations.applied} / {health.data.migrations.expected}</span></div>{(health.data.migrations.pending||[]).length>0&&<div className="row"><span>En attente</span><span>{health.data.migrations.pending.join(', ')}</span></div>}{(health.data.migrations.drifted||[]).length>0&&<div className="row"><span>Empreinte modifiée</span><span>{health.data.migrations.drifted.join(', ')}</span></div>}{(health.data.migrations.unknown||[]).length>0&&<div className="row"><span>Appliquées hors de ce build</span><span>{health.data.migrations.unknown.join(', ')}</span></div>}<div className="row"><span>Notifications en échec</span><span>{health.data.counts.notification_failed}</span></div><div className="row"><span>Canaux indisponibles</span><span>{health.data.counts.notification_unavailable}</span></div><div className="row"><span>Événements à reprendre</span><span>{health.data.counts.dispatch_dead}</span></div><div className="row"><span>Échecs de routage (24h)</span><span>{health.data.counts.routing_failed}</span></div></div></Card></>}</div></PlatformOnly>;}
+export function PlatformSystem(){const health=usePlatformHealth();return <PlatformOnly grant='system'><div className="stack"><SectionTitle title="Système & capacité" icon={Database}/>{health.data?.migrations&&health.data.migrations.status!=='current'&&<Card><p role="alert">{schemaAlert(health.data.migrations)}</p></Card>}{health.loading?<SkeletonCards count={2}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<><StorageCard storage={health.data.storage}/><Card className="stack"><strong>Base de données</strong><div className="summary"><div className="row"><span>Stockage utilisé</span><span>{fmtBytes(health.data.storage.usedBytes)}</span></div><div className="row"><span>Limite appliquée</span><span>{health.data.storage.limitBytes?fmtBytes(health.data.storage.limitBytes):'Aucune'}</span></div><div className="row"><span>Limite configurée (DATABASE_STORAGE_LIMIT_MB)</span><span>{health.data.storage.configuredLimitBytes?fmtBytes(health.data.storage.configuredLimitBytes):'Non configurée'}</span></div><div className="row"><span>Limite imposée par la base</span><span>{health.data.storage.providerLimitBytes?fmtBytes(health.data.storage.providerLimitBytes):'Non publiée'}</span></div><div className="row"><span>Utilisation</span><span>{health.data.storage.usedPercent===null?'–':`${health.data.storage.usedPercent} %`}</span></div><div className="row"><span>Seuil d’arrêt des inscriptions</span><span>{health.data.storage.registrationStopPercent} %</span></div><div className="row"><span>Protection stockage</span><span>{health.data.storage.storageProtection==='armed'?'Armée':'Non armée'}</span></div><div className="row"><span>Inscriptions</span><span>{health.data.storage.registrationsOpen?'Ouvertes':'Suspendues'}</span></div></div></Card><EvidenceStorageCard/><Card className="stack"><h3>État technique</h3><div className="summary"><div className="row"><span>Migrations</span><span>{schemaLabel(health.data.migrations)}</span></div><div className="row"><span>Appliquées</span><span>{health.data.migrations.applied} / {health.data.migrations.expected}</span></div>{(health.data.migrations.pending||[]).length>0&&<div className="row"><span>En attente</span><span>{health.data.migrations.pending.join(', ')}</span></div>}{(health.data.migrations.drifted||[]).length>0&&<div className="row"><span>Empreinte modifiée</span><span>{health.data.migrations.drifted.join(', ')}</span></div>}{(health.data.migrations.unknown||[]).length>0&&<div className="row"><span>Appliquées hors de ce build</span><span>{health.data.migrations.unknown.join(', ')}</span></div>}<div className="row"><span>Notifications en échec</span><span>{health.data.counts.notification_failed}</span></div><div className="row"><span>Canaux indisponibles</span><span>{health.data.counts.notification_unavailable}</span></div><div className="row"><span>Événements à reprendre</span><span>{health.data.counts.dispatch_dead}</span></div><div className="row"><span>Échecs de routage (24h)</span><span>{health.data.counts.routing_failed}</span></div></div></Card></>}</div></PlatformOnly>;}
 // Any operator's dossier stays re-readable, not only the ones still queued
 // for a first decision: re-opening a verified company's file is exactly what
 // oversight means. The evidence is fetched on demand rather than shipped with

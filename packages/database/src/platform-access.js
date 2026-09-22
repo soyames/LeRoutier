@@ -102,6 +102,23 @@ export function requirePlatform(user, capability) {
   return user;
 }
 
+/**
+ * Refuse unless the identity holds at least one of these capabilities.
+ *
+ * For the few facts that genuinely belong to more than one job. Evidence
+ * storage status is the case it was written for: whether LeRoutier holds KYC
+ * documents privately is infrastructure state to `system` and the ground under
+ * their feet to `verification`, and it exposes no credential, no object key
+ * and no document to either.
+ */
+export function requireAnyPlatform(user, capabilities) {
+  invariant(isPlatformIdentity(user), 'FORBIDDEN', 'Platform Operations access required.', 403);
+  invariant(capabilities.some(capability => holds(user, capability)), 'FORBIDDEN',
+    `Accès refusé : cette action demande l’une des autorisations « ${
+      capabilities.map(c => CAPABILITY_LABELS[c]).join(' » ou « ')} ».`, 403);
+  return user;
+}
+
 /** Refuse unless the identity is the superadmin. */
 export function requireSuperadmin(user) {
   invariant(isPlatformIdentity(user), 'FORBIDDEN', 'Platform Operations access required.', 403);

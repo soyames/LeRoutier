@@ -7,7 +7,7 @@ import { authentication } from './auth.js';
 import { publicAuthConfig } from '@leroutier/config';
 import { updateProfile, audit, managesOperator } from '@leroutier/database/identities';
 import { provisioning } from '@leroutier/database/provisioning';
-import { requirePlatform } from '@leroutier/database/platform-access';
+import { requirePlatform, requireAnyPlatform } from '@leroutier/database/platform-access';
 import { schemaStatus } from '@leroutier/database/migrations';
 import { payments } from '@leroutier/database/payments';
 import { tickets } from '@leroutier/database/tickets';
@@ -450,7 +450,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     const evidenceAccess=path.match(/^\/ops\/evidence\/([^/]+)\/access$/);
     if(method==='GET' && evidenceAccess) return onboard.accessEvidence(actor,evidenceAccess[1]);
     if(method==='GET' && path==='/ops/evidence-storage') {
-      requirePlatform(actor,'verification');
+      requireAnyPlatform(actor,['system','verification']);
       return onboard.storage();
     }
     if(method==='GET' && path==='/operators') return onboard.listOperators(actor);

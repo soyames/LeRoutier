@@ -18,6 +18,13 @@ test-results/
 *.key
 # Credential exports must never enter this repository.
 leroutier-db.txt
+# Backblaze's own download names the bucket, and the file it produces carries
+# the account's master application key — the one credential that can delete
+# buckets and mint further keys. Matched by its download pattern so a file
+# dragged in from Downloads cannot be committed by a routine `git add -A`.
+Backblaze-*.txt
+*b2-master*
+*application-key*.txt
 # Provider credential exports: Firebase service accounts and Google OAuth
 # clients. Named by their own download patterns so a file dragged in from
 # Downloads cannot be committed by a routine `git add -A`.
