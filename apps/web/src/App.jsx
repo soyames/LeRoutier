@@ -11,6 +11,7 @@ import { JourneyTimeline } from '@leroutier/screens/journey';
 import { JourneyTracking } from '@leroutier/screens/tracking';
 import { NotificationCentre, useUnreadCount } from '@leroutier/screens/notifications';
 import { Home } from './home.jsx';
+import { ProfessionalEntry } from './professional.jsx';
 import { PASSENGER, WORK, OPS, workspacesFor, capabilities, workspaceOf, isAuthorized } from './workspaces.js';
 import {
   Search, Ticket, UserRound, Package, Bell, Home as HomeIcon, Route, Users, QrCode,
@@ -112,11 +113,13 @@ export default function App() {
   const passengerScreens = {
     '': <Home/>, trips: <Trips/>, tickets: <TicketsRoute/>, stations: <Stations/>, parcels: <ParcelsRoute/>,
     tracking: <Tracking/>, account: <Account/>, onboarding: <OnboardingPage/>, checkout: <Checkout/>,
+    professionnel: <ProfessionalEntry/>,
     notifications: <NotificationCentre onOpen={to => navigate(to)}/>,
   };
   const passengerTitles = {
     '': 'LeRoutier', trips: 'Voyager', tickets: 'Mes billets', stations: 'Gares & arrêts',
     parcels: 'Colis', tracking: 'Suivi', account: 'Mon compte', onboarding: 'Travailler avec LeRoutier',
+    professionnel: 'Espace professionnel',
     checkout: 'Paiement', notifications: 'Notifications',
   };
 
@@ -217,7 +220,9 @@ export default function App() {
       </div>);
     }
   }
-  const fullyPublic = workspace === PASSENGER && (page === '' || page === 'trips' ||
+  // The professional landing page is public: somebody deciding whether to
+  // work with LeRoutier must be able to read it before creating an account.
+  const fullyPublic = workspace === PASSENGER && (page === '' || page === 'trips' || page === 'professionnel' ||
     (page === 'parcels' && segments[1] === 'track') || page === 'checkout');
   return shell(<>{user?.is_demo && <div className="notice" role="status">Espace TEST · données de démonstration · aucun paiement réel</div>}{!fullyPublic && <SessionPanel onWorkspace={navigate}/>}{privacySub ? <PrivacyCenter/> : scoped.screens[page]}</>);
 }

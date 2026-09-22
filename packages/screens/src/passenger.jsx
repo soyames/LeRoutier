@@ -606,6 +606,17 @@ export function PrivacyCenter() {
   </Card>;
 }
 
+// Which professional workspace this identity actually holds. Derived from the
+// identity the API returned, never from a stored preference, and never a
+// switcher: a passenger is offered nothing here, and the API re-checks anyway.
+function professionalWorkspace(user) {
+  if (user?.role === 'ops') return user.operator_id
+    ? { label: 'Ouvrir mon espace exploitation', to: '/ops/today' }
+    : { label: 'Ouvrir l’exploitation plateforme', to: '/ops/platform' };
+  if (user?.role === 'convoyeur') return { label: 'Ouvrir mon espace convoyeur', to: '/work/today' };
+  return { label: 'Ouvrir mon espace chauffeur', to: '/work/today' };
+}
+
 export function Account() {
   const { user } = useSession();
   const navigate = useNavigate();
@@ -643,10 +654,22 @@ export function Account() {
       </Card>
       {!user.needs_profile && <PrivacyCenter/>}
     </>}
+    {/* Two different people reach this point. Somebody who only travels is
+        offered the professional door, quietly. Somebody who already works here
+        is offered the way into the workspace they actually hold — never a role
+        switcher, and never an invitation to onboard a second time. */}
+    {user && user.role !== 'passenger' && <Card className="stack">
+      <SectionTitle icon={Store} title="Espace professionnel"/>
+      <p className="small muted">{user.operator_name
+        ? `Votre compte professionnel : ${user.operator_name}.`
+        : 'Votre compte professionnel LeRoutier.'}</p>
+      <button className="btn btn-primary" onClick={() => navigate(professionalWorkspace(user).to)}>
+        {professionalWorkspace(user).label}</button>
+    </Card>}
     {(!user || (user.role === 'passenger' && !user.needs_profile)) && <Card className="stack">
-      <SectionTitle icon={Store} title="Conduire ou gérer une compagnie ?"/>
-      <p className="small muted">LeRoutier accueille les chauffeurs indépendants et les compagnies de transport.</p>
-      <button className="btn btn-soft" onClick={() => navigate('/onboarding')}>Devenir opérateur</button>
+      <SectionTitle icon={Store} title="Vous travaillez dans le transport ?"/>
+      <p className="small muted">LeRoutier accueille les chauffeurs indépendants et les compagnies de transport. Votre compte voyageur reste inchangé.</p>
+      <button className="btn btn-soft" onClick={() => navigate('/professionnel')}>Espace professionnel</button>
     </Card>}
   </>;
 }

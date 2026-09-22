@@ -2,7 +2,7 @@ import { Link, useNavigate } from 'react-router';
 import { useSession } from '@leroutier/config/client';
 import { Card, SectionTitle } from '@leroutier/ui';
 import { TripSearchHero } from '@leroutier/screens/passenger';
-import { Package, Navigation, Car, Building2 } from 'lucide-react';
+import { Package, Navigation } from 'lucide-react';
 import { LegalFooter } from './legal.jsx';
 
 // One public entry point, led by the single most important task: find a trip.
@@ -15,10 +15,6 @@ export function Home() {
     { icon: Package, label: 'Envoyer un colis', hint: 'Devis, dépôt et suivi', to: '/parcels' },
     { icon: Navigation, label: 'Suivre un colis', hint: 'Avec un numéro de suivi', to: '/parcels/track' },
   ];
-  const workActions = [
-    { icon: Car, label: 'Je suis chauffeur indépendant', hint: 'Mon véhicule, mes recettes', to: '/onboarding' },
-    { icon: Building2, label: 'Je représente une compagnie', hint: 'Flotte, équipage et lignes', to: '/onboarding' },
-  ];
   return <div className="stack">
     <TripSearchHero/>
 
@@ -29,12 +25,11 @@ export function Home() {
       </button>; })}
     </div>
 
-    <SectionTitle title="Travailler avec LeRoutier"/>
-    <div className="home-actions">
-      {workActions.map(action => { const Icon = action.icon; return <button key={action.label} className="home-action" onClick={() => navigate(action.to)}>
-        <Icon size={20}/><span>{action.label}<small>{action.hint}</small></span>
-      </button>; })}
-    </div>
+    {/* Professional access stays available, but as one quiet line rather than a
+        top-level section competing with the trip search. */}
+    <p className="small muted home-professional">
+      Vous travaillez dans le transport ? <Link to="/professionnel">Espace professionnel</Link>
+    </p>
 
     <Card className="stack">
       <h2 style={{ margin: 0 }}>Transport interurbain au Bénin</h2>

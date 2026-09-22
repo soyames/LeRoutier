@@ -29,18 +29,53 @@ function Section({ title, children }) {
 function P({ children }) { return <p style={{ margin: 0 }}>{children}</p>; }
 function List({ children }) { return <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>{children}</ul>; }
 
+// The public footer is organised the way a traveller thinks: travel, parcels,
+// help, account — and only then, quietly, the door for people who work in
+// transport. Operator onboarding is a real product path, but it is not what a
+// passenger came here for, so it does not compete with the trip search.
+//
+// Platform Ops appears nowhere. It is not a thing anyone signs up for.
+const FOOTER_GROUPS = [
+  { title: 'Voyager', links: [
+    { to: '/trips', label: 'Rechercher un trajet' },
+    { to: '/tickets', label: 'Mes billets' },
+    { to: '/stations', label: 'Gares et points d’embarquement' },
+  ] },
+  { title: 'Colis', links: [
+    { to: '/parcels', label: 'Envoyer un colis' },
+    { to: '/parcels/track', label: 'Suivre un colis' },
+  ] },
+  { title: 'Aide', links: [
+    { to: '/about', label: 'À propos de LeRoutier' },
+    { to: '/cancellations', label: 'Annulations et remboursements' },
+    { to: '/terms', label: 'Conditions d’utilisation' },
+  ] },
+  { title: 'Compte', links: [
+    { to: '/account', label: 'Mon compte' },
+    { to: '/account/privacy', label: 'Confidentialité et données' },
+  ] },
+  { title: 'Professionnels', links: [
+    { to: '/professionnel', label: 'Espace professionnel' },
+  ] },
+];
+
 export function LegalFooter() {
-  return <footer aria-label="Informations légales" className="small muted" style={{ padding: '18px 4px 6px', textAlign: 'center' }}>
-    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '10px 16px' }}>
-      <Link to="/about">À propos</Link>
-      <Link to="/legal">Mentions légales</Link>
-      <Link to="/privacy">Confidentialité</Link>
-      <Link to="/terms">Conditions d’utilisation</Link>
-      <Link to="/cancellations">Annulations et remboursements</Link>
-      <Link to="/cookies">Cookies et technologies</Link>
-      <button className="footer-link" onClick={() => window.dispatchEvent(new Event('leroutier:assistant-open'))}>Assistant</button>
+  return <footer aria-label="Pied de page" className="site-footer small">
+    <nav className="site-footer-groups" aria-label="Navigation du pied de page">
+      {FOOTER_GROUPS.map(group => <div key={group.title} className="site-footer-group">
+        <h2>{group.title}</h2>
+        <ul>{group.links.map(link => <li key={link.to + link.label}><Link to={link.to}>{link.label}</Link></li>)}</ul>
+      </div>)}
+    </nav>
+    <div className="site-footer-legal muted">
+      <div className="site-footer-legal-links">
+        <Link to="/legal">Mentions légales</Link>
+        <Link to="/privacy">Confidentialité</Link>
+        <Link to="/cookies">Cookies et technologies</Link>
+        <button className="footer-link" onClick={() => window.dispatchEvent(new Event('leroutier:assistant-open'))}>Assistant</button>
+      </div>
+      <p>LeRoutier est exploité par DIGITAL CONDORDIA, Bénin.</p>
     </div>
-    <p style={{ margin: '10px 0 0' }}>LeRoutier est exploité par DIGITAL CONDORDIA, Bénin.</p>
   </footer>;
 }
 
