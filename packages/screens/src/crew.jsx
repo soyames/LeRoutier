@@ -617,11 +617,30 @@ export function Points(){
   </>;
 }
 
+/**
+ * Whether a withdrawal can honestly be offered.
+ *
+ * `available` used to mean "a secret key is set in the environment", which is
+ * not a fact a driver can act on. These states say what is actually proven,
+ * and each one names the thing that is missing rather than a generic failure.
+ */
+function PayoutCapability({capability}){
+  if(!capability||capability.state==='available')return null;
+  const copy={
+    missing_provider:'Les retraits ne sont pas encore ouverts sur LeRoutier. Votre solde reste acquis et vous sera versé dès l’ouverture.',
+    missing_credentials:'Les retraits ne sont pas encore ouverts sur LeRoutier. Votre solde reste acquis et vous sera versé dès l’ouverture.',
+    provider_not_activated:'Les virements sont momentanément indisponibles chez notre prestataire. Votre solde est intact ; LeRoutier règle le problème et vous pourrez retirer ensuite.',
+    configured:'Aucun virement n’a encore été effectué depuis cette plateforme. Votre demande sera traitée manuellement par LeRoutier lors de ce premier retrait.',
+  };
+  return <p className="small" role="status">{copy[capability.state]||copy.missing_provider}</p>;
+}
+
 export function Earnings(){
   const {user,request,online}=useSession();
   const data=useApi(user?'/driver/earnings':null),payouts=useApi(user?'/driver/payouts':null),destinations=useApi(user?'/driver/payout-destinations':null);
   const independent=user?.operator_type==='independent' && user?.role==='driver';
   const operatorData=useApi(independent?'/operator/settlements':null),operatorPayouts=useApi(independent?'/operator/payouts':null);
+  const payments=useApi(independent?'/payments/config':null);
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const [amount,setAmount]=useState(''),[destinationId,setDestinationId]=useState('');
   const [phone,setPhone]=useState(''),[country,setCountry]=useState('BJ'),[network,setNetwork]=useState('');
@@ -651,10 +670,15 @@ export function Earnings(){
         <StatCard label="Déjà versé" value={fcfa(operatorData.data.summary.paid)}/>
       </div>
       {operatorData.data.summary.verificationStatus!=='verified' && <p className="small" role="status">Les retraits s’ouvriront dès la validation de votre dossier.</p>}
+      {/* What the platform can honestly claim about paying somebody out. A
+          withdrawal button shown on the strength of an environment variable
+          takes a driver's request, reserves their balance, and fails at a
+          provider that never activated transfers for this account. */}
+      <PayoutCapability capability={payments.data?.payouts}/>
       <div className="between wrap">
         <label className="grow">Montant du retrait (FCFA)<input className="control" type="number" min={1} step={1} value={opAmount} onChange={e=>setOpAmount(e.target.value)}/></label>
         <label className="grow">Numéro Mobile Money<input className="control" type="tel" inputMode="numeric" value={opPhone} onChange={e=>setOpPhone(e.target.value.replace(/[^0-9]/g,''))}/></label>
-        <button className="btn btn-primary" disabled={busy || !online || operatorData.data.summary.verificationStatus!=='verified' || !Number.isInteger(Number(opAmount)) || Number(opAmount)<=0 || !/^[0-9]{8,15}$/.test(opPhone)} onClick={()=>act('/operator/payouts',{amountMinor:Number(opAmount),phoneNumber:opPhone,country:'BJ',network:null},'oppayout-'+crypto.randomUUID())}>Demander le retrait</button>
+        <button className="btn btn-primary" disabled={busy || !online || payments.data?.payouts?.canRequest===false || operatorData.data.summary.verificationStatus!=='verified' || !Number.isInteger(Number(opAmount)) || Number(opAmount)<=0 || !/^[0-9]{8,15}$/.test(opPhone)} onClick={()=>act('/operator/payouts',{amountMinor:Number(opAmount),phoneNumber:opPhone,country:'BJ',network:null},'oppayout-'+crypto.randomUUID())}>Demander le retrait</button>
       </div>
       {(operatorPayouts.data||[]).map(p=><div className="between" key={p.id}><span className="small">{fcfa(p.amountMinor)} · {p.phoneNumber}</span><Badge tone={status('payout',p.status).tone}>{status('payout',p.status).label}</Badge></div>)}
     </Card>}

@@ -152,6 +152,54 @@ export function payouts(db, adapter = null, config = {}) {
 
   return {
     configured: !!adapter,
+    /**
+     * What the platform can honestly claim about paying people out.
+     *
+     * `payoutsAvailable` only ever meant "a secret key is set in the
+     * environment". It could not mean more: whether FedaPay has ACTIVATED
+     * Payouts for this merchant is a fact about their account that no
+     * environment variable knows. Reporting that as `available: true` showed a
+     * driver a withdrawal button, took their request, reserved their balance,
+     * and failed at the provider — after which the money reappeared and a
+     * failed payout sat in Platform Ops with no explanation a driver could act
+     * on.
+     *
+     * The states are ordered by how much is actually PROVEN:
+     *
+     *   missing_provider      no payment adapter at all
+     *   missing_credentials   adapter present, no payout key
+     *   provider_not_activated  the provider refused the last attempts; on
+     *                         FedaPay this is what an unactivated Payouts
+     *                         account looks like from here
+     *   configured            credentials present, never yet proven by a real
+     *                         transfer — the honest state before the first one
+     *   available             a transfer has actually completed
+     *
+     * Only `available` is a claim. Everything else says what is missing.
+     */
+    async capability() {
+      if (!adapter) return { state: 'missing_provider', canRequest: false, provider: null };
+      const provider = adapter.name;
+      if (!adapter.payoutsAvailable) return { state: 'missing_credentials', canRequest: false, provider };
+      const history = await db.transaction(async tx => (await tx.query(`SELECT
+        count(*) FILTER (WHERE status='paid')::integer AS paid,
+        count(*) FILTER (WHERE status IN ('processing','paid'))::integer AS accepted,
+        count(*) FILTER (WHERE status='failed' AND updated_at>now()-interval '7 days')::integer AS recent_failures
+        FROM payout_requests WHERE provider=$1`, [provider])).rows[0]);
+      // A completed transfer is the only thing that proves the account works.
+      if (history.paid > 0) return { state: 'available', canRequest: true, provider };
+      // The provider accepted an initiation but nothing has settled yet: the
+      // account is working, the transfer is in flight.
+      if (history.accepted > 0) return { state: 'available', canRequest: true, provider };
+      // Every attempt so far was refused at the provider. On FedaPay that is
+      // what an unactivated Payouts account looks like from this side, and it
+      // is the most useful thing to tell somebody.
+      if (history.recent_failures > 0) return { state: 'provider_not_activated', canRequest: false, provider };
+      // Credentials are present and nothing has been tried. Requests are
+      // allowed — that is how the first one ever happens — but nothing claims
+      // the transfer will land.
+      return { state: 'configured', canRequest: true, provider };
+    },
     // Internal accessor for the agentic layer; API routes enforce authorization.
     async getById(id) {
       const row = await db.transaction(tx => loadRequest(tx, id));

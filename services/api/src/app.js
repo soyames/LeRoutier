@@ -132,7 +132,17 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     }
     if(method==='GET' && path==='/health') {await list('SELECT 1');return {status:'ok'};}
     if(method==='GET' && path==='/auth/config') return publicAuthConfig(config);
-    if(method==='GET' && path==='/payments/config') return {available:pay.configured,payouts:{available:!!(adapter && adapter.payoutsAvailable)}};
+    // `payouts.available` used to mean "a secret key is set", which is not
+    // something a driver can act on: they saw a withdrawal button, requested
+    // one, had their balance reserved, and the transfer failed at a provider
+    // that had never activated Payouts for this account. The state now says
+    // what is actually proven, and `available` stays a boolean so existing
+    // callers keep working — it is simply true only when it is true.
+    if(method==='GET' && path==='/payments/config') {
+      const payoutCapability=await payout.capability();
+      return {available:pay.configured,
+        payouts:{available:payoutCapability.state==='available',...payoutCapability}};
+    }
     // Public parcel tracking: safe projection only — no parties, phones or
     // payment data, ever. Rate limited per client address.
     const publicTracking=path.match(/^\/public\/parcel-tracking\/(LRP-[0-9A-Fa-f]{8})$/);
@@ -794,7 +804,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
           FROM workflow_runs WHERE status='failed' AND ($1::uuid IS NULL OR operator_id=$1) ORDER BY updated_at DESC LIMIT 10`,[scope])).rows;
         return {
           generatedAt:new Date().toISOString(),database:'ok',
-          fedapay:{collections:pay.configured,payouts:!!(adapter && adapter.payoutsAvailable),environment:adapter?.environment ?? null},
+          fedapay:{collections:pay.configured,payouts:await payout.capability(),environment:adapter?.environment ?? null},
           payments:{failed:d.failed_payments,anomalies7d:d.payment_anomalies},
           payouts:{failed:d.failed_payouts,processing:d.processing_payouts},
           incidents:{open:d.open_incidents},

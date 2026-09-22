@@ -309,3 +309,129 @@ test('a withdrawal is reserved once: approving twice cannot pay twice',async()=>
     `SELECT sum(net_minor)::integer AS total FROM operator_settlements WHERE payout_request_id=$1`,[first.id])).rows[0]);
   assert.equal(reserved.total,5000,'exactly the requested amount is held, once');
 });
+
+// ------------------------------------- what the platform may claim it can do --
+// `payoutsAvailable` only ever meant "a secret key is set in the environment".
+// Whether FedaPay ACTIVATED Payouts for this merchant is a fact about their
+// account that no environment variable knows — and reporting it as available
+// showed a driver a withdrawal button, took the request, reserved the balance,
+// and failed at the provider.
+test('payout capability reports what is proven, not what is configured',async()=>{
+  const {payouts}=await import('../src/payouts.js');
+
+  // No adapter at all.
+  assert.deepEqual(await payouts(db,null,{}).capability(),
+    {state:'missing_provider',canRequest:false,provider:null});
+
+  // An adapter whose payout key is absent. Collections may still work; paying
+  // somebody out is a different credential and a different account permission.
+  const noKey=payouts(db,{name:'fedapay',payoutsAvailable:false},{});
+  const missing=await noKey.capability();
+  assert.equal(missing.state,'missing_credentials');
+  assert.equal(missing.canRequest,false);
+
+  // Credentials present, nothing ever attempted. Requests are allowed — that
+  // is how a first transfer ever happens — but nothing claims it will land.
+  await db.transaction(tx=>tx.query("DELETE FROM payout_requests WHERE provider='fedapay'"));
+  const fresh=await payout.capability();
+  assert.equal(fresh.state,'configured');
+  assert.equal(fresh.canRequest,true,'the first payout has to be possible');
+  assert.notEqual(fresh.state,'available','credentials are not proof');
+});
+
+test('a provider that refuses every transfer is reported as not activated',async()=>{
+  const {b}=await paid();
+  await earn.credit({driverId:demo.driver,source:'ride',reference:'cap:'+randomUUID(),grossMinor:9000});
+  const destination=await payout.addDestination(driver,{country:'BJ',phoneNumber:'97000777'});
+  failPayouts=true;
+  const request=await payout.request(driver,{destinationId:destination.id,amountMinor:3000},randomUUID());
+  await assert.rejects(payout.approve(ops,request.id),{code:'PAYOUT_UNAVAILABLE'});
+
+  // This is exactly what an unactivated FedaPay Payouts account looks like
+  // from here, and it is the most useful thing to tell somebody.
+  const refused=await payout.capability();
+  assert.equal(refused.state,'provider_not_activated');
+  assert.equal(refused.canRequest,false,'a driver is not invited to try again into the same wall');
+  // The balance came back; nothing was lost while the platform learned this.
+  const summary=await earn.summary(driver);
+  assert.ok(summary.available>=3000,'the reserved amount was released: '+JSON.stringify(summary));
+  assert.ok(b);
+
+  // One completed transfer is what turns the claim true.
+  failPayouts=false;
+  await payout.approve(ops,request.id);
+  const settled=JSON.stringify(payoutEvent(request.id,'sent'));
+  await payout.webhook('fedapay',settled,headers(settled));
+  const proven=await payout.capability();
+  assert.equal(proven.state,'available');
+  assert.equal(proven.canRequest,true);
+});
+
+// ----------------------------------------------- collection integrity ------
+test('a passenger cannot influence what they are charged',async()=>{
+  const b=await hold();
+  // The intent body must be empty: amount and currency are the booking's, and
+  // the route whitelists nothing a caller could put there.
+  for(const hostile of [{amountMinor:1},{amount:1},{currency:'EUR'},{status:'succeeded'},{bookingId:b.id}]){
+    await assert.rejects(pay.initiate(passenger,b.id,hostile,randomUUID()),{code:'INVALID_PAYMENT'},
+      JSON.stringify(hostile)+' was accepted as payment input');
+  }
+  const intent=await pay.initiate(passenger,b.id,{},randomUUID());
+  const stored=await db.transaction(async tx=>(await tx.query('SELECT amount_minor,currency FROM payments WHERE id=$1',[intent.id])).rows[0]);
+  assert.equal(stored.amount_minor,b.amount_minor,'the amount is the booking’s, server-side');
+  assert.equal(stored.currency,'XOF');
+
+  // And a provider event claiming a different amount never confirms anything.
+  const cheated=txEvent('transaction.approved',intent.id,'approved',1);
+  await assert.rejects(webhook(cheated),{code:'PAYMENT_MISMATCH'});
+  const after=await db.transaction(async tx=>(await tx.query('SELECT status FROM bookings WHERE id=$1',[b.id])).rows[0]);
+  assert.equal(after.status,'held','the booking is not confirmed by a mismatched event');
+});
+
+test('a replayed webhook is idempotent; a reused event id with new data is refused',async()=>{
+  const {b,p}=await intent();
+  const event=txEvent('transaction.approved',p.id,'approved');
+  await webhook(event);
+  const confirmed=await db.transaction(async tx=>(await tx.query('SELECT status FROM bookings WHERE id=$1',[b.id])).rows[0]);
+  assert.equal(confirmed.status,'confirmed');
+
+  // The same delivery again, byte for byte: one event row, one confirmation.
+  await webhook(event);
+  await webhook(event);
+  const events=await db.transaction(async tx=>(await tx.query(
+    'SELECT count(*)::int AS n FROM payment_events WHERE payment_id=$1 AND event_id=$2',[p.id,event.id])).rows[0]);
+  assert.equal(events.n,1,'a provider retry is not a second payment');
+
+  // Same identifier, different content: that is not a retry, and accepting it
+  // would let anybody overwrite a settled payment by reusing an id.
+  const forged={...event,entity:{...event.entity,status:'canceled'}};
+  await assert.rejects(webhook(forged),{code:'EVENT_CONFLICT'});
+});
+
+test('an unsigned or stale webhook never reaches the domain',async()=>{
+  const {p}=await intent();
+  const raw=JSON.stringify(txEvent('transaction.approved',p.id,'approved'));
+  for(const [label,header] of [
+    ['missing',new Headers({})],
+    ['garbage',new Headers({'x-fedapay-signature':'nonsense'})],
+    ['wrong key',new Headers({'x-fedapay-signature':`t=${Math.floor(Date.now()/1000)},s=${'0'.repeat(64)}`})],
+    ['stale',new Headers({'x-fedapay-signature':sign(raw,Math.floor(Date.now()/1000)-4000)})],
+  ]){
+    await assert.rejects(pay.webhook('fedapay',raw,header),{code:'INVALID_WEBHOOK'},`${label} signature was accepted`);
+  }
+  const untouched=await db.transaction(async tx=>(await tx.query('SELECT status FROM payments WHERE id=$1',[p.id])).rows[0]);
+  assert.equal(untouched.status,'pending');
+});
+
+test('a TEST service can never take real money, in either direction',async()=>{
+  // The TEST corridor is restored for this case only; the suite otherwise runs
+  // the seeded service as real inventory.
+  await db.transaction(tx=>tx.query('UPDATE services SET is_demo=true WHERE id=$1',[demo.service]));
+  try{
+    const b=await hold();
+    await assert.rejects(pay.initiate(passenger,b.id,{},randomUUID()),{code:'FORBIDDEN'},
+      'a TEST booking must never reach a real provider');
+  } finally {
+    await db.transaction(tx=>tx.query('UPDATE services SET is_demo=false WHERE id=$1',[demo.service]));
+  }
+});

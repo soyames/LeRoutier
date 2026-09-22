@@ -962,8 +962,10 @@ test('a proof is identified by its own bytes, never by what the uploader claimed
   // The whole attack is a declaration that does not match the bytes. An SVG
   // announced as image/png is still a scripted page in a reviewer's browser,
   // so the declaration is never consulted.
-  for (const [label, bytes] of [['svg', SVG()], ['html', HTML()],
-    ['empty', new Uint8Array(0)], ['random', Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8])]]) {
+  /** @type {Array<[string, Uint8Array]>} */
+  const refused = [['svg', SVG()], ['html', HTML()],
+    ['empty', new Uint8Array(0)], ['random', Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8])]];
+  for (const [label, bytes] of refused) {
     assert.throws(() => detectEvidenceType(bytes), { code: 'INVALID_EVIDENCE_FILE' }, `${label} was accepted`);
   }
   assert.throws(() => detectEvidenceType(new Uint8Array(MAX_EVIDENCE_BYTES + 1)), { code: 'INVALID_EVIDENCE_FILE' });
