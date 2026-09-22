@@ -8,5 +8,7 @@ try {
   await migrate(db);
   await seedTestTransport(db);
   console.log('TEST transport seeded: six relative departures; public visibility disabled.');
-} catch (error) { console.error('TEST seed failed:', error.code ?? error.message); process.exitCode = 1; }
+  // Code AND message: the code alone turns an actionable failure — "add this
+  // table to the delete order" — into an unreadable one.
+} catch (error) { console.error('TEST seed failed:', [error.code, error.message].filter(Boolean).join(' — ')); process.exitCode = 1; }
 finally { await db.close(); }
