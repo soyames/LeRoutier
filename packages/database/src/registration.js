@@ -48,6 +48,32 @@ export function registrationPolicy(env = process.env) {
 }
 
 /**
+ * The hard limit the DATABASE ITSELF enforces, when it publishes one.
+ *
+ * Neon sets `neon.max_cluster_size` on the compute from the project's plan.
+ * It is not advisory: past it Neon makes the database READ-ONLY, which stops
+ * bookings, tickets, parcels and payments for every existing user at once —
+ * precisely the outcome this whole module exists to avoid.
+ *
+ * Read with the missing_ok form so a plain PostgreSQL (local development, CI,
+ * a future move off Neon) simply reports nothing instead of erroring. A gate
+ * that throws is a gate that blocks every registration, so the failure mode
+ * here has to be "no opinion".
+ *
+ * @param {{query:(sql:string,params?:unknown[])=>Promise<{rows:any[]}>}} tx
+ * @returns {Promise<number|null>} bytes, or null when the provider is silent
+ */
+export async function providerStorageLimit(tx) {
+  try {
+    const row = (await tx.query("SELECT current_setting('neon.max_cluster_size', true) AS value")).rows[0];
+    const megabytes = Number(String(row?.value ?? '').trim());
+    // Neon reports this in MB. Zero means "unlimited" on paid plans, which is
+    // an absence of a limit rather than a limit of nothing.
+    return Number.isFinite(megabytes) && megabytes > 0 ? Math.round(megabytes * 1024 * 1024) : null;
+  } catch { return null; }
+}
+
+/**
  * Measure the database and decide whether a new account may be created.
  * Read-only: safe to call from Platform Ops health as well as from the gate.
  * @param {{query:(sql:string,params?:unknown[])=>Promise<{rows:any[]}>}} tx
@@ -56,24 +82,48 @@ export async function registrationCapacity(tx, env = process.env) {
   const policy = registrationPolicy(env);
   const row = (await tx.query('SELECT pg_database_size(current_database())::bigint AS bytes')).rows[0];
   const usedBytes = Number(row?.bytes ?? 0);
-  const usedPercent = policy.limitBytes ? Math.round((usedBytes / policy.limitBytes) * 1000) / 10 : null;
+  const providerLimitBytes = await providerStorageLimit(tx);
+
+  // The limit actually enforced is the SMALLER of what somebody configured and
+  // what the database will really tolerate.
+  //
+  // Setting DATABASE_STORAGE_LIMIT_MB=10000 against a 512 MB plan would
+  // otherwise leave the gate permanently unreachable: usage never approaches
+  // the configured threshold, the console shows a comfortable percentage, and
+  // the first anybody hears of it is the database refusing writes. A
+  // configured value can tighten the door; it cannot prop it open.
+  const candidates = [policy.limitBytes, providerLimitBytes].filter(value => typeof value === 'number');
+  const limitBytes = candidates.length ? Math.min(...candidates) : null;
+  const limitSource = limitBytes === null ? 'none'
+    : policy.limitBytes !== null && limitBytes === policy.limitBytes ? 'configured' : 'provider';
+  // Somebody configured a limit the database will not honour. The gate is
+  // armed — on the real limit — but the configuration is still wrong, and
+  // saying only "armed" would hide a number an operator is trusting.
+  const overstated = policy.limitBytes !== null && providerLimitBytes !== null && policy.limitBytes > providerLimitBytes;
+
+  const usedPercent = limitBytes ? Math.round((usedBytes / limitBytes) * 1000) / 10 : null;
   const open = policy.registrationEnabled && (usedPercent === null || usedPercent < policy.threshold);
   return {
     usedBytes,
-    limitBytes: policy.limitBytes,
+    limitBytes,
+    // What each side said, so a console can explain a disagreement rather than
+    // just reporting the winner.
+    configuredLimitBytes: policy.limitBytes,
+    providerLimitBytes,
+    limitSource,
     usedPercent,
     registrationStopPercent: policy.threshold,
     registrationEnabled: policy.registrationEnabled,
     registrationsOpen: open,
     // Whether the storage gate can actually fire.
     //
-    // Without DATABASE_STORAGE_LIMIT_MB there is nothing to measure against,
-    // so `registrationsOpen` is true for the same reason an unplugged smoke
-    // alarm is silent. Platform Ops was shown that as a green "capacity
-    // available", which is the worst way to report a protection that is not
-    // running: the one screen meant to warn about it confirmed the opposite.
-    // Said out loud here so no console has to infer it from a null.
-    storageProtection: policy.limitBytes ? 'armed' : 'not_configured',
+    // Without any limit at all there is nothing to measure against, so
+    // `registrationsOpen` is true for the same reason an unplugged smoke alarm
+    // is silent. Platform Ops was shown that as a green "capacity available",
+    // which is the worst way to report a protection that is not running: the
+    // one screen meant to warn about it confirmed the opposite. Said out loud
+    // here so no console has to infer it from a null.
+    storageProtection: limitBytes === null ? 'not_configured' : overstated ? 'misconfigured' : 'armed',
     // Why it is closed, for Platform Ops only. Never sent to the public.
     reason: open ? null : policy.registrationEnabled ? 'storage' : 'disabled',
   };

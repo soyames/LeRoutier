@@ -193,3 +193,104 @@ test('Platform Ops health carries the armed state, so a console cannot infer it 
   // And the public never learns any of it.
   assert.ok(!JSON.stringify(view.storage).includes('DATABASE_URL'));
 });
+
+// ---------------------------------------- the limit the database enforces --
+// Neon publishes neon.max_cluster_size from the project's plan, and past it
+// the database becomes READ-ONLY — bookings, tickets, parcels and payments
+// stop for everybody at once. That is the exact outcome this module exists to
+// avoid, so the provider's own number is treated as authoritative.
+test('a provider limit is read where one is published, and ignored where none is', async () => {
+  const { providerStorageLimit } = await import('../src/registration.js');
+  // Plain PostgreSQL does not publish it. The missing_ok form must report
+  // "no opinion" rather than throw: a gate that throws blocks every
+  // registration, which is a worse failure than having no limit.
+  assert.equal(await db.transaction(tx => providerStorageLimit(tx)), null);
+
+  const say = value => ({ query: async () => ({ rows: [{ value }] }) });
+  assert.equal(await providerStorageLimit(say('512')), 512 * 1024 * 1024);
+  assert.equal(await providerStorageLimit(say(' 512 ')), 512 * 1024 * 1024);
+  // Zero means "no limit" on a paid plan, not "a limit of nothing".
+  assert.equal(await providerStorageLimit(say('0')), null);
+  assert.equal(await providerStorageLimit(say('')), null);
+  assert.equal(await providerStorageLimit(say(null)), null);
+  assert.equal(await providerStorageLimit(say('unlimited')), null);
+  // A database that refuses the question at all is silent, never fatal.
+  assert.equal(await providerStorageLimit({ query: async () => { throw new Error('nope'); } }), null);
+});
+
+test('a configured limit can tighten the door but never prop it open', async () => {
+  // The dangerous misconfiguration: DATABASE_STORAGE_LIMIT_MB=10000 against a
+  // 512 MB plan leaves the threshold permanently unreachable. Usage never
+  // approaches it, the console shows a comfortable percentage, and the first
+  // anybody hears of the problem is the provider refusing writes.
+  const { registrationCapacity } = await import('../src/registration.js');
+  const provider = bytes => ({
+    query: async sql => ({ rows: [sql.includes('pg_database_size')
+      ? { bytes: String(450 * 1024 * 1024) } : { value: String(bytes) }] }),
+  });
+
+  env({ DATABASE_STORAGE_LIMIT_MB: '10000' });
+  const overstated = await registrationCapacity(provider(512), process.env);
+  assert.equal(overstated.storageProtection, 'misconfigured');
+  assert.equal(overstated.limitBytes, 512 * 1024 * 1024, 'the real limit wins');
+  assert.equal(overstated.limitSource, 'provider');
+  assert.equal(overstated.configuredLimitBytes, 10000 * 1024 * 1024, 'and the wrong number is named, so it can be fixed');
+  assert.equal(overstated.registrationsOpen, false, '450 of 512 MB is past the 85% threshold');
+
+  // A configured limit BELOW the provider's is a deliberate margin and is
+  // honoured as the operator's decision.
+  env({ DATABASE_STORAGE_LIMIT_MB: '256' });
+  const tighter = await registrationCapacity(provider(512), process.env);
+  assert.equal(tighter.storageProtection, 'armed');
+  assert.equal(tighter.limitBytes, 256 * 1024 * 1024);
+  assert.equal(tighter.limitSource, 'configured');
+});
+
+test('an unconfigured deployment arms itself from the database rather than failing open', async () => {
+  const { registrationCapacity } = await import('../src/registration.js');
+  const provider = ({ used, limit }) => ({
+    query: async sql => ({ rows: [sql.includes('pg_database_size')
+      ? { bytes: String(used) } : { value: limit === null ? '' : String(limit) }] }),
+  });
+  env({});
+
+  // On Neon, with nothing configured, the protection is armed on the number
+  // the database itself will enforce. Previously this deployment was open
+  // forever with no measurement at all.
+  const armed = await registrationCapacity(provider({ used: 48 * 1024 * 1024, limit: 512 }), process.env);
+  assert.equal(armed.storageProtection, 'armed');
+  assert.equal(armed.limitSource, 'provider');
+  assert.equal(armed.limitBytes, 512 * 1024 * 1024);
+  assert.equal(armed.registrationsOpen, true, '48 of 512 MB is nowhere near the threshold');
+  assert.ok(armed.usedPercent > 9 && armed.usedPercent < 10);
+
+  // Where neither side offers a limit there is genuinely nothing to measure,
+  // and the honest report is that the protection is not running.
+  const silent = await registrationCapacity(provider({ used: 48 * 1024 * 1024, limit: null }), process.env);
+  assert.equal(silent.storageProtection, 'not_configured');
+  assert.equal(silent.limitSource, 'none');
+  assert.equal(silent.limitBytes, null);
+  assert.equal(silent.usedPercent, null);
+  assert.equal(silent.registrationsOpen, true, 'and it still fails open, which is the right default');
+});
+
+test('nonsense configuration cannot invent a limit, and the refusal stays opaque', async () => {
+  const { registrationCapacity, registrationPolicy } = await import('../src/registration.js');
+  // Already covered for the policy; asserted again through the capacity read
+  // because that is what the gate and the console actually consume.
+  for (const value of ['0', '-1', 'plenty', '', 'NaN']) {
+    env({ DATABASE_STORAGE_LIMIT_MB: value });
+    assert.equal(registrationPolicy(process.env).limitBytes, null, `${value} must not become a limit`);
+    const silent = { query: async sql => ({ rows: [sql.includes('pg_database_size') ? { bytes: '1000' } : { value: '' }] }) };
+    const capacity = await registrationCapacity(silent, process.env);
+    assert.equal(capacity.storageProtection, 'not_configured');
+    assert.equal(capacity.limitBytes, null, `${value} produced a fabricated limit`);
+  }
+  // And a real refusal still tells the public nothing about capacity.
+  env({ REGISTRATION_ENABLED: 'false' });
+  await assert.rejects(mapIdentity(db, { subject: 'opaque-' + randomUUID(), issuer: ISSUER }),
+    /** @param {any} error */ error => {
+      assert.ok(!/\d+\s*%|byte|octet|storage|neon|cluster|quota/i.test(error.message), error.message);
+      return true;
+    });
+});
