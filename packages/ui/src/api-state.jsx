@@ -26,10 +26,10 @@ export function SessionPanel({onWorkspace=undefined}) {
     try{setNotice(await resetPassword(email));}catch(e){setError(e.message);}finally{setBusy(false);}}
   if(!configured) return <Card><p role="status">Connexion au service indisponible. Réessayez ultérieurement.</p></Card>;
   return <Card className="stack">
-    {!online && <p role="status">Hors ligne — les actions nécessitent une connexion.</p>}
+    {!online && <p role="status">Hors ligne : les actions nécessitent une connexion.</p>}
     {identity ? <><div className="between"><span>{identity.display_name || 'Compte connecté'}</span><button className="btn btn-soft" disabled={busy} onClick={()=>run(logout)}>Déconnexion</button></div>
       {!user && <p role="status">
-        {isDriverApp(role) && identity.role==='convoyeur' && 'Votre compte convoyeur est actif — utilisez la console Conducteur en mode convoyeur.'}
+        {isDriverApp(role) && identity.role==='convoyeur' && 'Votre compte convoyeur est actif : utilisez la console Conducteur en mode convoyeur.'}
         {isDriverApp(role) && identity.role==='ops' && 'Votre compte administrateur s’utilise dans le centre opérationnel (app Ops), pas dans la console conducteur.'}
         {isDriverApp(role) && identity.role==='passenger' && 'Votre compte passager n’est pas encore provisionné comme équipage. Créez un compte opérateur ou demandez votre provisionnement.'}
         {role==='ops' && identity.role==='passenger' && 'Cet espace est réservé aux opérateurs de transport.'}
@@ -46,7 +46,7 @@ export function SessionPanel({onWorkspace=undefined}) {
           {role.map(r=><button key={r} className="control" disabled={busy || !online}
             onClick={()=>run(()=>loginDemo(r))}>Développement : {r}</button>)}
         </div>}
-        {demoLogin && <details className="stack"><summary>Profils TEST — tous les espaces</summary>
+        {demoLogin && <details className="stack"><summary>Profils TEST : tous les espaces</summary>
           <p className="small muted">Données de démonstration locales. Aucun paiement réel.</p>
           <div className="demo-profiles">{[
             ['passenger','Voyageur','/tickets'],['owner-driver','Chauffeur indépendant','/work/today'],

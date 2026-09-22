@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 const APP='http://127.0.0.1:4173';
 async function login(page){
   await page.goto(APP+'/account');
-  await page.getByText('Profils TEST — tous les espaces',{exact:true}).click();
+  await page.getByText('Profils TEST : tous les espaces',{exact:true}).click();
   await page.getByRole('button',{name:'TEST : Voyageur',exact:true}).click();
 }
 async function downloadPdf(page,name){
@@ -64,7 +64,7 @@ test('cancelled booking documents remain printable and do not claim a completed 
   await expect(page.locator('.ticket').first().getByText('Annulé',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Afficher mon billet'}).first().click();
   await page.getByRole('button',{name:'Annulation / remboursement',exact:true}).click();
-  await expect(page.getByText('Remboursement à examiner — aucun versement confirmé',{exact:true})).toBeVisible();
+  await expect(page.getByText('Remboursement à examiner : aucun versement confirmé',{exact:true})).toBeVisible();
   await downloadPdf(page,'cancellation');
 });
 test('camera denial leaves public reference entry usable',async({page})=>{

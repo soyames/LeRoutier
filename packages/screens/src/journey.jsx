@@ -48,15 +48,15 @@ export function JourneyTimeline({ bookingId }) {
   // Ephemeral, on-device only: coordinates never leave the browser.
   function useMyPosition() {
     const point = data?.firstMile?.boardingPoint;
-    if (!navigator.geolocation || !point || point.latitude === null) { setLocating('Position indisponible — utilisez le plan.'); return; }
+    if (!navigator.geolocation || !point || point.latitude === null) { setLocating('Position indisponible : utilisez le plan.'); return; }
     setLocating('Localisation…');
     navigator.geolocation.getCurrentPosition(
       position => {
         const minutes = localTravelEstimateMinutes({ latitude: position.coords.latitude, longitude: position.coords.longitude }, point);
-        if (minutes === null) { setLocating('Position indisponible — utilisez le plan.'); return; }
+        if (minutes === null) { setLocating('Position indisponible : utilisez le plan.'); return; }
         setTravelMinutes(minutes); setLocating('');
       },
-      () => setLocating('Localisation refusée — l’heure ci-dessous reste une estimation standard.'),
+      () => setLocating('Localisation refusée : l’heure ci-dessous reste une estimation standard.'),
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 300_000 },
     );
   }
@@ -73,7 +73,7 @@ export function JourneyTimeline({ bookingId }) {
       <SectionTitle icon={MapPin} title="Point d’embarquement exact"/>
       {departurePoint ? <>
         <strong>{departurePoint.name}</strong>
-        <span className="small muted">{departurePoint.city}{departurePoint.landmark ? ` — ${departurePoint.landmark}` : ''}</span>
+        <span className="small muted">{departurePoint.city}{departurePoint.landmark ? ` · ${departurePoint.landmark}` : ''}</span>
         {departurePoint.directionsUrl && <a className="small" href={departurePoint.directionsUrl} target="_blank" rel="noreferrer"
           onClick={() => track('directions_clicked')}>Voir le point d’embarquement sur le plan</a>}
       </> : <p className="small muted">Le point d’embarquement exact n’est pas encore publié par l’opérateur.</p>}
@@ -118,7 +118,7 @@ export function JourneyTimeline({ bookingId }) {
             onClick={() => track('directions_clicked')}>Itinéraire</a>}
           <button className="btn btn-soft" onClick={() => track('self_selected')}>J’y vais par mes propres moyens</button>
         </div>
-        <Badge tone="neutral">Service externe — non intégré</Badge>
+        <Badge tone="neutral">Service externe : non intégré</Badge>
       </> : <>
         <p className="small muted">Aucun partenaire de transport local n’est proposé ici pour le moment.</p>
         {firstMile.directionsUrl && <a className="btn btn-soft" href={firstMile.directionsUrl} target="_blank" rel="noreferrer"
@@ -144,7 +144,7 @@ export function JourneyTimeline({ bookingId }) {
     {/* Last mile only becomes relevant once the passenger is actually moving. */}
     {lastMile.available && <Card className="stack">
       <SectionTitle icon={Car} title="À l’arrivée"/>
-      {arrivalPoint && <span className="small muted">{arrivalPoint.name}{arrivalPoint.landmark ? ` — ${arrivalPoint.landmark}` : ''}</span>}
+      {arrivalPoint && <span className="small muted">{arrivalPoint.name}{arrivalPoint.landmark ? ` · ${arrivalPoint.landmark}` : ''}</span>}
       <p>Besoin d’un transport jusqu’à votre destination finale ?</p>
       <div className="controls">
         {lastMile.provider && <a className="btn btn-primary" href={lastMile.provider.launchUrl} target="_blank" rel="noreferrer"

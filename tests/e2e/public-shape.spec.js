@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { mockApi } from './api-fixture.js';
 
 const APP = 'http://127.0.0.1:4173';
 
@@ -67,4 +68,28 @@ test('the professional entry explains the three situations and stays public', as
   }
   // A company's employees are the company's responsibility, and the page says so.
   await expect(page.getByText(/aucune pièce d’identité personnelle à déposer ici/)).toBeVisible();
+});
+
+test('frequent corridors are resolved from real geography and run a real search', async ({ page }) => {
+  await mockApi(page);
+  await page.goto(APP + '/');
+  const corridors = page.getByRole('group', { name: 'Trajets fréquents' });
+  await expect(corridors).toBeVisible();
+  const pill = corridors.getByRole('button').first();
+  const label = (await pill.textContent()) ?? '';
+  // A pill only exists when both of its places exist, so its label is real
+  // geography rather than a hardcoded route name.
+  expect(label).toMatch(/\S+\s*→\s*\S+/);
+  await pill.click();
+  // It runs the ordinary search, with both endpoints as canonical place ids.
+  await expect(page).toHaveURL(/\/trips\?.*from=place%3A[0-9a-f-]{36}.*to=place%3A[0-9a-f-]{36}/);
+});
+
+test('the search explains segment travel without quoting a price it cannot know', async ({ page }) => {
+  await mockApi(page);
+  await page.goto(APP + '/');
+  await expect(page.getByText(/descendre à une étape intermédiaire/)).toBeVisible();
+  // The claim is about how fares work, never an invented amount.
+  const note = (await page.getByText(/descendre à une étape intermédiaire/).textContent()) ?? '';
+  expect(note).not.toMatch(/\d[\d\s]*FCFA/);
 });

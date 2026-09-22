@@ -20,7 +20,7 @@ export function About() {
 
     <Section title="Ce que fait LeRoutier">
       <p>LeRoutier relie les voyageurs, les compagnies de transport, les chauffeurs indépendants, les équipages, les colis, les lignes, les paiements, le suivi en direct et la gestion opérationnelle dans une seule plateforme.</p>
-      <p>Les voyageurs recherchent des départs, réservent un billet en ligne au tarif affiché, suivent leur voyage et envoient des colis. Les compagnies et les chauffeurs indépendants gèrent leurs lignes, leurs tarifs, leurs services, leurs équipages, leurs colis, leurs incidents et leur activité — avec une assistance intelligente qui s’appuie uniquement sur les données réelles de la plateforme.</p>
+      <p>Les voyageurs recherchent des départs, réservent un billet en ligne au tarif affiché, suivent leur voyage et envoient des colis. Les compagnies et les chauffeurs indépendants gèrent leurs lignes, leurs tarifs, leurs services, leurs équipages, leurs colis, leurs incidents et leur activité : avec une assistance intelligente qui s’appuie uniquement sur les données réelles de la plateforme.</p>
     </Section>
 
     <Section title="Qui sert LeRoutier">
@@ -41,7 +41,7 @@ export function About() {
         <li><strong>Colis standard et express</strong> : l’express n’est proposé que lorsqu’un départ du jour peut réellement livrer le jour même.</li>
         <li><strong>Intelligence tarifaire</strong> : un outil consultatif réservé aux opérateurs pour comparer leurs tarifs au marché observé ; l’opérateur reste responsable du tarif final.</li>
         <li><strong>Accès USSD prévu</strong> : la réservation par téléphone simple est préparée pour les voyageurs sans smartphone, dans l’attente des autorisations réglementaires.</li>
-        <li><strong>Assistance intelligente</strong> : un assistant intégré répond à partir des données réelles — il n’invente jamais une place, un tarif ou une heure.</li>
+        <li><strong>Assistance intelligente</strong> : un assistant intégré répond à partir des données réelles : il n’invente jamais une place, un tarif ou une heure.</li>
       </ul>
     </Section>
 

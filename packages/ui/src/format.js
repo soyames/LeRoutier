@@ -77,7 +77,7 @@ const SETS = { booking: BOOKING, service: SERVICE, parcel: PARCEL, payment: PAYM
 export function status(kind, value) {
   const entry = SETS[kind]?.[value ?? ''];
   // An unmapped value is shown neutrally rather than leaking the enum name.
-  if (!entry) return { label: '—', tone: 'neutral', known: false };
+  if (!entry) return { label: '–', tone: 'neutral', known: false };
   return { label: entry[0], tone: entry[1], known: true };
 }
 
@@ -122,5 +122,5 @@ export function mapLink(latitude, longitude, zoom = 17) {
 
 /** "Gare de Jonquet — en face du marché", skipping whatever is missing. */
 export function placeLabel(name, landmark) {
-  return [name, landmark].filter(Boolean).join(' — ') || null;
+  return [name, landmark].filter(Boolean).join(' · ') || null;
 }

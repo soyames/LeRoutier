@@ -137,7 +137,7 @@ test('the workspace switcher names the job and the company, never a role string'
   await page.goto(APP + '/ops/today');
   await login(page);
   await page.getByRole('button', { name: /Changer d’espace/ }).click();
-  await expect(page.getByRole('menuitem', { name: /Exploitation — Baobab Express/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Exploitation · Baobab Express/ })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: /Voyageur/ })).toBeVisible();
   // Internal role names never appear in the switcher.
   await expect(page.getByRole('menuitem', { name: /^ops$|^driver$|^convoyeur$/ })).toHaveCount(0);

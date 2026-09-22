@@ -66,6 +66,6 @@ test('offline state disables booking actions',async({page,context})=>{
   await page.getByRole('button',{name:'Choisir'}).first().click();
   await expect(page.getByRole('button',{name:'Continuer vers le paiement'})).toBeEnabled();
   await context.setOffline(true);
-  await expect(page.getByText('Hors ligne — les actions nécessitent une connexion.')).toBeVisible();
+  await expect(page.getByText('Hors ligne : les actions nécessitent une connexion.')).toBeVisible();
   await expect(page.getByRole('button',{name:'Continuer vers le paiement'})).toBeDisabled();
 });

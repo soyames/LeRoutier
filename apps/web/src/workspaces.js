@@ -13,7 +13,7 @@ export function workspacesFor(user) {
   const independent = user.role === 'driver' && user.operator_type === 'independent' && user.owner_user_id === user.id;
   // Workspaces are named after the job and the company, never after a role
   // string: "Conducteur — Baobab Express", not "driver".
-  const company = user.operator_name ? ` — ${user.operator_name}` : '';
+  const company = user.operator_name ? ` · ${user.operator_name}` : '';
   if (user.role === 'driver' || user.role === 'convoyeur') {
     available.push({
       id: WORK,

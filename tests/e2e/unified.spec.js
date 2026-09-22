@@ -101,7 +101,7 @@ test('passenger sees the exact boarding point, first-mile suggestion and timelin
   // Gozem is offered and labelled external, with no fare and no ETA claim.
   await expect(page.getByRole('link', { name: /Ouvrir Gozem/ })).toBeVisible();
   await expect(page.getByText(/LeRoutier ne réserve pas la course/)).toBeVisible();
-  await expect(page.getByText('Service externe — non intégré')).toBeVisible();
+  await expect(page.getByText('Service externe : non intégré')).toBeVisible();
   // "I'll get there myself" is always available.
   await expect(page.getByRole('button', { name: /J’y vais par mes propres moyens/ })).toBeVisible();
   // Arrival is not invented when the operator has not scheduled one.

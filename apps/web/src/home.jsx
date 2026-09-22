@@ -37,7 +37,7 @@ export function Home() {
         themselves still exist and stay linked from the footer. */}
     <Card className="assistant-invite stack">
       <div className="row"><MessagesSquare size={20} aria-hidden="true"/><h2 style={{ margin: 0, fontSize: 18 }}>Une question sur votre trajet ?</h2></div>
-      <p style={{ margin: 0 }}>Demandez les départs réellement publiés entre deux villes, un tarif, le suivi d’un colis ou l’état de votre réservation. L’assistant répond à partir des services réels — jamais d’un horaire inventé.</p>
+      <p style={{ margin: 0 }}>Demandez les départs réellement publiés entre deux villes, un tarif, le suivi d’un colis ou l’état de votre réservation. L’assistant répond à partir des services réels : jamais d’un horaire inventé.</p>
       <div className="controls">
         <button className="btn btn-primary" onClick={() => window.dispatchEvent(new Event('leroutier:assistant-open'))}>
           <MessagesSquare size={16} aria-hidden="true"/>Ouvrir l’assistant</button>

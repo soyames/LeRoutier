@@ -114,6 +114,36 @@ export function JourneySearchFields({ originMode, setOriginMode, originPlace, se
 }
 
 /** Public home hero: the single most important action in the product. */
+// The corridors people actually ask for, offered as one tap instead of two
+// pickers. Each pill is resolved against the real geography the API serves:
+// a corridor whose endpoints do not both exist simply is not shown, so this
+// can never advertise a route LeRoutier has no places for. Tapping one runs
+// the ordinary search, which still answers honestly when nothing is published.
+const CORRIDORS = [['Cotonou', 'Parakou'], ['Cotonou', 'Porto-Novo'], ['Cotonou', 'Bohicon'],
+  ['Cotonou', 'Abomey-Calavi'], ['Cotonou', 'Natitingou'], ['Cotonou', 'Ouidah']];
+const foldName = value => String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+
+function CorridorPills({ onPick }) {
+  const places = useApi('/places?type=commune');
+  const byName = useMemo(() => {
+    const index = new Map();
+    for (const place of places.data || []) index.set(foldName(place.name), place);
+    return index;
+  }, [places.data]);
+  const available = useMemo(() => CORRIDORS
+    .map(([from, to]) => ({ from: byName.get(foldName(from)), to: byName.get(foldName(to)) }))
+    .filter(pair => pair.from && pair.to), [byName]);
+  if (!available.length) return null;
+  return <div className="corridor-pills">
+    <span className="small muted" id="corridor-pills-label">Trajets fréquents</span>
+    <div className="corridor-pill-row" role="group" aria-labelledby="corridor-pills-label">
+      {available.map(({ from, to }) => <button key={from.id + to.id} type="button" className="corridor-pill"
+        onClick={() => onPick(from.id, to.id)}>{from.name} → {to.name}</button>)}
+    </div>
+    <span className="small muted">Vous pouvez aussi descendre à une étape intermédiaire : le tarif correspond au trajet réellement parcouru.</span>
+  </div>;
+}
+
 export function TripSearchHero() {
   const navigate = useNavigate();
   const [originMode, setOriginMode] = useState('current');
@@ -142,6 +172,11 @@ export function TripSearchHero() {
       originPlace={originPlace} setOriginPlace={setOriginPlace}
       destinationPlace={destinationPlace} setDestinationPlace={setDestinationPlace}
       day={day} setDay={setDay} onSearch={search} onSwap={swap}/>
+    <CorridorPills onPick={(from, to) => {
+      const params = new URLSearchParams({ date: day, from: `place:${from}`, to: `place:${to}` });
+      if (new URLSearchParams(window.location.search).get('testMode') === '1') params.set('testMode', '1');
+      navigate(`/trips?${params}`);
+    }}/>
     <span className="small muted">Aucun compte nécessaire pour rechercher.</span>
   </Card>;
 }
@@ -299,7 +334,7 @@ function LegacyServiceList({ originStopId, destinationStopId, day, choose }) {
   const showingNext = !anyDay && onDay.length === 0 && all.length > 0;
   const shown = anyDay || showingNext ? all : onDay;
   return <><SectionTitle title={anyDay || showingNext ? 'Prochains départs' : `Départs du ${dayLong(day)}`}/>
-    {showingNext && <p className="small muted" role="status">Aucun départ le {dayLong(day)} — voici les prochains départs sur ce trajet.</p>}
+    {showingNext && <p className="small muted" role="status">Aucun départ le {dayLong(day)} : voici les prochains départs sur ce trajet.</p>}
     {services.loading ? <SkeletonCards count={2} lines={4}/>
       : services.error ? <ErrorState text="Impossible de charger les départs." onRetry={services.reload}/>
         : !shown.length ? <Card className="stack">
@@ -315,7 +350,7 @@ function LegacyServiceList({ originStopId, destinationStopId, day, choose }) {
                 <div className="trip-times">
                   <strong>{time(service.departure_at)}</strong>
                   <span className="arrow">→</span>
-                  <strong>{service.arrival_at ? time(service.arrival_at) : '—'}</strong>
+                  <strong>{service.arrival_at ? time(service.arrival_at) : '–'}</strong>
                   {trip && <span className="trip-duration">{trip}</span>}
                 </div>
                 {anyDay && <Badge tone="neutral">{dayShort(service.departure_at)}</Badge>}
@@ -456,7 +491,7 @@ export function Tickets({ focusId = null }) {
                       : onlinePayments
                         ? <button className="btn btn-primary" disabled={!!busy || !online} onClick={() => pay(b.id)}>
                           {busy === b.id ? 'Ouverture du paiement…' : pay$ === 'failed' ? 'Réessayer le paiement' : 'Payer en ligne'}</button>
-                        : <p className="small muted" role="status">Le paiement en ligne est momentanément indisponible. Votre place sera libérée automatiquement — aucun billet n’est émis sans paiement.</p>}
+                        : <p className="small muted" role="status">Le paiement en ligne est momentanément indisponible. Votre place sera libérée automatiquement : aucun billet n’est émis sans paiement.</p>}
                     {pay$ === 'pending' && <p className="small muted">Nous attendons la confirmation de votre paiement. Cette page se met à jour toute seule.</p>}
                   </div>}
 
@@ -592,7 +627,7 @@ export function PrivacyCenter() {
       </div>}
       <div className="stack">
         <strong>Supprimer mon compte</strong>
-        {deletionStatus ? <p role="status">Votre demande est « {deletionStatus.status} »{blockers.length ? ` — en attente : ${blockers.map(b => ({ active_booking: 'réservation active', pending_payment: 'paiement en attente', active_parcel: 'colis en cours' })[b.kind] ?? b.kind).join(', ')}` : ''}. Nous vous informerons du résultat.</p>
+        {deletionStatus ? <p role="status">Votre demande est « {deletionStatus.status} »{blockers.length ? ` : en attente : ${blockers.map(b => ({ active_booking: 'réservation active', pending_payment: 'paiement en attente', active_parcel: 'colis en cours' })[b.kind] ?? b.kind).join(', ')}` : ''}. Nous vous informerons du résultat.</p>
           : confirmDelete ? <div className="stack">
             <p className="small muted">Votre identité de connexion et vos données seront supprimées ou anonymisées. Certaines données (paiements, réservations, colis, preuves de sécurité) peuvent être conservées pour des raisons légales, comptables ou de litiges. Les voyages, colis ou paiements en cours seront d’abord clôturés.</p>
             <div className="controls">
@@ -656,7 +691,7 @@ export function Account() {
     </>}
     {/* Two different people reach this point. Somebody who only travels is
         offered the professional door, quietly. Somebody who already works here
-        is offered the way into the workspace they actually hold — never a role
+        is offered the way into the workspace they actually hold : never a role
         switcher, and never an invitation to onboard a second time. */}
     {user && user.role !== 'passenger' && <Card className="stack">
       <SectionTitle icon={Store} title="Espace professionnel"/>
@@ -814,7 +849,7 @@ export function Parcels() {
             <button className="btn btn-primary" disabled={busy || !online || !quote}>{busy ? 'Enregistrement…' : 'Confirmer l’envoi'}</button>
             <button type="button" className="btn btn-soft" onClick={() => setStep(1)}>Retour</button>
           </div>
-          <p className="small muted">Le tarif est fixé par le transporteur — aucun prix n’est inventé.</p>
+          <p className="small muted">Le tarif est fixé par le transporteur : aucun prix n’est inventé.</p>
         </>}
       </form>}
     </Card>}

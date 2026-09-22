@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 const APP='http://127.0.0.1:4173';
 async function login(page,label){
   await page.goto(APP+'/account');
-  await page.getByText('Profils TEST — tous les espaces',{exact:true}).click();
+  await page.getByText('Profils TEST : tous les espaces',{exact:true}).click();
   await page.getByRole('button',{name:'TEST : '+label,exact:true}).click();
   // Platform Ops has its own control plane and lands there, not on a company
   // operations console it has no operator scope for.

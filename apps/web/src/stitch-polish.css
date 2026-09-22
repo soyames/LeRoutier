@@ -276,3 +276,14 @@ overflow:hidden}
 /* The invitation that replaced the wall of SEO links on the home page. */
 .assistant-invite{border-color:#f3dbc7!important}
 .assistant-invite .row{gap:9px;align-items:center}
+
+/* Frequent corridors: one tap instead of two pickers.
+   A horizontal row that wraps rather than scrolls, so every corridor is
+   reachable without a swipe and nothing sits outside the card. */
+.corridor-pills{display:flex;flex-direction:column;gap:7px}
+.corridor-pill-row{display:flex;flex-wrap:wrap;gap:7px}
+.corridor-pill{border:1px solid var(--line);background:#fff;color:var(--navy);border-radius:999px;
+  padding:9px 13px;min-height:38px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px}
+.corridor-pill:hover{border-color:var(--lr-primary);color:var(--lr-primary-strong)}
+.corridor-pill:focus-visible{outline:3px solid rgba(177,95,0,.25);outline-offset:1px}

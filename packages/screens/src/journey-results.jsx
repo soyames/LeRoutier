@@ -8,7 +8,7 @@ import './operator-trust.css';
 
 const JourneyMap=lazy(()=>import('./map.jsx').then(m=>({default:m.JourneyPlanMap})));
 export function TestBadge(){return <Badge tone="danger">TEST</Badge>;}
-export function ModeTestBanner(){return <div className="notice test-mode-banner" role="status"><strong>Mode test</strong> — Ces trajets sont fictifs et servent uniquement à tester LeRoutier. Aucun paiement réel ne sera effectué.</div>;}
+export function ModeTestBanner(){return <div className="notice test-mode-banner" role="status"><strong>Mode test</strong> : Ces trajets sont fictifs et servent uniquement à tester LeRoutier. Aucun paiement réel ne sera effectué.</div>;}
 const km=metres=>Number.isFinite(metres)?`${Math.round(metres/100)/10} km`:null;
 const mins=seconds=>Number.isFinite(seconds)?`${Math.round(seconds/60)} min`:null;
 const durText=seconds=>Number.isFinite(seconds)?`${Math.floor(seconds/3600)} h ${String(Math.round((seconds%3600)/60)).padStart(2,'0')}`:null;
@@ -46,7 +46,7 @@ function OperatorLine({option}){
 export function OfferCard({option,originLabel,destinationLabel,selected,onSelect,onView,onChoose,compact=false}){
   const seats=option.available,soldOut=seats===0;
   return <article className={`card offer-card ${selected?'selected':''} ${compact?'compact':''}`} onMouseEnter={onSelect} onFocusCapture={onSelect} aria-label={`Trajet de ${option.operatorName}`}>
-    <div className="offer-head between wrap"><div className="trip-times"><strong>{time(option.departureAt)}</strong><span className="arrow">→</span><strong>{option.etaAt?time(option.etaAt):'—'}</strong>{option.totalDurationS!=null&&<span className="trip-duration">{durText(option.totalDurationS)}</span>}</div>
+    <div className="offer-head between wrap"><div className="trip-times"><strong>{time(option.departureAt)}</strong><span className="arrow">→</span><strong>{option.etaAt?time(option.etaAt):'–'}</strong>{option.totalDurationS!=null&&<span className="trip-duration">{durText(option.totalDurationS)}</span>}</div>
       <div className="offer-head-end">{option.isTest&&<TestBadge/>}<Badge tone={soldOut?'danger':seats>2?'success':'warning'}><Armchair size={13}/>{soldOut?'Complet':`${seats} place${seats>1?'s':''}`}</Badge></div></div>
     <div className="offer-journey"><div className="offer-line"><span className="offer-dot start"/><div><strong>{originLabel??option.pickupStop.city}</strong>{option.firstMile&&<span className="small muted"> · Premier kilomètre : {mins(option.firstMile.durationS)} · {km(option.firstMile.distanceM)}</span>}</div></div><div className="offer-rail"/><div className="offer-line"><span className="offer-dot end"/><div><strong>{destinationLabel??option.dropoffStop.city}</strong>{option.lastMile&&<span className="small muted"> · Dernier kilomètre : {mins(option.lastMile.durationS)} · {km(option.lastMile.distanceM)}</span>}</div></div></div>
     <p className="small muted">Montée : {option.pickupStop.name} · Descente : {option.dropoffStop.name}</p>
@@ -62,20 +62,20 @@ function OfferDetails({option,originLabel,destinationLabel,originPoint,destinati
   useEffect(()=>{const previous=document.activeElement;dialog.current.showModal();return()=>{if(previous instanceof HTMLElement)previous.focus();};},[]);
   const leaveOrigin=new Date(new Date(option.departureAt).getTime()-(option.firstMile?.durationS??0)*1000-option.waitingS*1000);
   const arrivePickup=new Date(new Date(option.departureAt).getTime()-option.waitingS*1000),steps=[];
-  if(option.firstMile){steps.push([time(leaveOrigin.toISOString()),`${originLabel??'Votre position'} — départ`]);steps.push([time(arrivePickup.toISOString()),`Arrivée au point de prise en charge · ${option.pickupStop.name}`]);}
+  if(option.firstMile){steps.push([time(leaveOrigin.toISOString()),`${originLabel??'Votre position'} : départ`]);steps.push([time(arrivePickup.toISOString()),`Arrivée au point de prise en charge · ${option.pickupStop.name}`]);}
   steps.push([time(option.departureAt),`Départ LeRoutier · ${option.pickupStop.city} → ${option.dropoffStop.city}`]);
   for(const stop of(option.intermediateStops??[]).filter(s=>s.sequence>option.originSequence&&s.sequence<option.destinationSequence))steps.push([null,`Arrêt · ${stop.city}`]);
   steps.push([time(option.intercity.etaAt),`Arrivée ${option.dropoffStop.city}`]);if(option.lastMile)steps.push([time(option.etaAt),`Destination finale · ${destinationLabel??'votre destination'}`]);
   return <dialog ref={dialog} className="offer-details" aria-label="Détails du trajet" onCancel={onClose}>
     <div className="offer-details-head between"><div><strong>{originLabel??option.pickupStop.city} → {destinationLabel??option.dropoffStop.city}</strong><span className="small muted"> · {dayLong(option.departureAt)} · {durText(option.totalDurationS)} au total</span></div><button className="icon-btn" aria-label="Fermer les détails" onClick={onClose}><X size={17}/></button></div>
-    {option.isTest&&<div className="offer-details-test"><TestBadge/> <span className="small">Offre de démonstration — aucun transport réel.</span></div>}
+    {option.isTest&&<div className="offer-details-test"><TestBadge/> <span className="small">Offre de démonstration : aucun transport réel.</span></div>}
     <OperatorLine option={option}/>
     {option.operatorType==='independent'&&<Card className="stack independent-detail"><h3>Votre chauffeur et son véhicule</h3><IndependentTrust option={option}/>{option.vehicle?.photoUrl&&<img className="vehicle-photo" src={option.vehicle.photoUrl} alt={`${option.vehicle.make??''} ${option.vehicle.model??'Véhicule du chauffeur'}`.trim()} referrerPolicy="no-referrer"/>}<p className="small muted">Les documents d’identité, permis, assurance et autres justificatifs restent privés. Seules les informations utiles pour reconnaître le chauffeur et le véhicule sont affichées.</p></Card>}
-    <div className="journey-steps">{steps.map(([at,label],i)=><div key={i} className="journey-step">{at?<strong className="small">{at}</strong>:<span className="small muted">—</span>}<span className="small">{label}</span></div>)}</div>
-    {option.livePosition&&<span className="small muted" role="status">{option.livePosition.signal==='live'?'En direct — position récente du véhicule':'Dernière position connue du véhicule'}</span>}
+    <div className="journey-steps">{steps.map(([at,label],i)=><div key={i} className="journey-step">{at?<strong className="small">{at}</strong>:<span className="small muted">–</span>}<span className="small">{label}</span></div>)}</div>
+    {option.livePosition&&<span className="small muted" role="status">{option.livePosition.signal==='live'?'En direct : position récente du véhicule':'Dernière position connue du véhicule'}</span>}
     <Suspense fallback={<SkeletonCards count={1} lines={3}/>}><JourneyMap option={option} originPoint={originPoint} destinationPoint={destinationPoint} height={260}/></Suspense>
     <div className="summary"><div className="row"><span>Opérateur</span><span>{option.operatorName}</span></div><div className="row"><span>Véhicule</span><span>{vehicleText(option.vehicle)}</span></div><div className="row"><span>Immatriculation</span><span>{option.vehicle?.registration??'Non communiquée'}</span></div><div className="row"><span>Places restantes</span><span>{soldOut?'Complet':`${seats} place${seats>1?'s':''}`}</span></div><div className="row"><span>Prix final</span><span>{fcfa(option.fare.amountMinor)}</span></div></div>
-    <p className="small muted">Transport local (premier et dernier kilomètre) non inclus — estimé à pied. Conditions d’annulation selon l’opérateur.</p>
+    <p className="small muted">Transport local (premier et dernier kilomètre) non inclus : estimé à pied. Conditions d’annulation selon l’opérateur.</p>
     <div className="controls"><button className="btn btn-soft" onClick={onClose}>Fermer</button><button className="btn btn-primary" disabled={soldOut||!option.feasible} onClick={onChoose}>Choisir ce trajet</button></div>
   </dialog>;
 }
@@ -101,6 +101,6 @@ export function JourneySearchResults({originMode,originPlace,destinationPlace,de
       {!detail&&view==='list'&&options.map(o=><OfferCard key={o.serviceId+':'+o.originSequence+':'+o.destinationSequence} option={o} originLabel={originLabel} destinationLabel={destinationLabel} selected={selected?.serviceId===o.serviceId&&selected?.originSequence===o.originSequence} onSelect={()=>setSelected(o)} onView={()=>setDetail(o)} onChoose={()=>choose(o)}/>)}</>}
     </div>{!detail&&view==='list'&&shown&&options.length>0&&<div className="journey-map-col"><Suspense fallback={<SkeletonCards count={1} lines={5}/>}><JourneyMap option={shown} originPoint={originPoint} destinationPoint={destinationPoint} height={560}/></Suspense></div>}</div>)}
     {detail&&<OfferDetails option={detail} originLabel={originLabel} destinationLabel={destinationLabel} originPoint={originPoint} destinationPoint={destinationPoint} onClose={()=>setDetail(null)} onChoose={()=>{const o=detail;setDetail(null);choose(o);}}/>}
-    {user&&!online&&<p className="small muted" role="status">Hors ligne — les actions nécessitent une connexion.</p>}
+    {user&&!online&&<p className="small muted" role="status">Hors ligne : les actions nécessitent une connexion.</p>}
   </div>;
 }

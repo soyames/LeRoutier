@@ -103,7 +103,7 @@ export function Today(){
     </Card>}
     {diagnostics.data && <>
       {/* The strip scrolls sideways on a phone, so it has to be reachable by
-          keyboard — otherwise the indicators past the fold are unreachable
+          keyboard, otherwise the indicators past the fold are unreachable
           without a touchscreen. */}
       <div className="kpi-scroll" tabIndex={0} role="group" aria-label="Indicateurs du jour">
         <StatCard label="Services aujourd’hui" value={todayServices.length} icon={Radio}/>
@@ -198,7 +198,7 @@ export function Services(){
       {s.availability && <div className="notice"><div className="between"><strong>Capacité restante</strong><Armchair size={18}/></div>{s.availability.segments.map(segment=><div className="between small" key={segment.sequence}><span>{s.availability.stops[segment.sequence].city} → {s.availability.stops[segment.sequence+1].city}</span><strong>{segment.available} / {s.capacity}</strong></div>)}</div>}
       <div className="controls">{(s.status==='scheduled'?['active','cancelled']:s.status==='active'?['disrupted','completed']:s.status==='disrupted'?['active','cancelled']:[]).map(status=><button className="btn btn-soft" key={status} disabled={!online} onClick={()=>act(`/services/${s.id}/status`,{status})}>Passer à {status}</button>)}</div></Card>)}
     <SectionTitle icon={ShieldAlert} title="Incidents & reprise"/>
-    {incidents.loading || incidents.error || !incidents.data?.length ? <ApiState resource={incidents} empty="Aucun incident signalé."/> : incidents.data.map(i=><Card key={i.id} className="stack"><div className="between"><h3>{i.kind}</h3><Badge tone={i.status==='resolved'?'success':'danger'}>{i.status}</Badge></div><p>{i.description}</p><div className="controls">{i.status!=='resolved' && <button className="btn btn-soft" disabled={!online} onClick={()=>act(`/incidents/${i.id}`,{status:'resolved'})}>Résoudre</button>}</div><p className="small muted">Le remplacement de véhicule est proposé par le workflow de reprise — approuvez-le dans « Alertes ».</p></Card>)}
+    {incidents.loading || incidents.error || !incidents.data?.length ? <ApiState resource={incidents} empty="Aucun incident signalé."/> : incidents.data.map(i=><Card key={i.id} className="stack"><div className="between"><h3>{i.kind}</h3><Badge tone={i.status==='resolved'?'success':'danger'}>{i.status}</Badge></div><p>{i.description}</p><div className="controls">{i.status!=='resolved' && <button className="btn btn-soft" disabled={!online} onClick={()=>act(`/incidents/${i.id}`,{status:'resolved'})}>Résoudre</button>}</div><p className="small muted">Le remplacement de véhicule est proposé par le workflow de reprise : approuvez-le dans « Alertes ».</p></Card>)}
   </>;
 }
 
@@ -236,13 +236,13 @@ export function Crew(){
     e.preventDefault();setError('');setNotice('');
     const body={operatorId:user.operator_id,subject:subject.trim(),displayName:name.trim(),...(role==='driver'?{licenseReference:license.trim()}:{})};
     const path=role==='driver'?'/ops/drivers':role==='convoyeur'?'/ops/convoyeurs':'/ops/ops-users';
-    try{await request(path,{method:'POST',key:'crew-'+crypto.randomUUID(),body});members.reload();catalog.reload();setNotice('Membre provisionné — il peut se connecter avec sa propre identité.');setSubject('');setName('');setLicense('');}
+    try{await request(path,{method:'POST',key:'crew-'+crypto.randomUUID(),body});members.reload();catalog.reload();setNotice('Membre provisionné : il peut se connecter avec sa propre identité.');setSubject('');setName('');setLicense('');}
     catch(e){setError(e.message);}
   }
   return <>
     <SectionTitle icon={Users} title="Équipage & personnel"/>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    {members.loading || members.error || !members.data?.length ? <ApiState resource={members} empty="Aucun membre provisionné. Chaque employé se connecte avec son identité personnelle — jamais de compte partagé."/> : members.data.map(m=><Card key={m.id} className="between wrap"><div><h3>{m.display_name}</h3><span className="small muted">{m.role==='driver'?'Conducteur':m.role==='convoyeur'?'Convoyeur':'Agent Ops'}{m.license_reference?` · permis ${m.license_reference}`:''}</span></div><Badge tone={m.active?'success':'danger'}>{m.active?'Actif':'Inactif'}</Badge></Card>)}
+    {members.loading || members.error || !members.data?.length ? <ApiState resource={members} empty="Aucun membre provisionné. Chaque employé se connecte avec son identité personnelle : jamais de compte partagé."/> : members.data.map(m=><Card key={m.id} className="between wrap"><div><h3>{m.display_name}</h3><span className="small muted">{m.role==='driver'?'Conducteur':m.role==='convoyeur'?'Convoyeur':'Agent Ops'}{m.license_reference?` · permis ${m.license_reference}`:''}</span></div><Badge tone={m.active?'success':'danger'}>{m.active?'Actif':'Inactif'}</Badge></Card>)}
     <Card className="stack"><SectionTitle title="Provisionner un membre"/>
       <p className="small muted">Utilisez l’identifiant vérifié du fournisseur d’identité de la personne, jamais un mot de passe. Chaque membre garde son propre compte.</p>
       <form className="stack" onSubmit={provision}>
@@ -323,7 +323,7 @@ function FareInsight(){
     </div>}
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
     {origin&&destination&&(insight.loading?<p>Analyse en cours…</p>:insight.error?<p role="alert">{insight.error}</p>:i&&i.status==='insufficient_data'?<p role="status">{i.message}</p>:i&&<div className="stack">
-      <div className="row"><span>Votre prix actuel</span><strong>{i.currentPriceMinor===null?'—':fcfa(i.currentPriceMinor)}</strong></div>
+      <div className="row"><span>Votre prix actuel</span><strong>{i.currentPriceMinor===null?'–':fcfa(i.currentPriceMinor)}</strong></div>
       <div className="row"><span>Fourchette typique du marché</span><span>{fcfa(i.typicalRange[0])}–{fcfa(i.typicalRange[1])}</span></div>
       <div className="row"><span>Prix suggéré</span><strong>{fcfa(i.suggestedPriceMinor)}</strong></div>
       {i.advice==='above'&&<p role="status">Votre tarif actuel est supérieur aux tarifs comparables sur ce trajet.</p>}
@@ -331,7 +331,7 @@ function FareInsight(){
       {i.advice==='within_range'&&<p role="status">Votre tarif actuel est dans la fourchette typique du marché.</p>}
       <div className="controls">
         {fareType!=='passenger'&&<button className="btn btn-primary" disabled={!online||i.currentPriceMinor===i.suggestedPriceMinor} onClick={accept}>Utiliser le prix suggéré</button>}
-        {fareType==='passenger'&&<span className="small muted">Pour un billet, créez une nouvelle ligne avec ce tarif — les tarifs d’un service déjà réservé sont immuables.</span>}
+        {fareType==='passenger'&&<span className="small muted">Pour un billet, créez une nouvelle ligne avec ce tarif : les tarifs d’un service déjà réservé sont immuables.</span>}
         <button className="btn btn-soft" onClick={()=>setOrigin('')}>Garder mon prix</button>
       </div>
     </div>)}
@@ -371,7 +371,7 @@ export function Parcels(){
         </div></div>)}
     </Card>
     <SectionTitle icon={Package} title="Grille tarifaire colis"/>
-    {rateRules.loading || rateRules.error || !rateRules.data?.length ? <ApiState resource={rateRules} empty="Aucune règle tarifaire configurée — la création de colis échoue sans grille explicite."/> : rateRules.data.map(r=><Card key={r.id} className="between"><div><h3>{fcfa(r.base_minor)}</h3><span className="small muted">+ {r.per_kg_minor} FCFA/kg{r.declared_value_bp?` · +${r.declared_value_bp/100}% valeur déclarée`:''}{r.category?` · catégorie ${r.category}`:''}{r.origin_stop_id?' · trajet spécifique':' · tous trajets'}{r.service_level==='express'?' · EXPRESS':''}</span></div></Card>)}
+    {rateRules.loading || rateRules.error || !rateRules.data?.length ? <ApiState resource={rateRules} empty="Aucune règle tarifaire configurée : la création de colis échoue sans grille explicite."/> : rateRules.data.map(r=><Card key={r.id} className="between"><div><h3>{fcfa(r.base_minor)}</h3><span className="small muted">+ {r.per_kg_minor} FCFA/kg{r.declared_value_bp?` · +${r.declared_value_bp/100}% valeur déclarée`:''}{r.category?` · catégorie ${r.category}`:''}{r.origin_stop_id?' · trajet spécifique':' · tous trajets'}{r.service_level==='express'?' · EXPRESS':''}</span></div></Card>)}
     <Card className="stack"><div className="between wrap">
       <label>Base (FCFA)<input className="control" type="number" min={0} value={ruleBase} onChange={e=>setRuleBase(e.target.value)}/></label>
       <label>Par kg (FCFA)<input className="control" type="number" min={0} value={rulePerKg} onChange={e=>setRulePerKg(e.target.value)}/></label>
@@ -405,7 +405,7 @@ export function Payments(){
       {(!bookings.data || !bookings.data.length) && <p role="status">Aucune option de réservation en attente.</p>}
       {bookings.loading || bookings.error ? <ApiState resource={bookings}/> : <>
         <label>Référence du reçu<input className="control" value={reference} onChange={e=>setReference(e.target.value)} maxLength={100}/></label>
-        <p className="small muted">Enregistrer uniquement un paiement réellement reçu. Le passager ne paie jamais en espèces dans l’application — ce guichet est le canal espèces de la compagnie.</p>
+        <p className="small muted">Enregistrer uniquement un paiement réellement reçu. Le passager ne paie jamais en espèces dans l’application : ce guichet est le canal espèces de la compagnie.</p>
         {(bookings.data||[]).filter(b=>b.status==='held').map(b=><div className="between wrap" key={b.id}><span className="small">{b.passenger_name} · {b.amount_minor} FCFA</span><button className="btn btn-primary" disabled={!online || !reference.trim()} onClick={()=>act(`/bookings/${b.id}/payments`,{provider:'cash',reference:reference.trim(),amountMinor:b.amount_minor,currency:'XOF'},'POST','cash-'+b.id,()=>bookings.reload())}>Enregistrer le paiement</button></div>)}
       </>}
     </Card>
@@ -413,7 +413,7 @@ export function Payments(){
     {payments.loading || payments.error || !payments.data?.length ? <ApiState resource={payments} empty={`Aucun paiement ${status('payment',paymentStatus).label.toLowerCase()}.`}/> : payments.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.passengerName} · {p.amountMinor.toLocaleString('fr-FR')} {p.currency}</h3><Badge tone={p.status==='succeeded'?'success':p.status==='failed'?'danger':'neutral'}>{status('payment',p.status).label}</Badge></div><span className="small muted">{p.reconciliation==='review'?<Badge tone="danger">à examiner</Badge>:p.reconciliation}</span></div>
       <button className="btn btn-soft" disabled={!online} onClick={()=>act(`/ops/payments/${p.id}/reconcile`,undefined,'POST',undefined,()=>payments.reload())}>Réconcilier</button></Card>)}
     <SectionTitle title="Versements conducteurs"/>
-    {payouts.loading || payouts.error || !payouts.data?.length ? <ApiState resource={payouts} empty="Aucun versement demandé."/> : payouts.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.driverName} · {p.amountMinor.toLocaleString('fr-FR')} {p.currency}</h3><Badge tone={status('payout',p.status).tone}>{status('payout',p.status).label}</Badge></div><span className="small muted">{new Date(p.createdAt).toLocaleString('fr-FR')} · destination {p.destinationPhone} · réf. prestataire {p.provider_reference ?? '—'}</span></div>
+    {payouts.loading || payouts.error || !payouts.data?.length ? <ApiState resource={payouts} empty="Aucun versement demandé."/> : payouts.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.driverName} · {p.amountMinor.toLocaleString('fr-FR')} {p.currency}</h3><Badge tone={status('payout',p.status).tone}>{status('payout',p.status).label}</Badge></div><span className="small muted">{new Date(p.createdAt).toLocaleString('fr-FR')} · destination {p.destinationPhone} · réf. prestataire {p.provider_reference ?? '–'}</span></div>
       <div className="controls">{(p.status==='requested'||p.status==='failed') && <button className="btn btn-primary" disabled={!online} onClick={()=>act(`/ops/payouts/${p.id}/approve`,undefined,'POST',undefined,()=>payouts.reload())}>{p.status==='failed'?'Relancer le versement':'Valider et envoyer'}</button>}
       {p.status==='processing' && <button className="btn btn-soft" disabled={!online} onClick={()=>act(`/ops/payouts/${p.id}/reconcile`,undefined,'POST',undefined,()=>payouts.reload())}>Vérifier auprès du prestataire</button>}</div></Card>)}
   </>;
@@ -427,7 +427,7 @@ export function Settlements(){
   return <>
     <SectionTitle icon={WalletCards} title="Règlements & retraits opérateurs"/>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-    <p className="small muted">La recette appartient à l’opérateur. Les retraits des chauffeurs indépendants sont validés ici — les compagnies gèrent leurs versements selon leur propre politique.</p>
+    <p className="small muted">La recette appartient à l’opérateur. Les retraits des chauffeurs indépendants sont validés ici : les compagnies gèrent leurs versements selon leur propre politique.</p>
     {operatorPayouts.loading || operatorPayouts.error || !operatorPayouts.data?.length ? <ApiState resource={operatorPayouts} empty="Aucun retrait opérateur."/> : operatorPayouts.data.map(p=><Card key={p.id} className="between wrap"><div className="stack"><div className="between"><h3>{p.operatorName} · {fcfa(p.amountMinor)}</h3><Badge tone={status('payout',p.status).tone}>{status('payout',p.status).label}</Badge></div><span className="small muted">{new Date(p.createdAt).toLocaleString('fr-FR')} · {p.phoneNumber} · {p.operatorType}</span></div>
       <div className="controls">{(p.status==='requested'||p.status==='failed') && <button className="btn btn-primary" disabled={!online} onClick={()=>act(`/ops/operator-payouts/${p.id}/approve`,()=>operatorPayouts.reload())}>{p.status==='failed'?'Relancer':'Valider et envoyer'}</button>}
       {p.status==='processing' && <button className="btn btn-soft" disabled={!online} onClick={()=>act(`/ops/operator-payouts/${p.id}/reconcile`,()=>operatorPayouts.reload())}>Vérifier auprès du prestataire</button>}</div></Card>)}

@@ -113,7 +113,7 @@ function VehicleTracking({serviceId,serviceStatus}){
     active:{label:'Suivi actif',tone:'success',help:'Vos passagers voient la position du véhicule. Gardez cette page ouverte pendant le trajet.'},
     denied:{label:'Localisation refusée',tone:'danger',help:'La localisation est bloquée pour ce site. Autorisez-la dans les réglages du navigateur, puis réactivez le suivi.'},
     unavailable:{label:'GPS indisponible',tone:'danger',help:'Cet appareil ne fournit pas de position exploitable pour le moment.'},
-    offline:{label:'Hors ligne — positions en attente',tone:'warning',help:'Les positions sont conservées sur l’appareil et repartiront dès le retour du réseau.'},
+    offline:{label:'Hors ligne : positions en attente',tone:'warning',help:'Les positions sont conservées sur l’appareil et repartiront dès le retour du réseau.'},
   }[state]??{label:'Suivi désactivé',tone:'neutral',help:''};
   if(!running) return null;
   return <Card className="stack">
@@ -257,7 +257,7 @@ export function Manifest(){
     }catch(e){setError(e.message);}
     finally{setBusy(false);manifest.reload();service.reload();}
   }
-  if(!s) return <><SectionTitle icon={Users} title="Manifeste passagers"/><Card><p role="status">Aucun service affecté — le manifeste apparaît ici dès l’affectation.</p></Card></>;
+  if(!s) return <><SectionTitle icon={Users} title="Manifeste passagers"/><Card><p role="status">Aucun service affecté : le manifeste apparaît ici dès l’affectation.</p></Card></>;
   const stop=s.stops.find(stop=>stop.sequence===s.current_sequence);
   return <>
     <SectionTitle icon={Users} title="Manifeste passagers" trailing={<Badge>{stop?.city}</Badge>}/>
@@ -301,12 +301,12 @@ export function Scanner(){
         if(reading.current)return;
         const match=/^LRT1\.[A-Za-z0-9_-]+$/.test(result.data)?result.data:null;
         if(match){reading.current=true;scanner.current?.stop();setScanning(false);act('board',{code:match,serviceId:s.id,stopSequence:s.current_sequence});}
-        else setError('QR inconnu — il ne s’agit pas d’un billet LeRoutier.');
+        else setError('QR inconnu : il ne s’agit pas d’un billet LeRoutier.');
       },{highlightScanRegion:true,preferredCamera:'environment'});
       await scanner.current.start();
-    }catch{scanner.current?.destroy();setScanning(false);setError('Caméra indisponible — saisissez le code du billet manuellement.');}
+    }catch{scanner.current?.destroy();setScanning(false);setError('Caméra indisponible : saisissez le code du billet manuellement.');}
   }
-  if(!s) return <><SectionTitle icon={QrCode} title="Contrôle des billets"/><Card><p role="status">Aucun service affecté — le contrôle des billets n’est pas disponible.</p></Card></>;
+  if(!s) return <><SectionTitle icon={QrCode} title="Contrôle des billets"/><Card><p role="status">Aucun service affecté : le contrôle des billets n’est pas disponible.</p></Card></>;
   return <>
     <SectionTitle icon={QrCode} title="Contrôle des billets"/>
     <QueueStatus queue={queue}/>
@@ -426,17 +426,17 @@ export function Parcels(){
         const value=result.data.trim();
         if(/^LRP1\.[A-Za-z0-9_-]+$/.test(value) || /^(?:https:\/\/leroutier\.app\/parcels\/track\?ref=)?LRP-[0-9A-F]{8}$/i.test(value)){
           parcelReading.current=true;parcelScanner.current?.stop();setScanning(false);lookup(value);
-        }else setError('QR colis inconnu — utilisez le numéro LRP manuscrit en secours.');
+        }else setError('QR colis inconnu : utilisez le numéro LRP manuscrit en secours.');
       },{highlightScanRegion:true,preferredCamera:'environment'});
       await parcelScanner.current.start();
-    }catch{parcelScanner.current?.destroy();setScanning(false);setError('Caméra indisponible — saisissez la référence LRP manuellement.');}
+    }catch{parcelScanner.current?.destroy();setScanning(false);setError('Caméra indisponible : saisissez la référence LRP manuellement.');}
   }
   async function queueParcel(kind, parcelId=scannedParcel?.id){
     if(!parcelId || !s) return;
     setBusy(true);setError('');
     try{
       const result=await queue.send('parcel',{serviceId:s.id,parcelId,kind});
-      setNotice(result?.state==='succeeded'?'Prise en charge confirmée.':result?.state==='conflict'?'Scan refusé. Vérifiez le statut du colis.':'Scan enregistré sur cet appareil — confirmation du serveur en attente.');
+      setNotice(result?.state==='succeeded'?'Prise en charge confirmée.':result?.state==='conflict'?'Scan refusé. Vérifiez le statut du colis.':'Scan enregistré sur cet appareil : confirmation du serveur en attente.');
       cargo.reload?.();setScannedParcel(null);setLookupCode('');
     }catch(e){setError(e.message);}finally{setBusy(false);}
   }
@@ -447,7 +447,7 @@ export function Parcels(){
     try{await request(`/parcels/${p.id}/exceptions`,{method:'POST',body:{kind:'damaged',description:description.trim()}});setNotice('Problème signalé à la régulation.');cargo.reload?.();}
     catch(e){setError(e.message);}finally{setBusy(false);}
   }
-  if(!s) return <><SectionTitle icon={Package} title="Fret & colis"/><Card><p role="status">Aucun service affecté — les colis du service apparaissent ici.</p></Card></>;
+  if(!s) return <><SectionTitle icon={Package} title="Fret & colis"/><Card><p role="status">Aucun service affecté : les colis du service apparaissent ici.</p></Card></>;
   return <>
     <SectionTitle icon={Package} title="Fret & colis" trailing={cargo.data?.length?<Badge>{cargo.data.length} colis</Badge>:null}/>
     {documentParcel && <ParcelDocuments parcel={documentParcel} onClose={()=>setDocumentParcel(null)}/>}
@@ -489,7 +489,7 @@ export function Parcels(){
 
 export function Vehicle(){
   const {s}=useService();
-  if(!s) return <><SectionTitle icon={BusFront} title="Véhicule"/><Card><p role="status">Aucun véhicule affecté — l’affectation apparaît ici.</p></Card></>;
+  if(!s) return <><SectionTitle icon={BusFront} title="Véhicule"/><Card><p role="status">Aucun véhicule affecté : l’affectation apparaît ici.</p></Card></>;
   return <>
     <SectionTitle icon={BusFront} title="Véhicule"/>
     <Card className="stack"><div className="between"><h2>{s.registration}</h2><Badge tone="success">{s.capacity} places</Badge></div>
@@ -516,7 +516,7 @@ export function Points(){
     e.preventDefault();setBusy(true);setError('');setNotice('');
     try{
       await request('/boarding-points/proposals',{method:'POST',body:{name,placeId,type,description:description.trim()||undefined,purposes}});
-      setNotice('Point proposé — en attente de vérification avant de devenir une adresse de confiance.');setName('');setDescription('');
+      setNotice('Point proposé : en attente de vérification avant de devenir une adresse de confiance.');setName('');setDescription('');
     }catch(e){setError(e.message);}finally{setBusy(false);}
   }
   if(!user || !(user.operator_type==='independent' && user.role==='driver')) return <Card><p role="status">La gestion des points d’embarquement est réservée aux chauffeurs indépendants.</p></Card>;
@@ -527,7 +527,7 @@ export function Points(){
       <label className="grow">Rechercher un point vérifié<input className="control" placeholder="Nom, quartier…" value={q} onChange={e=>setQ(e.target.value)}/></label>
       <button className="btn btn-soft" disabled={busy || !online || !q.trim()}>Rechercher</button></form>
       {(results||[]).map(p=><div className="between wrap" key={p.id}><div className="stack"><h3>{p.name}</h3><span className="small muted">{p.city} · {p.type} · {(p.purposes||[]).join(', ')}</span>{p.status!=='verified' && <Badge tone="warning">Vérification en attente</Badge>}</div></div>)}
-      {results && results.length===0 && <p role="status">Aucun point vérifié trouvé — proposez-le ci-dessous.</p>}
+      {results && results.length===0 && <p role="status">Aucun point vérifié trouvé : proposez-le ci-dessous.</p>}
     </Card>
     <Card className="stack"><SectionTitle title="Proposer un nouveau point"/>
       <p className="small muted">Les propositions sont examinées avant de devenir des adresses de confiance.</p>
@@ -604,7 +604,7 @@ export function Earnings(){
       </select></label>
       <label>Montant (FCFA)<input className="control" type="number" min={1} step={1} value={amount} onChange={e=>setAmount(e.target.value)}/></label>
       <button className="btn btn-primary" disabled={busy || !online || !destinationId || !Number.isInteger(Number(amount)) || Number(amount)<=0} onClick={()=>act('/driver/payouts',{destinationId,amountMinor:Number(amount)},'payout-'+crypto.randomUUID())}>Demander le versement</button>
-      <p className="small muted">Le solde est réservé dès la demande. Le versement part après validation par la régulation — il n’est « versé » qu’une fois confirmé par le prestataire.</p>
+      <p className="small muted">Le solde est réservé dès la demande. Le versement part après validation par la régulation : il n’est « versé » qu’une fois confirmé par le prestataire.</p>
     </Card>
     <Card className="stack"><SectionTitle title="Destination de versement"/>
       <div className="between wrap">
@@ -627,6 +627,6 @@ export function Profile(){
   return <><VerificationBanner/>
     <Card className="stack"><h2>{user?.display_name || 'Profil'}</h2><span className="small muted">{user?.role==='convoyeur'?'Compte convoyeur':'Compte conducteur'}{user?.operator_type==='independent'?' · indépendant':''}</span></Card>
     <Card className="stack"><SectionTitle icon={BusFront} title="Affectation véhicule"/>{service.data?<><h3>{service.data.registration}</h3><p>{service.data.route_name}</p><Badge>{service.data.capacity} places</Badge></>:<ApiState resource={service} empty="Aucune affectation disponible."/>}</Card>
-    <Card className="stack"><SectionTitle icon={Navigation} title="Ma position sur le réseau"/><p className="small muted">Partagez votre position depuis l’écran Aujourd’hui pendant le service — elle alimente le suivi des passagers.</p></Card>
+    <Card className="stack"><SectionTitle icon={Navigation} title="Ma position sur le réseau"/><p className="small muted">Partagez votre position depuis l’écran Aujourd’hui pendant le service : elle alimente le suivi des passagers.</p></Card>
   </>;
 }

@@ -13,7 +13,7 @@ export function ticketDocument(ticket, kind = 'ticket') {
   const bookingReference = `LRB-${short}`;
   const documentNumber = kind === 'invoice' ? `LRF-${short}` : kind === 'cancellation' ? `LRA-${short}` : bookingReference;
   const paymentRows = [['Tarif du transport', fcfa(b.amount_minor)], ['Montant payé', fcfa(b.paidMinor)], ['Montant remboursé', fcfa(b.refundedMinor)]];
-  const cancellation = b.refundedMinor > 0 ? 'Remboursement enregistré' : b.paidMinor > 0 ? 'Remboursement à examiner — aucun versement confirmé' : 'Aucun paiement encaissé';
+  const cancellation = b.refundedMinor > 0 ? 'Remboursement enregistré' : b.paidMinor > 0 ? 'Remboursement à examiner : aucun versement confirmé' : 'Aucun paiement encaissé';
   return {
     kind, title: kind === 'invoice' ? 'Facture de transport' : kind === 'cancellation' ? 'Annulation / remboursement' : 'Votre billet de voyage',
     reference: bookingReference, number: documentNumber,
@@ -28,7 +28,7 @@ export function ticketDocument(ticket, kind = 'ticket') {
     ],
     qr: kind === 'ticket' ? ticket.token : null, manualCode: kind === 'ticket' ? ticket.manualCode : null,
     qrHelp: ticket.validForBoarding ? 'À présenter à l’embarquement' : 'Archive du billet · contrôle de validité effectué par LeRoutier',
-    notes: kind === 'ticket' ? [...(!ticket.validForBoarding ? ['Billet archivé — ce QR reste celui du document original mais ne permet pas un nouvel embarquement.'] : []), ...travelNotes]
+    notes: kind === 'ticket' ? [...(!ticket.validForBoarding ? ['Billet archivé : ce QR reste celui du document original mais ne permet pas un nouvel embarquement.'] : []), ...travelNotes]
       : kind === 'cancellation' ? ['L’annulation et le remboursement sont deux opérations distinctes. Seuls les montants confirmés figurent comme remboursés.', 'Retrouvez le suivi dans votre compte LeRoutier.']
         : ['Document établi à partir des paiements enregistrés pour ce transport. Conservez-le avec votre réservation.'],
     help: `Aide : leroutier.app/about · Réservation : ${bookingReference}`,
@@ -42,7 +42,7 @@ export function parcelDocument(p, kind = 'label') {
     sections: [
       { title: 'Expéditeur', rows: [['Nom', p.parties?.sender?.name], ['Téléphone', p.parties?.sender?.phone], ['Dépôt', p.originName]] },
       { title: 'Destinataire', rows: [['Nom', p.parties?.receiver?.name], ['Téléphone', p.parties?.receiver?.phone], ['Retrait', p.destinationName]] },
-      { title: 'Prise en charge', rows: [['Transporteur', p.operatorName], ['Service', p.serviceLevel === 'express' ? 'Express' : 'Standard'], ['Pièces / poids', `${p.quantity} pièce(s)${p.weightG ? ` · ${p.weightG} g` : ''}`], ['Paiement', `${p.paymentStatus === 'succeeded' ? 'Payé' : p.paymentStatus === 'partial' ? 'Partiellement payé' : 'À payer'} · ${fcfa(p.paidMinor)} / ${fcfa(p.priceMinor)}`], ['À la charge de', p.paymentResponsibility === 'receiver' ? 'Destinataire' : 'Expéditeur'], ['Manipulation', p.notes || (p.category === 'fragile' ? 'Fragile — manipuler avec soin' : 'Aucune consigne particulière')]] },
+      { title: 'Prise en charge', rows: [['Transporteur', p.operatorName], ['Service', p.serviceLevel === 'express' ? 'Express' : 'Standard'], ['Pièces / poids', `${p.quantity} pièce(s)${p.weightG ? ` · ${p.weightG} g` : ''}`], ['Paiement', `${p.paymentStatus === 'succeeded' ? 'Payé' : p.paymentStatus === 'partial' ? 'Partiellement payé' : 'À payer'} · ${fcfa(p.paidMinor)} / ${fcfa(p.priceMinor)}`], ['À la charge de', p.paymentResponsibility === 'receiver' ? 'Destinataire' : 'Expéditeur'], ['Manipulation', p.notes || (p.category === 'fragile' ? 'Fragile : manipuler avec soin' : 'Aucune consigne particulière')]] },
     ], qr: p.trackingUrl || `https://leroutier.app/parcels/track?ref=${p.trackingNumber}`, manualCode: p.trackingNumber,
     qrHelp: 'Scanner pour suivre ou saisir la référence', stickerSpace: kind === 'label',
     notes: ['Sans imprimante : montrez ce QR à l’équipage et inscrivez la référence sur le colis.',
