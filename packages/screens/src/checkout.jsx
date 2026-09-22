@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useSession } from '@leroutier/config/client';
+import { useApi, useSession } from '@leroutier/config/client';
 import { Card, Badge, SectionTitle, ProfileForm, ErrorState, SessionPanel } from '@leroutier/ui';
 import { fcfa, time, dayLong } from '@leroutier/ui';
 import { ArrowLeft, CreditCard, Lock } from 'lucide-react';
@@ -67,6 +67,37 @@ function JourneySummary({ intent, fare }) {
   </div>;
 }
 
+// Choosing a seat, before signing in.
+//
+// Availability is per leg, so a seat carrying somebody on an earlier part of
+// the route is genuinely free here and is offered as such. Skipping is the
+// default: a passenger who does not care gets the first free seat, exactly as
+// before, and is never blocked by a grid they did not ask for.
+function SeatPicker({ option, value, onChange }) {
+  const plan = useApi(`/services/${option.serviceId}/seats?origin=${option.originSequence}&destination=${option.destinationSequence}`);
+  if (plan.loading || plan.error || !plan.data) return null;
+  const seats = plan.data.seats ?? [];
+  const free = seats.filter(s => s.available).length;
+  if (!free) return null;
+  return <Card className="stack">
+    <div className="between wrap">
+      <div><strong>Choisir votre siège</strong>
+        <p className="small muted">Facultatif. Sans choix, nous vous attribuons une place libre.</p></div>
+      <Badge tone={free > 2 ? 'success' : 'warning'}>{free} libre{free > 1 ? 's' : ''}</Badge>
+    </div>
+    <div className="seat-grid" role="group" aria-label="Sièges disponibles">
+      {seats.map(seat => <button key={seat.seatNumber} type="button"
+        className={`seat ${seat.available ? '' : 'taken'} ${value === seat.seatNumber ? 'chosen' : ''} ${seat.freedForThisLeg ? 'freed' : ''}`}
+        disabled={!seat.available} aria-pressed={value === seat.seatNumber}
+        aria-label={`Siège ${seat.seatNumber}${seat.available ? (seat.freedForThisLeg ? ', libre à partir de votre montée' : ', libre') : ', occupé'}`}
+        onClick={() => onChange(value === seat.seatNumber ? null : seat.seatNumber)}>{seat.seatNumber}</button>)}
+    </div>
+    {seats.some(s => s.freedForThisLeg) && <p className="small muted">
+      Les sièges marqués se libèrent à votre arrêt de montée : ils sont occupés plus tôt sur la ligne, pas sur la portion que vous réservez.</p>}
+    {value && <p className="small" role="status">Siège {value} sélectionné.</p>}
+  </Card>;
+}
+
 export function Checkout() {
   const navigate = useNavigate();
   const [intent] = useState(readIntent);
@@ -78,6 +109,7 @@ function CheckoutFlow({ intent }) {
   const navigate = useNavigate();
   const { user, request, online } = useSession();
   const [step, setStep] = useState(intent.paymentRequested ? 'auth' : 'review');
+  const [seat, setSeat] = useState(null);
   const [error, setError] = useState('');
   const [fare, setFare] = useState(null);
   const [booking, setBooking] = useState(null);
@@ -98,7 +130,9 @@ function CheckoutFlow({ intent }) {
     const key = keys.current.get('hold') ?? crypto.randomUUID();
     keys.current.set('hold', key);
     try {
-      const b = await request('/bookings', { method: 'POST', key, body: { serviceId: option.serviceId, origin: option.originSequence, destination: option.destinationSequence } });
+      const b = await request('/bookings', { method: 'POST', key, body: { serviceId: option.serviceId,
+        origin: option.originSequence, destination: option.destinationSequence,
+        ...(seat ? { seatNumber: seat } : {}) } });
       setBooking(b);
       // Fare stability: the hold's amount is authoritative. A changed amount
       // is stated, never silently applied.
@@ -107,7 +141,10 @@ function CheckoutFlow({ intent }) {
       }
       return b;
     } catch (e) {
-      setError(e.code === 'SOLD_OUT' || e.code === 'SERVICE_UNAVAILABLE'
+      // A seat that went while the passenger was deciding is a different
+      // problem from a full coach, and only one of them they can fix here.
+      if (e.code === 'SEAT_TAKEN') { setSeat(null); setError('Ce siège vient d’être pris. Choisissez-en un autre.'); }
+      else setError(e.code === 'SOLD_OUT' || e.code === 'SERVICE_UNAVAILABLE'
         ? 'Ce trajet n’est plus disponible. Retournez aux résultats pour choisir un autre départ.'
         : e.message);
       setStep('review');
@@ -171,6 +208,7 @@ function CheckoutFlow({ intent }) {
         Le tarif a changé. Vérifiez le nouveau prix avant de poursuivre. Aucun paiement n’a été effectué.</p>}
       <p className="small muted">Aucun compte n’est nécessaire pour consulter ce récapitulatif. La connexion n’est demandée qu’au paiement.</p>
 
+      {step === 'review' && !soldOut && <SeatPicker option={option} value={seat} onChange={setSeat}/>}
       {step === 'review' && <div className="controls">
         <button className="btn btn-soft" onClick={backToResults}><ArrowLeft size={15}/>Retour aux résultats</button>
         <button className="btn btn-primary" disabled={soldOut || !online} onClick={continueToPayment}>

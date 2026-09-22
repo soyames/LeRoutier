@@ -34,9 +34,11 @@ const baseOption={
   intercity:{durationS:22200,etaAt:new Date(soon.getTime()+22200_000).toISOString()},
   lastMile:null,totalDurationS:22200,etaAt:new Date(soon.getTime()+22200_000).toISOString()};
 export const JOURNEY_OPTION={...baseOption,serviceId:id(30),operatorName:'Opérateur démo',operatorType:'company',
-  routeName:'DEMO Cotonou → Parakou',vehicle:{registration:'DEMO-BUS-01',model:'Autocar'},available:12,isTest:false};
+  routeName:'DEMO Cotonou → Parakou',vehicle:{registration:'DEMO-BUS-01',model:'Autocar'},available:12,isTest:false,
+  rating:{count:12,average:4.5,published:true},amenities:[{key:'air_conditioning',label:'Climatisation',short:'Clim'},{key:'usb_power',label:'Prises USB',short:'USB'}]};
 export const TEST_JOURNEY_OPTION={...baseOption,serviceId:id(31),operatorName:'TEST Chauffeur 01',operatorType:'independent',
-  routeName:'TEST Service Cotonou–Parakou',vehicle:{registration:'TEST-001',model:'Toyota Hiace'},available:3,isTest:true};
+  routeName:'TEST Service Cotonou–Parakou',vehicle:{registration:'TEST-001',model:'Toyota Hiace'},available:3,isTest:true,
+  rating:{count:1,average:null,published:false},amenities:[]};
 
 const TRACKED_STOPS=[['Cotonou',6.3654,2.4183,'passed'],['Bohicon',7.1783,2.0667,'passed'],
   ['Dassa-Zoumè',7.7500,2.1833,'next'],['Parakou',9.3370,2.6300,'upcoming']]
@@ -80,6 +82,10 @@ export async function mockApi(page) {
   // Benin geography: the parcel city picker reads communes, independent of routes.
   await page.route('**/api/v1/places?type=commune',r=>r.fulfill({json:{data:stops.map((s,i)=>({id:id(300+i),name:s.city,kind:'city',parent_id:null,latitude:6.4,longitude:2.4}))}}));
   await page.route('**/api/v1/places?type=department',r=>r.fulfill({json:{data:[]}}));
+  // Seat map: one seat busy on an earlier leg, so the freed-for-this-leg
+  // marking has something to show.
+  await page.route('**/api/v1/services/*/seats*',r=>r.fulfill({json:{data:{serviceId:id(30),origin:0,destination:3,capacity:8,
+    seats:[1,2,3,4,5,6,7,8].map(n=>({seatNumber:n,available:n!==3,freedForThisLeg:n===5}))}}}));
   await page.route('**/api/v1/services?*',r=>r.fulfill({json:{data:[service]}}));
   // The geography-backed journey planner answers with one real and one TEST
   // feasible option; specs that need the empty-catalogue state override this.

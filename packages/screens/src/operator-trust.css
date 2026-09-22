@@ -12,3 +12,13 @@
    stays on the vehicle line rather than wrapping alone. */
 .offer-operator-block{display:flex;flex-direction:column;gap:4px}
 .offer-operator-block .vehicle-identity{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* Reputation and declared equipment, on an offer card.
+   Both are attributions, so both are visually quieter than the fare and the
+   times a passenger is actually comparing. */
+.offer-trust{gap:8px;margin-top:2px}
+.offer-rating{display:inline-flex;align-items:center;gap:5px;color:var(--primary-strong);font-size:12.5px}
+.offer-rating strong{font-size:14px}
+.offer-amenities{display:flex;flex-wrap:wrap;gap:5px}
+.amenity-tag{border:1px solid var(--line);border-radius:7px;padding:3px 7px;font-size:11px;font-weight:700;color:var(--muted);background:#fff}
+.amenity-tag.more{border-style:dashed}

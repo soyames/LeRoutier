@@ -304,3 +304,17 @@ overflow:hidden}
 .incident-tile.sev-medium .incident-icon{background:var(--primary-strong)}
 .incident-tile.sev-low .incident-icon{background:var(--navy-2)}
 @media(min-width:720px){.incident-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+
+/* Seat grid.
+   Numbers stay legible at arm's length and the targets stay thumb-sized, so
+   the grid wraps instead of shrinking. A seat freed at the passenger's own
+   boarding stop is marked, because "free" and "free for your leg" are
+   different facts and the second one is the interesting one. */
+.seat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:8px}
+.seat{min-height:46px;border-radius:12px;border:1px solid var(--line);background:#fff;color:var(--navy);
+  font:inherit;font-size:13px;font-weight:800;cursor:pointer}
+.seat:hover:not(:disabled){border-color:var(--lr-primary)}
+.seat.chosen{background:var(--lr-primary-strong);border-color:var(--lr-primary-strong);color:#fff}
+.seat.freed:not(.chosen):not(.taken){border-style:dashed;border-color:var(--lr-primary);color:var(--lr-primary-strong)}
+.seat.taken,.seat:disabled{background:#eef2f7;color:#9aa5b5;cursor:not-allowed;border-color:transparent}
+.seat:focus-visible{outline:3px solid rgba(177,95,0,.3);outline-offset:2px}

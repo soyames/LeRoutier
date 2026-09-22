@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router';
 import { useApi,useSession } from '@leroutier/config/client';
 import { Card,Badge,ErrorState,SkeletonCards } from '@leroutier/ui';
 import { fcfa,time,dayLong } from '@leroutier/ui';
-import { Armchair,Bus,Car,List,Map as MapIcon,X,ShieldCheck,UserRound } from 'lucide-react';
+import { Armchair,Bus,Car,List,Map as MapIcon,X,ShieldCheck,Star,UserRound } from 'lucide-react';
 import './operator-trust.css';
 
 const JourneyMap=lazy(()=>import('./map.jsx').then(m=>({default:m.JourneyPlanMap})));
@@ -26,6 +26,27 @@ function IndependentTrust({option,compact=false}){
       <strong className="vehicle-registration">{option.vehicle?.registration||'Immatriculation non communiquée'}</strong>
     </div>
   </div>;
+}
+
+// What an operator's past passengers said, and what the operator says about
+// its coach. Both are attributed: the rating is other travellers' opinion,
+// the amenities are the operator's own claim. Neither is a LeRoutier promise,
+// and the wording keeps that distinction visible.
+function Reputation({rating}){
+  if(!rating)return null;
+  if(!rating.published)return <span className="small muted offer-rating">
+    {rating.count?`${rating.count} avis · pas encore de moyenne`:'Pas encore d’avis'}</span>;
+  return <span className="offer-rating" title={`Moyenne de ${rating.count} avis de voyageurs`}>
+    <Star size={13} aria-hidden="true"/><strong>{rating.average.toLocaleString('fr-FR',{minimumFractionDigits:1})}</strong>
+    <span className="small muted">({rating.count} avis)</span></span>;
+}
+
+function Amenities({amenities,limit=4}){
+  if(!amenities?.length)return null;
+  const shown=amenities.slice(0,limit),rest=amenities.length-shown.length;
+  return <div className="offer-amenities" aria-label="Équipements annoncés par l’opérateur">
+    {shown.map(a=><span key={a.key} className="amenity-tag">{a.short}</span>)}
+    {rest>0&&<span className="amenity-tag more">+{rest}</span>}</div>;
 }
 
 function OperatorLine({option}){
@@ -51,6 +72,7 @@ export function OfferCard({option,originLabel,destinationLabel,selected,onSelect
     <div className="offer-journey"><div className="offer-line"><span className="offer-dot start"/><div><strong>{originLabel??option.pickupStop.city}</strong>{option.firstMile&&<span className="small muted"> · Premier kilomètre : {mins(option.firstMile.durationS)} · {km(option.firstMile.distanceM)}</span>}</div></div><div className="offer-rail"/><div className="offer-line"><span className="offer-dot end"/><div><strong>{destinationLabel??option.dropoffStop.city}</strong>{option.lastMile&&<span className="small muted"> · Dernier kilomètre : {mins(option.lastMile.durationS)} · {km(option.lastMile.distanceM)}</span>}</div></div></div>
     <p className="small muted">Montée : {option.pickupStop.name} · Descente : {option.dropoffStop.name}</p>
     <OperatorLine option={option}/>
+    <div className="between wrap offer-trust"><Reputation rating={option.rating}/><Amenities amenities={option.amenities}/></div>
     <span className="small muted">{option.serviceStatus==='active'?'En cours':'Départ programmé'}{option.livePosition?` · ${option.livePosition.signal==='live'?'En direct':'Dernière position connue'}`:''}</span>
     {option.waitingS>0&&<span className="small muted">Dont {mins(option.waitingS)} d’attente à la prise en charge</span>}
     <div className="trip-foot"><span className="trip-price">{fcfa(option.fare.amountMinor)}</span><div className="controls"><button className="btn btn-soft" onClick={onView}>Voir le trajet</button><button className="btn btn-primary" disabled={soldOut||!option.feasible} onClick={onChoose}>Choisir</button></div></div>
