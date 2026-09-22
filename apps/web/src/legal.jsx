@@ -40,10 +40,22 @@ const FOOTER_GROUPS = [
     { to: '/trips', label: 'Rechercher un trajet' },
     { to: '/tickets', label: 'Mes billets' },
     { to: '/stations', label: 'Gares et points d’embarquement' },
+    { to: '/bus-benin', label: 'Bus et transport au Bénin' },
+    { to: '/gares-routieres-benin', label: 'Gares routières du Bénin' },
+  ] },
+  // The corridor pages. They belong in a footer, where somebody looking for a
+  // specific route can find them, rather than as a block of link text on the
+  // home page competing with the search box.
+  { title: 'Destinations', links: [
+    { to: '/cotonou-parakou', label: 'Cotonou – Parakou' },
+    { to: '/cotonou-porto-novo', label: 'Cotonou – Porto-Novo' },
+    { to: '/cotonou-bohicon', label: 'Cotonou – Bohicon' },
+    { to: '/cotonou-natitingou', label: 'Cotonou – Natitingou' },
   ] },
   { title: 'Colis', links: [
     { to: '/parcels', label: 'Envoyer un colis' },
     { to: '/parcels/track', label: 'Suivre un colis' },
+    { to: '/colis-benin', label: 'Envoi et suivi de colis au Bénin' },
   ] },
   { title: 'Aide', links: [
     { to: '/about', label: 'À propos de LeRoutier' },
@@ -56,6 +68,7 @@ const FOOTER_GROUPS = [
   ] },
   { title: 'Professionnels', links: [
     { to: '/professionnel', label: 'Espace professionnel' },
+    { to: '/transporteurs-benin', label: 'Chauffeurs et compagnies de transport' },
   ] },
 ];
 

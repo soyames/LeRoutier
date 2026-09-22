@@ -2,7 +2,7 @@ import { Link, useNavigate } from 'react-router';
 import { useSession } from '@leroutier/config/client';
 import { Card, SectionTitle } from '@leroutier/ui';
 import { TripSearchHero } from '@leroutier/screens/passenger';
-import { Package, Navigation } from 'lucide-react';
+import { Package, Navigation, MessagesSquare } from 'lucide-react';
 import { LegalFooter } from './legal.jsx';
 
 // One public entry point, led by the single most important task: find a trip.
@@ -31,25 +31,16 @@ export function Home() {
       Vous travaillez dans le transport ? <Link to="/professionnel">Espace professionnel</Link>
     </p>
 
-    <Card className="stack">
-      <h2 style={{ margin: 0 }}>Transport interurbain au Bénin</h2>
-      <p style={{ margin: 0 }}>LeRoutier aide les voyageurs à rechercher les services de transport réellement publiés entre les villes du Bénin. La plateforme réunit la recherche de trajet, les points d’embarquement, les billets, le suivi du voyage et les colis sans transformer l’absence d’offre en faux horaire.</p>
-      <div className="home-actions">
-        <Link className="home-action" to="/bus-benin">Bus et transport au Bénin</Link>
-        <Link className="home-action" to="/cotonou-parakou">Cotonou – Parakou</Link>
-        <Link className="home-action" to="/cotonou-porto-novo">Cotonou – Porto-Novo</Link>
-        <Link className="home-action" to="/cotonou-bohicon">Cotonou – Bohicon</Link>
-        <Link className="home-action" to="/cotonou-natitingou">Cotonou – Natitingou</Link>
-      </div>
-    </Card>
-
-    <Card className="stack">
-      <h2 style={{ margin: 0 }}>Colis, gares routières et transporteurs</h2>
-      <p style={{ margin: 0 }}>LeRoutier couvre aussi l’envoi et le suivi de colis entre villes, les points d’embarquement ainsi que les outils destinés aux chauffeurs indépendants et aux compagnies de transport.</p>
-      <div className="home-actions">
-        <Link className="home-action" to="/colis-benin">Envoi et suivi de colis au Bénin</Link>
-        <Link className="home-action" to="/gares-routieres-benin">Gares routières et points d’embarquement</Link>
-        <Link className="home-action" to="/transporteurs-benin">Chauffeurs et compagnies de transport</Link>
+    {/* These two cards were a wall of link text doing a job a conversation does
+        better: a visitor with a question about a corridor, a gare or a parcel
+        now asks it and gets an answer from real published services. The pages
+        themselves still exist and stay linked from the footer. */}
+    <Card className="assistant-invite stack">
+      <div className="row"><MessagesSquare size={20} aria-hidden="true"/><h2 style={{ margin: 0, fontSize: 18 }}>Une question sur votre trajet ?</h2></div>
+      <p style={{ margin: 0 }}>Demandez les départs réellement publiés entre deux villes, un tarif, le suivi d’un colis ou l’état de votre réservation. L’assistant répond à partir des services réels — jamais d’un horaire inventé.</p>
+      <div className="controls">
+        <button className="btn btn-primary" onClick={() => window.dispatchEvent(new Event('leroutier:assistant-open'))}>
+          <MessagesSquare size={16} aria-hidden="true"/>Ouvrir l’assistant</button>
       </div>
     </Card>
 

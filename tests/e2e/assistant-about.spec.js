@@ -97,8 +97,14 @@ test.describe('Assistant', () => {
     await page.getByRole('button', { name: 'Assistant', exact: true }).click();
     await page.getByRole('textbox', { name: 'Votre message à l’assistant' }).fill('Bonjour ?');
     await page.getByRole('dialog', { name: 'Assistant LeRoutier' }).getByRole('button', { name: 'Envoyer', exact: true }).click();
-    await expect(page.getByText('La réponse a échoué.')).toBeVisible();
+    await expect(page.getByText('La réponse n’a pas abouti.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Réessayer' })).toBeVisible();
+    // Retry re-sends the question that failed, rather than being a button that
+    // only looks like a way out.
+    await page.route('**/api/v1/assistant', r => r.fulfill({ json: { data: { reply: 'Voici la réponse.', intent: 'support', mode: 'deterministic', tools: [] } } }));
+    await page.getByRole('button', { name: 'Réessayer' }).click();
+    await expect(page.getByText('Voici la réponse.')).toBeVisible();
+    await expect(page.getByText('La réponse n’a pas abouti.')).toHaveCount(0);
   });
 
   test('the assistant never exposes architecture to the user', async ({ page }) => {
@@ -133,5 +139,63 @@ test.describe('Assistant', () => {
     // The mobile navigation remains fully clickable: the panel only appears
     // after the link is activated.
     await expect(page.getByRole('dialog', { name: 'Assistant LeRoutier' })).toHaveCount(0);
+  });
+});
+
+test.describe('Assistant conversation design', () => {
+  const replyWith = (page, reply, intent) => page.route('**/api/v1/assistant', r => r.fulfill({
+    json: { data: { reply, intent, mode: 'deterministic', tools: [] } },
+  }));
+  const openAssistant = async page => {
+    await mockApi(page);
+    await page.goto(APP + '/');
+    await page.getByRole('button', { name: 'Assistant', exact: true }).click();
+    return page.getByRole('dialog', { name: 'Assistant LeRoutier' });
+  };
+
+  test('the thinking placeholder is replaced by the answer, not left above it', async ({ page }) => {
+    // Regression: the placeholder was addressed by an index computed from a
+    // stale render and was one past the end, so the answer was appended and
+    // every "cherche…" bubble stayed in the thread forever, under its own reply.
+    const dialog = await openAssistant(page);
+    await replyWith(page, 'Deux départs demain matin.', 'trip_search');
+    await dialog.getByRole('button', { name: 'Quels départs depuis Cotonou ?' }).click();
+    await expect(page.getByText('Deux départs demain matin.')).toBeVisible();
+    await expect(page.getByText(/cherche dans les services publiés/)).toHaveCount(0);
+  });
+
+  test('suggestions are grouped by what the assistant can actually answer', async ({ page }) => {
+    const dialog = await openAssistant(page);
+    for (const group of ['Voyager', 'Colis', 'Ma réservation', 'Aide et données']) {
+      await expect(dialog.getByRole('heading', { name: group })).toBeVisible();
+    }
+    // The corridors that used to be a wall of links on the home page are here
+    // as questions answered from real published services.
+    for (const corridor of ['Parakou', 'Porto-Novo', 'Bohicon', 'Natitingou']) {
+      await expect(dialog.getByRole('button', { name: new RegExp(corridor) }).first()).toBeVisible();
+    }
+  });
+
+  test('an answer offers the next question instead of dead-ending', async ({ page }) => {
+    const dialog = await openAssistant(page);
+    await replyWith(page, 'Votre colis est arrivé à Bohicon.', 'parcel_tracking');
+    await dialog.getByRole('button', { name: 'Où en est mon colis ?' }).click();
+    await expect(page.getByText('Votre colis est arrivé à Bohicon.')).toBeVisible();
+    // Follow-ups track the intent the server reported, not the opening menu.
+    await expect(dialog.getByRole('button', { name: 'Comment retirer un colis ?' })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Comment envoyer un colis ?' })).toBeVisible();
+    // The full menu stays one tap away rather than disappearing.
+    await dialog.getByRole('button', { name: /Autres questions/ }).click();
+    await expect(dialog.getByRole('heading', { name: 'Ma réservation' })).toBeVisible();
+  });
+
+  test('a new conversation clears the thread', async ({ page }) => {
+    const dialog = await openAssistant(page);
+    await replyWith(page, 'Deux départs demain matin.', 'trip_search');
+    await dialog.getByRole('button', { name: 'Quels départs depuis Cotonou ?' }).click();
+    await expect(page.getByText('Deux départs demain matin.')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Nouvelle conversation' }).click();
+    await expect(page.getByText('Deux départs demain matin.')).toHaveCount(0);
+    await expect(dialog.getByRole('heading', { name: 'Voyager' })).toBeVisible();
   });
 });
