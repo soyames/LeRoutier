@@ -124,6 +124,10 @@ export function serverConfig(env = process.env) {
     // arrangement, which is a supported state rather than a degraded one, and
     // a half-configured one produces no store rather than one that fails on
     // the first upload.
+    // Which build is answering. Vercel sets this on every deployment; it is a
+    // public git SHA, not a secret, and it is what lets a post-deploy check
+    // tell the deployment it just shipped from the one it replaced.
+    commitSha: env.VERCEL_GIT_COMMIT_SHA || env.GITHUB_SHA || null,
     evidenceStorage: {
       provider: env.EVIDENCE_STORAGE_PROVIDER || null,
       b2: {

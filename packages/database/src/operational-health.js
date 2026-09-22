@@ -1,4 +1,4 @@
-import {readdir} from 'node:fs/promises';
+import {schemaStatus} from './migrations.js';
 import {invariant} from '@leroutier/domain';
 // One capacity measurement, shared with the gate that actually refuses new
 // accounts. Two implementations would eventually disagree, and Platform Ops
@@ -32,7 +32,8 @@ export function operationalHealth(db) {
       invariant(isPlatformIdentity(actor) && (actor.platform_capabilities ?? []).length,
         'FORBIDDEN','Platform Operations access required.',403);
       const can=capability=>holds(actor,capability);
-      const expected=(await readdir(new URL('../migrations/',import.meta.url))).filter(f=>/^\d+.*\.sql$/.test(f)).length;
+      // Same comparison the readiness endpoint answers from.
+      const schema=can('system')?await schemaStatus(db):null;
       return db.transaction(async tx=>{
         const counts=(await tx.query(`SELECT
           (SELECT count(*) FROM schema_migrations)::integer AS migrations,
@@ -124,7 +125,13 @@ export function operationalHealth(db) {
           if(can(capability)) for(const field of fields) visibleCounts[field]=counts[field];
 
         return {database:'ok',
-          migrations:can('system')?{applied:counts.migrations,expected,matched:counts.migrations===expected}:null,
+          // Platform Ops holding `system` sees the filenames too: they are the
+          // people who would run the migration, and "1 pending" without a name
+          // is a question rather than an answer.
+          migrations:schema?{applied:schema.counts.applied,expected:schema.counts.declared,
+            matched:schema.status==='current',status:schema.status,
+            pending:schema.pending,drifted:schema.drifted,unknown:schema.unknown,
+            missingTables:schema.missingTables}:null,
           signals,counts:visibleCounts,pool:can('system')?(db.poolStats?.()??null):null,
           alertTransport:'internal_ops_only',
           storage:capacity,

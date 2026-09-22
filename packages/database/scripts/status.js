@@ -1,21 +1,19 @@
-import { readFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { serverConfig } from '@leroutier/config';
 import { createDatabase } from '../src/index.js';
+import { declaredMigrations, schemaStatus } from '../src/migrations.js';
 
 // Read-only inspection of whichever database the environment selects. Applies
 // nothing and writes nothing: run it before a production migration to confirm
 // the target, and after one to confirm the result. The connection string, host,
 // database name and credentials are never printed — `target` is a stable hash
 // so two runs can be compared without revealing either value.
+//
+// The comparison itself lives in schemaStatus(), shared with the readiness
+// endpoint and the Platform Ops system screen. A second copy here would
+// eventually disagree with the one production answers from, and the
+// disagreement would surface mid-incident.
 const config = serverConfig();
-const folder = new URL('../migrations/', import.meta.url);
-const files = (await readdir(folder)).filter(f => /^\d+.*\.sql$/.test(f)).sort();
-const declared = new Map();
-for (const file of files) {
-  const sql = await readFile(new URL(file, folder), 'utf8');
-  declared.set(file, [...sql.matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+([a-z_]+)/gi)].map(m => m[1].toLowerCase()));
-}
 let target = 'unreadable';
 try {
   const url = new URL(config.databaseUrl);
@@ -24,35 +22,35 @@ try {
 
 const db = createDatabase(config);
 try {
-  const state = await db.transaction(async tx => {
-    const present = new Set((await tx.query(
-      'SELECT table_name FROM information_schema.tables WHERE table_schema=$1', [config.schema])).rows.map(r => r.table_name));
-    const applied = present.has('schema_migrations')
-      ? new Set((await tx.query('SELECT name FROM schema_migrations')).rows.map(r => r.name)) : new Set();
-    const demo = present.has('users')
-      ? (await tx.query('SELECT count(*)::integer AS n FROM users WHERE is_demo=true')).rows[0].n : 0;
-    return { present, applied, demo };
-  });
+  const [declared, status] = await Promise.all([declaredMigrations(), schemaStatus(db)]);
+  const demo = status.reachable
+    ? await db.transaction(async tx => {
+      const present = (await tx.query(
+        "SELECT 1 FROM information_schema.tables WHERE table_schema=$1 AND table_name='users'", [config.schema])).rows.length;
+      return present ? (await tx.query('SELECT count(*)::integer AS n FROM users WHERE is_demo=true')).rows[0].n : 0;
+    }).catch(() => 0)
+    : 0;
 
   console.log(`Database status (read-only). target=${target} schema=${config.schema}`);
-  let missingTables = 0;
-  for (const file of files) {
-    const absent = declared.get(file).filter(t => !state.present.has(t));
-    missingTables += absent.length;
-    const mark = state.applied.has(file) ? 'applied' : 'MISSING';
-    const tables = declared.get(file).length ? ` tables ${declared.get(file).length - absent.length}/${declared.get(file).length}` : '';
-    console.log(`  ${mark}  ${file}${tables}`);
+  const pending = new Set(status.pending), drifted = new Set(status.drifted);
+  const missing = new Set(status.missingTables);
+  for (const migration of declared) {
+    const absent = migration.tables.filter(t => missing.has(t));
+    const mark = drifted.has(migration.name) ? 'DRIFTED' : pending.has(migration.name) ? 'MISSING' : 'applied';
+    const tables = migration.tables.length
+      ? ` tables ${migration.tables.length - absent.length}/${migration.tables.length}` : '';
+    console.log(`  ${mark}  ${migration.name}${tables}`);
   }
-  const pending = files.filter(f => !state.applied.has(f));
-  console.log(`Migrations: ${state.applied.size}/${files.length} applied; ${missingTables} declared table(s) absent.`);
+  console.log(`Migrations: ${status.counts.applied}/${status.counts.declared} applied; `
+    + `${status.missingTables.length} declared table(s) absent. Schema is ${status.status}.`);
   // Demo rows are the decisive signal that a target is the development database.
-  console.log(state.demo > 0
-    ? `Demo identities present (${state.demo}): this is a DEVELOPMENT database, never production.`
+  console.log(demo > 0
+    ? `Demo identities present (${demo}): this is a DEVELOPMENT database, never production.`
     : 'No demo identities: consistent with a production database.');
-  if (pending.length) {
-    console.log(`Pending: ${pending.join(', ')}`);
-    process.exitCode = 1;
-  } else if (missingTables) process.exitCode = 1;
+  if (status.unknown.length) console.log(`Applied but not declared by this build: ${status.unknown.join(', ')}`);
+  if (status.pending.length) console.log(`Pending: ${status.pending.join(', ')}`);
+  if (status.drifted.length) console.log(`Checksum drift: ${status.drifted.join(', ')}`);
+  if (status.status !== 'current' && status.status !== 'ahead') process.exitCode = 1;
 } catch (error) {
   console.error('Database status failed.', /^[0-9A-Z]{5}$/.test(error?.code) ? error.code : '');
   process.exitCode = 1;

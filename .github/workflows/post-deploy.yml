@@ -1,0 +1,75 @@
+name: Post-deploy readiness
+
+# The gate that would have caught 2026-09-22.
+#
+# Vercel deploys on push. It does not run migrations, and nothing told anybody
+# that production was fourteen migrations behind the code it had just been
+# given — `/health` answered 200 throughout while every authenticated request
+# returned 503. CI cannot check this for us: production Neon is deliberately
+# unreachable from CI and no production credential is available here.
+#
+# So the deployed API answers the question itself. This waits for production to
+# be serving THIS commit, then reads its readiness. No secret is required,
+# because readiness is public and deliberately carries counts and a state word
+# rather than filenames, SQL or any connection detail.
+#
+# Applying a production migration stays an explicit human action — this job
+# never runs one. Its whole job is to make sure nobody finds out from a
+# passenger.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for production to serve this commit, then check its schema
+        env:
+          READY_URL: https://api.leroutier.app/api/v1/health/ready
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -u
+          deadline=$(( $(date +%s) + 900 ))
+          serving=""
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            body="$(curl -sS --max-time 20 "$READY_URL" || true)"
+            serving="$(printf '%s' "$body" | jq -r '.data.commit // empty' 2>/dev/null || true)"
+            if [ "$serving" = "$EXPECTED_SHA" ]; then
+              echo "Production is serving $EXPECTED_SHA."
+              schema="$(printf '%s' "$body" | jq -r '.data.schema')"
+              ready="$(printf '%s' "$body" | jq -r '.data.ready')"
+              applied="$(printf '%s' "$body" | jq -r '.data.migrations.applied')"
+              declared="$(printf '%s' "$body" | jq -r '.data.migrations.declared')"
+              pending="$(printf '%s' "$body" | jq -r '.data.migrations.pending')"
+              {
+                echo "### Production readiness"
+                echo ""
+                echo "| | |"
+                echo "|---|---|"
+                echo "| schema | \`$schema\` |"
+                echo "| applied / declared | $applied / $declared |"
+                echo "| pending | $pending |"
+              } >> "$GITHUB_STEP_SUMMARY"
+
+              if [ "$ready" = "true" ]; then
+                echo "Schema is $schema. Production is ready."
+                exit 0
+              fi
+              echo "::error title=Production schema is $schema::This deployment expects $declared migrations; production has applied $applied ($pending pending). Authenticated requests may fail until the migration is applied. Run the migration against the production schema, then re-run this job."
+              exit 1
+            fi
+            sleep 15
+          done
+
+          echo "::error title=Production never reported this commit::Waited 15 minutes and production readiness last reported commit '${serving:-unknown}', not $EXPECTED_SHA. The deployment may have failed, or the API may be down — check the Vercel deployment before assuming the schema is fine."
+          exit 1

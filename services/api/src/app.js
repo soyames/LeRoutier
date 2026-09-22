@@ -8,6 +8,7 @@ import { publicAuthConfig } from '@leroutier/config';
 import { updateProfile, audit, managesOperator } from '@leroutier/database/identities';
 import { provisioning } from '@leroutier/database/provisioning';
 import { requirePlatform } from '@leroutier/database/platform-access';
+import { schemaStatus } from '@leroutier/database/migrations';
 import { payments } from '@leroutier/database/payments';
 import { tickets } from '@leroutier/database/tickets';
 import { ratings } from '@leroutier/database/ratings';
@@ -40,9 +41,13 @@ import { createUssdEngine, adapterFor as ussdAdapterFor } from '@leroutier/ussd'
 
 const API_PREFIX = '/api/v1';
 
-/** A body that is not the JSON envelope — currently only the USSD gateway. */
+/**
+ * A response this handler renders itself rather than wrapping in the JSON
+ * envelope: the USSD gateway's plain text, and readiness, which has to be able
+ * to answer 503 with a body a monitor can read.
+ */
 class RawResponse {
-  constructor(body, contentType) { this.body = body; this.contentType = contentType; }
+  constructor(body, contentType, status = 200) { this.body = body; this.contentType = contentType; this.status = status; }
 }
 
 export function createApi(db, config, keyResolver=undefined, adapter=paymentAdapter(config)) {
@@ -124,6 +129,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       '/onboarding/operator': ['PATCH'], '/onboarding/evidence': ['GET'], '/ops/corridors': ['GET'],
       '/ops/evidence-storage': ['GET'],
       '/ops/platform-team': ['GET', 'POST'], '/ops/platform-capabilities': ['GET'],
+      '/health/ready': ['GET'],
       '/operators': ['GET'], '/incidents': ['GET', 'POST'],
       '/boarding-points': ['GET'], '/boarding-points/proposals': ['POST'], '/mobility/providers': ['GET'],
       '/mobility/handoff': ['POST'], '/tickets/verify': ['POST'], '/workflows': ['GET'],
@@ -133,6 +139,35 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       throw new DomainError('METHOD_NOT_ALLOWED', 'Method not allowed for this endpoint.', 405);
     }
     if(method==='GET' && path==='/health') {await list('SELECT 1');return {status:'ok'};}
+    // Readiness, as distinct from liveness.
+    //
+    // /health stays exactly what it was so infrastructure health checks keep
+    // working: a process that answers and a database it can reach. That pair
+    // is precisely what stayed green for the whole of the 2026-09-22 outage,
+    // while every authenticated request returned 503 because the deployed code
+    // queried a column fourteen migrations in the future.
+    //
+    // So readiness asks the question liveness cannot: does the database this
+    // build is talking to have the schema this build expects. Unauthenticated,
+    // because a deployment gate has no credentials — and therefore counts and
+    // a state word only. Migration FILENAMES describe unreleased work and are
+    // reserved for Platform Ops holding `system`; no SQL, no host, no
+    // credential appears here under any state.
+    if(method==='GET' && path==='/health/ready') {
+      const schema=await schemaStatus(db);
+      const ready=schema.status==='current'||schema.status==='ahead';
+      return new RawResponse(JSON.stringify({data:{
+        service:'healthy',
+        database:schema.reachable?'reachable':'unreachable',
+        schema:schema.status,
+        ready,
+        migrations:schema.counts,
+        // Which build is answering, so a post-deploy check can tell the new
+        // deployment from the one it replaced instead of asserting against
+        // whatever happens to be serving.
+        commit:config.commitSha??null,
+      }}),'application/json; charset=utf-8',ready?200:503);
+    }
     if(method==='GET' && path==='/auth/config') return publicAuthConfig(config);
     // `payouts.available` used to mean "a secret key is set", which is not
     // something a driver can act on: they saw a withdrawal button, requested
@@ -897,7 +932,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       if(legacy){headers.deprecation='true';headers.sunset='2026-12-31T23:59:59Z';}
       // One route answers a telecom gateway in plain text; everything else
       // uses the JSON envelope. Both get the same security headers.
-      if(data instanceof RawResponse) return new Response(data.body,{headers:{...headers,'content-type':data.contentType}});
+      if(data instanceof RawResponse) return new Response(data.body,{status:data.status,headers:{...headers,'content-type':data.contentType}});
       return new Response(JSON.stringify({data}),{headers});
     } catch(error) {
       const known=error instanceof DomainError;
