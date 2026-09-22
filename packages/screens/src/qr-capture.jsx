@@ -64,7 +64,17 @@ export function QrCapture({ onRead, accept = value => value, label = 'Scanner le
       // Boarding happens at dusk and before dawn, and a ticket on a dim phone
       // screen in a dark station is the normal case, not the edge one. Offered
       // only where the device really has a torch.
-      setTorch(await instance.hasFlash().then(has => (has ? false : null)).catch(() => null));
+      //
+      // Raced against a timeout, and deliberately not awaited by anything that
+      // matters: asking a camera what it can do goes through the platform's
+      // media stack, and on some devices — and on a synthetic camera — that
+      // question is slow or never answers. A torch button is a convenience;
+      // reading the code is the job, and the job must not wait on it.
+      const hasTorch = await Promise.race([
+        instance.hasFlash().catch(() => false),
+        new Promise(resolve => setTimeout(() => resolve(false), 1500)),
+      ]).catch(() => false);
+      if (current === generation.current) setTorch(hasTorch ? false : null);
     } catch {
       if (current === generation.current) { stop(); setError(deniedText); }
     }

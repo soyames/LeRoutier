@@ -1,12 +1,38 @@
-import { useState } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router';
 import { AppShell, Card, Badge, SectionTitle, SessionPanel, EmptyState } from '@leroutier/ui';
 import { useSession } from '@leroutier/config/client';
 import { Trips, Tickets, Stations, Tracking, Account, Parcels as PassengerParcels, ParcelTracking, OnboardingPage, PrivacyCenter } from '@leroutier/screens/passenger';
 import { Checkout } from '@leroutier/screens/checkout';
 import { Today as CrewToday, Manifest, Scanner, WalkUp, Parcels as CrewParcels, Vehicle, Points, Earnings, Profile, Departures } from '@leroutier/screens/crew';
-import { Today as OpsToday, Services, Fleet, Crew, Stations as OpsStations, Parcels as OpsParcels, Payments, Settlements, Incidents, Alerts, Settings } from '@leroutier/screens/ops';
-import { PlatformOverview, PlatformOperators, PlatformVerification, PlatformUsers, PlatformFinance, PlatformIncidents, PlatformSystem } from '@leroutier/screens/platform-ops';
+// The professional consoles load on demand.
+//
+// They were in the main bundle, which meant every anonymous visitor searching
+// for a bus downloaded the whole Platform Ops surface — the verification
+// queue, the user register, the capacity screens — to render a search box.
+// Server authorization made that harmless, never useful: it is payload a
+// passenger pays for on a phone, and a description of the internal console
+// shipped to people who can never open it.
+const ops = () => import('@leroutier/screens/ops');
+const platform = () => import('@leroutier/screens/platform-ops');
+const OpsToday = lazy(() => ops().then(m => ({ default: m.Today })));
+const Services = lazy(() => ops().then(m => ({ default: m.Services })));
+const Fleet = lazy(() => ops().then(m => ({ default: m.Fleet })));
+const Crew = lazy(() => ops().then(m => ({ default: m.Crew })));
+const OpsStations = lazy(() => ops().then(m => ({ default: m.Stations })));
+const OpsParcels = lazy(() => ops().then(m => ({ default: m.Parcels })));
+const Payments = lazy(() => ops().then(m => ({ default: m.Payments })));
+const Settlements = lazy(() => ops().then(m => ({ default: m.Settlements })));
+const Incidents = lazy(() => ops().then(m => ({ default: m.Incidents })));
+const Alerts = lazy(() => ops().then(m => ({ default: m.Alerts })));
+const Settings = lazy(() => ops().then(m => ({ default: m.Settings })));
+const PlatformOverview = lazy(() => platform().then(m => ({ default: m.PlatformOverview })));
+const PlatformOperators = lazy(() => platform().then(m => ({ default: m.PlatformOperators })));
+const PlatformVerification = lazy(() => platform().then(m => ({ default: m.PlatformVerification })));
+const PlatformUsers = lazy(() => platform().then(m => ({ default: m.PlatformUsers })));
+const PlatformFinance = lazy(() => platform().then(m => ({ default: m.PlatformFinance })));
+const PlatformIncidents = lazy(() => platform().then(m => ({ default: m.PlatformIncidents })));
+const PlatformSystem = lazy(() => platform().then(m => ({ default: m.PlatformSystem })));
 import { JourneyTimeline } from '@leroutier/screens/journey';
 import { JourneyTracking } from '@leroutier/screens/tracking';
 import { NotificationCentre, useUnreadCount } from '@leroutier/screens/notifications';
@@ -201,7 +227,14 @@ export default function App() {
     unread={unread} onNotifications={() => navigate(`${scoped.prefix}/notifications`)} onHome={() => navigate('/')}
     avatar={<AccountMenu/>}
     actions={<WorkspaceSwitcher current={workspace} onSwitch={path => navigate(path)}/>}>
-    {content}
+    {/* Keyed on the destination so each one gets a FRESH boundary.
+        Without the key React treats a workspace change as an update to the
+        existing boundary and keeps the previous tree on screen while the new
+        chunk loads — which means the old workspace's navigation stays live.
+        Signing into operations and tapping "Colis" before the chunk arrived
+        landed on the passenger parcel page, because that is whose nav was
+        still rendered. On a slow connection that window is seconds. */}
+    <Suspense key={`${workspace}:${page}`} fallback={<Card><p role="status">Chargement de votre espace…</p></Card>}>{content}</Suspense>
   </AppShell>;
 
   if (!known) return <Navigate to={workspace===OPS&&can.platformOps?'/ops/platform':scoped.prefix || '/'} replace/>;

@@ -24,6 +24,10 @@ export function SessionPanel({onWorkspace=undefined}) {
     catch(e){setError(e.message);}finally{setBusy(false);}}
   async function submitReset(e){e.preventDefault();setBusy(true);setError('');setNotice('');
     try{setNotice(await resetPassword(email));}catch(e){setError(e.message);}finally{setBusy(false);}}
+  // Compiled out of any Vercel build; see developmentSignIn in vite.config.js.
+  // The API refuses /auth/demo there anyway, so this removes a description of
+  // the bypass from the bundle rather than a control from the product.
+  const devSignIn = import.meta.env.VITE_DEVELOPMENT_SIGN_IN && demoLogin;
   if(!configured) return <Card><p role="status">Connexion au service indisponible. Réessayez ultérieurement.</p></Card>;
   return <Card className="stack">
     {!online && <p role="status">Hors ligne : les actions nécessitent une connexion.</p>}
@@ -41,12 +45,12 @@ export function SessionPanel({onWorkspace=undefined}) {
         <button className="btn btn-primary" disabled={busy || !online || !canSignin} onClick={()=>run(login)}>
           {canSignin?'Continuer avec Google':'Connexion indisponible'}</button>
         {!canSignin && !demoLogin && <p role="status">La connexion sécurisée n’est pas encore configurée.</p>}
-        {demoLogin && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>run(loginDemo)}>Connexion de développement</button>}
-        {demoLogin && Array.isArray(role) && role.length>1 && <div className="controls">
+        {devSignIn && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>run(loginDemo)}>Connexion de développement</button>}
+        {devSignIn && Array.isArray(role) && role.length>1 && <div className="controls">
           {role.map(r=><button key={r} className="control" disabled={busy || !online}
             onClick={()=>run(()=>loginDemo(r))}>Développement : {r}</button>)}
         </div>}
-        {demoLogin && <details className="stack"><summary>Profils TEST : tous les espaces</summary>
+        {devSignIn && <details className="stack"><summary>Profils TEST : tous les espaces</summary>
           <p className="small muted">Données de démonstration locales. Aucun paiement réel.</p>
           <div className="demo-profiles">{[
             ['passenger','Voyageur','/tickets'],['owner-driver','Chauffeur indépendant','/work/today'],

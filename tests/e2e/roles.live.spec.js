@@ -30,7 +30,13 @@ for(const [label,path,links] of profiles) test(`TEST ${label}: mobile login, wor
     await expect(page.getByRole('navigation').getByRole('button',{name,exact:true})).toHaveAttribute('aria-current','page');
     await page.waitForLoadState('networkidle');
     await expect(page.locator('.skeleton')).toHaveCount(0);
-    await expect(page.getByRole('alert')).toHaveCount(0);
+    // No alert except the capacity warning, which is a deliberate operational
+    // notice on the screen built to carry it: DATABASE_STORAGE_LIMIT_MB is not
+    // set on this database, so the registration gate genuinely cannot fire and
+    // Platform Ops is told so. Any OTHER alert still fails the screen.
+    for (const alert of await page.getByRole('alert').all()) {
+      await expect(alert).toContainText(/Aucune limite de stockage n’est configurée/);
+    }
     await expect(page.locator('main')).not.toBeEmpty();
     await expect(page.getByText('Espace non autorisé',{exact:true})).toHaveCount(0);
     // A bare true/false here says a screen overflows but not what did it, which
