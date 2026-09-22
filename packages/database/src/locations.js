@@ -84,14 +84,21 @@ export function locations(db) {
       });
     },
     // Operator stations: a company affiliates itself with a verified location.
+    // An operator's station register is operator-internal. The scope is always
+    // resolved to one named operator and then required to be the caller's own:
+    // the previous "refuse when the caller belongs to another operator" form
+    // was satisfied by a caller belonging to NO operator — every passenger —
+    // and an absent operator left the query unscoped across the platform.
     async stationList(actor, operatorId = undefined) {
       const id = operatorId ? uuid(operatorId) : null;
       return db.transaction(async tx => {
         const user = await activeIdentity(tx, actor.id);
-        if (user.operator_id) invariant(!id || user.operator_id === id, 'FORBIDDEN', 'Operation is not permitted.', 403);
+        const scope = id ?? user.operator_id ?? null;
+        const platform = user.role === 'ops' && !user.operator_id;
+        invariant(scope && (user.operator_id === scope || platform), 'FORBIDDEN', 'Operation is not permitted.', 403);
         return (await tx.query(`SELECT s.*,b.name AS point_name,b.type AS point_type,p.name AS city FROM operator_stations s
           JOIN boarding_points b ON b.id=s.boarding_point_id JOIN places p ON p.id=b.place_id
-          WHERE ($1::uuid IS NULL OR s.operator_id=$1) AND s.active=true ORDER BY s.name LIMIT 200`, [id ?? (user.role === 'ops' ? user.operator_id : null)])).rows;
+          WHERE s.operator_id=$1 AND s.active=true ORDER BY s.name LIMIT 200`, [scope])).rows;
       });
     },
     async stationCreate(actor, input) {

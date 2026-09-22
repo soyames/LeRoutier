@@ -7,8 +7,26 @@ export function validateQueuedAction(type,payload){
   if(type==='incident' && (typeof payload.description!=='string' || payload.description.length>2000 || !payload.description.trim()))throw new Error('Description requise.');
   if(type==='parcel' && (typeof payload.parcelId!=='string' || !['loaded','departed','arrived'].includes(payload.kind)))throw new Error('Scan colis invalide.');
 }
+export const QUEUE_PREFIX='lr-driver-queue:';
+/**
+ * Drop every queued crew action left in this browser.
+ *
+ * A pending board/alight row carries the passenger's ticket code. The queue is
+ * keyed per user, so the next person to sign in on a shared station handset
+ * cannot read it through the app — but it outlived sign-out in localStorage,
+ * which is not where somebody else's ticket code belongs. Signing out clears
+ * the device, not merely the session.
+ */
+export function clearQueuedActions(storage){
+  try{
+    const stale=[];
+    for(let i=0;i<storage.length;i++){const key=storage.key(i);if(key?.startsWith(QUEUE_PREFIX))stale.push(key);}
+    for(const key of stale)storage.removeItem(key);
+    return stale.length;
+  }catch{return 0;}
+}
 export function createSyncQueue(storage,owner,now=()=>Date.now()){
-  const name='lr-driver-queue:'+owner;
+  const name=QUEUE_PREFIX+owner;
   let running=null;
   function read(){try{const rows=JSON.parse(storage.getItem(name)||'[]');return Array.isArray(rows)?rows.filter(r=>r.owner===owner && now()-r.createdAt<OFFLINE_TTL):[];}catch{return [];}}
   const write=rows=>storage.setItem(name,JSON.stringify(rows));

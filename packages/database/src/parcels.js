@@ -29,6 +29,11 @@ const TRANSITIONS = {
   collected: [], rejected: [], lost: [], returned: [], cancelled: [],
 };
 const EXCEPTION_STATUS = { damaged: 'damaged', lost: 'lost', rejected: 'rejected', held: 'held', return_requested: 'return_requested' };
+// How many pickup verifications one parcel may absorb in an hour. A counter
+// clerk needs one, occasionally two when the receiver misreads their SMS; ten
+// is generous for a person and hopeless for a six-digit search. Issuing a new
+// code clears the counter, so an honest mistake is never a lockout.
+const PICKUP_ATTEMPT_LIMIT = 10;
 
 const publicParcel = (row, parties = null) => ({
   id: row.id, trackingNumber: row.tracking_number, operatorId: row.operator_id,
@@ -429,6 +434,9 @@ export function parcels(db) {
         invariant(parcel.status === 'ready_for_pickup', 'INVALID_TRANSITION', 'The parcel must be ready for pickup first.', 409);
         // Supersede any previously issued, unused code.
         await tx.query("UPDATE parcel_pickup_codes SET used_at=now() WHERE parcel_id=$1 AND used_at IS NULL", [parcel.id]);
+        // A fresh code is a fresh chance: the attempt counter that may have
+        // locked this parcel is cleared by the authorised act of re-issuing.
+        await tx.query('DELETE FROM parcel_pickup_attempts WHERE parcel_id=$1', [parcel.id]);
         await one(tx, 'INSERT INTO parcel_pickup_codes(parcel_id,code_hash,expires_at) VALUES($1,$2,$3)', [parcel.id, hash(code), expires]);
         await addEvent(tx, { parcelId: parcel.id, kind: 'pickup_code_issued', actor, stopId: parcel.destination_stop_id });
         await emit(tx, 'parcel.pickup_code_issued', parcel.id, { trackingNumber: parcel.tracking_number });
@@ -445,6 +453,18 @@ export function parcels(db) {
       invariant(receiverName === null || (receiverName.trim().length >= 2 && receiverName.length <= 100), 'INVALID_PICKUP', 'Receiver name is invalid.');
       const labelToken = input.labelToken === undefined || input.labelToken === null ? null : String(input.labelToken);
       invariant(labelToken === null || (labelToken.length > 0 && labelToken.length <= 200), 'INVALID_PICKUP', 'Label token is invalid.');
+      // The attempt is counted in its own transaction, BEFORE the code is
+      // checked, because the verification below rolls back when it refuses —
+      // a counter incremented inside it would roll back too and every wrong
+      // six-digit guess would cost nothing. Authorization runs first so a
+      // caller with no access to this parcel can never lock it.
+      const attempts = await db.transaction(async tx => {
+        await authorize(tx, actor, id);
+        return (await one(tx, `INSERT INTO parcel_pickup_attempts(parcel_id,window_at,attempts) VALUES($1,date_trunc('hour',now()),1)
+          ON CONFLICT(parcel_id,window_at) DO UPDATE SET attempts=parcel_pickup_attempts.attempts+1 RETURNING attempts`, [uuid(id)])).attempts;
+      });
+      invariant(attempts <= PICKUP_ATTEMPT_LIMIT, 'PICKUP_LOCKED',
+        'Trop de tentatives de retrait pour ce colis. Demandez un nouveau code de retrait.', 429);
       return db.transaction(async tx => {
         const parcel = await authorize(tx, actor, id);
         invariant(parcel.status === 'ready_for_pickup', 'INVALID_TRANSITION', 'The parcel is not ready for pickup.', 409);

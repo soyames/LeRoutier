@@ -41,6 +41,11 @@ export default defineConfig({
       runtimeCaching: [],
     },
   })],
+  // No source maps are published. Vite's default is already false, but the
+  // value that decides whether every module's original source ships next to
+  // the bundle should be stated where it can be reviewed, not inherited — and
+  // `pnpm secrets:check` fails the build if a .map ever appears in dist.
+  build: { sourcemap: false },
   resolve: { dedupe: ['react', 'react-dom'] },
   server: { port: 3003, strictPort: true },
   preview: { port: 4173, strictPort: true },

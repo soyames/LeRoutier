@@ -108,9 +108,15 @@ export function operatorSettlements(db, adapter = null) {
         (input.deductionMinor === undefined || (Number.isInteger(input.deductionMinor) && input.deductionMinor >= 0 && input.deductionMinor <= input.grossMinor)),
       'INVALID_CREDIT', 'Credit details are invalid.');
       // One (source,reference) credits once: a replayed provider event or a
-      // repeated cash entry can never credit the operator twice.
+      // repeated cash entry can never credit the operator twice. The replay
+      // must also be *quiet*: reading `row.id` off the skipped insert threw a
+      // TypeError, which rolled the caller's whole transaction back and
+      // answered a duplicate webhook with a 503 instead of an acknowledgement
+      // — the exact shape that makes a provider retry forever.
       const row = await one(tx, `INSERT INTO operator_settlements(operator_id,source,reference,gross_minor,deduction_minor)
         VALUES($1,$2,$3,$4,$5) ON CONFLICT (operator_id,source,reference) DO NOTHING RETURNING *`, [input.operatorId, input.source, input.reference, input.grossMinor, input.deductionMinor ?? 0]);
+      if (!row) return await one(tx, 'SELECT * FROM operator_settlements WHERE operator_id=$1 AND source=$2 AND reference=$3',
+        [input.operatorId, input.source, input.reference]);
       await emit(tx, 'operator_settlement.credited', row.id, { operatorId: row.operator_id, grossMinor: row.gross_minor, source: row.source });
       return row;
     },

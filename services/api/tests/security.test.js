@@ -15,7 +15,8 @@ import { createApi } from '../src/app.js';
 const config = { ...serverConfig(), schema: 'lr_test_' + randomUUID().replaceAll('-', ''), demoLogin: true };
 const db = createDatabase(config);
 let api, passengerToken, opsToken;
-let SECOND_OPERATOR, SECOND_OPS_USER;
+let SECOND_OPERATOR, SECOND_OPS_USER, SECOND_DRIVER, DEMO_OPERATOR;
+const SECOND_LICENCE = 'LICENCE-NEVER-DISCLOSED';
 
 /** @param {{method?:string,token?:string|null,body?:unknown,headers?:Record<string,string>}} [opts] */
 const call = (path, opts = {}) => { const { method = 'GET', token = null, body, headers = {} } = opts;
@@ -59,6 +60,47 @@ test('cross-operator access is denied at the API boundary', async () => {
     [SECOND_OPERATOR, demoId(200), demoId(201), randomUUID(), 'fp-cross'])).rows);
   const r = await call(`/parcels/${rows[0].id}`, { token: opsToken });
   assert.equal(r.status, 403, 'demo ops cannot read another operator’s parcel');
+});
+
+test('an operator roster is never readable by someone outside that operator', async () => {
+  // Regression: the guard was "refuse when the caller belongs to ANOTHER
+  // operator", which every passenger satisfies by belonging to none. A plain
+  // passenger could read any operator's crew list — driving licence
+  // references included — by naming the operator id from a public search.
+  const passenger = await call(`/operators/${SECOND_OPERATOR}/members`, { token: passengerToken });
+  assert.equal(passenger.status, 403, 'a passenger has no operator roster');
+  assert.ok(!(await passenger.text()).includes(SECOND_LICENCE), 'the licence reference never travels');
+  const other = await call(`/operators/${SECOND_OPERATOR}/members`, { token: opsToken });
+  assert.equal(other.status, 403, 'one operator never reads another operator’s roster');
+  const own = await call(`/operators/${DEMO_OPERATOR}/members`, { token: opsToken });
+  assert.equal(own.status, 200, 'an operator still reads its own roster');
+});
+
+test('an operator station register is never readable by someone outside that operator', async () => {
+  const passenger = await call(`/operators/${SECOND_OPERATOR}/stations`, { token: passengerToken });
+  assert.equal(passenger.status, 403, 'a passenger has no operator station register');
+  const other = await call(`/operators/${SECOND_OPERATOR}/stations`, { token: opsToken });
+  assert.equal(other.status, 403, 'one operator never reads another operator’s stations');
+  const own = await call(`/operators/${DEMO_OPERATOR}/stations`, { token: opsToken });
+  assert.equal(own.status, 200, 'an operator still reads its own stations');
+});
+
+test('an unidentifiable caller is refused, never treated as the actor', async () => {
+  // Regression: only a DomainError counted as "not signed in". Any other
+  // failure — a driver-level database error during identity resolution —
+  // became the actor object itself, and /me answered 200 with the provider's
+  // internals (schema, table, constraint, source routine) as the payload.
+  const broken = { code: '23505', severity: 'ERROR', detail: 'Key (auth_subject)=(secret-subject) already exists.',
+    schema: 'leroutier', table: 'users', constraint: 'users_auth_subject_key', file: 'nbtinsert.c', routine: '_bt_check_unique' };
+  /** @type {any} */
+  const failing = { ...db, transaction: () => Promise.reject(Object.assign(new Error('identity resolution failed'), broken)) };
+  const failingApi = createApi(failing, config);
+  const r = await failingApi(new Request('http://localhost/api/v1/me', { headers: { authorization: 'Bearer ' + passengerToken } }));
+  assert.ok(r.status >= 400, `an unidentified caller must be refused, got ${r.status}`);
+  const text = await r.text();
+  for (const internal of ['nbtinsert', 'users_auth_subject_key', '_bt_check_unique', 'secret-subject', 'leroutier']) {
+    assert.ok(!text.includes(internal), `${internal} must never reach the caller`);
+  }
 });
 
 test('public search exposes only public product fields', async () => {
@@ -136,10 +178,16 @@ before(async () => {
   await migrate(db); await seed(db);
   SECOND_OPS_USER = demoId(41);
   SECOND_OPERATOR = demoId(40);
+  SECOND_DRIVER = demoId(42);
   await db.transaction(async tx => {
     await tx.query(`INSERT INTO users(id,display_name,role) VALUES($1,'Régulation Opérateur B','ops') ON CONFLICT DO NOTHING`, [SECOND_OPS_USER]);
     await tx.query(`INSERT INTO operators(id,name,type,verification_status,owner_user_id) VALUES($1,'Second Opérateur','independent','verified',$2) ON CONFLICT DO NOTHING`, [SECOND_OPERATOR, SECOND_OPS_USER]);
     await tx.query(`UPDATE users SET operator_id=$2 WHERE id=$1`, [SECOND_OPS_USER, SECOND_OPERATOR]);
+    // A crew member of the second operator, carrying the one field a roster
+    // leak would hand out: a government driving licence reference.
+    await tx.query(`INSERT INTO users(id,display_name,role,operator_id) VALUES($1,'Chauffeur Opérateur B','driver',$2) ON CONFLICT DO NOTHING`, [SECOND_DRIVER, SECOND_OPERATOR]);
+    await tx.query(`INSERT INTO driver_profiles(user_id,operator_id,license_reference,active) VALUES($1,$2,$3,true) ON CONFLICT DO NOTHING`, [SECOND_DRIVER, SECOND_OPERATOR, SECOND_LICENCE]);
+    DEMO_OPERATOR = (await tx.query(`SELECT operator_id FROM users WHERE is_demo=true AND role='ops' AND operator_id IS NOT NULL LIMIT 1`)).rows[0]?.operator_id;
   });
   api = createApi(db, config);
   for (const role of ['passenger', 'ops']) {

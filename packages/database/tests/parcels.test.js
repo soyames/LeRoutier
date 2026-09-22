@@ -143,6 +143,35 @@ test('invalid, expired, reused and forged pickup codes are rejected',async()=>{
   await db.transaction(async tx=>tx.query("UPDATE parcel_pickup_codes SET expires_at=now()-interval '1 minute' WHERE parcel_id=$1 AND used_at IS NULL",[third.p.id]));
   await assert.rejects(parcel.collect(ops,third.p.id,{code:issued.code,receiverName:'X'}),{code:'INVALID_PICKUP'});
 });
+test('guessing a pickup code locks the parcel, and a new code unlocks it',async()=>{
+  // A six-digit code has 900 000 values and fifteen minutes to live. Without a
+  // per-parcel ceiling the only limit was the generic 120-mutations-a-minute
+  // request limiter — about 1 800 guesses per code, repeatable across parcels.
+  const {p}=await readyParcel();
+  const issued=await parcel.issuePickupCode(ops,p.id);
+  const wrong=issued.code==='000000'?'111111':'000000';
+  for(let attempt=0;attempt<10;attempt++)
+    await assert.rejects(parcel.collect(ops,p.id,{code:wrong,receiverName:'Guess'}),{code:'INVALID_PICKUP'});
+  // The counter survives the rejected transaction that produced it: the
+  // eleventh attempt is refused before the code is even compared, so the
+  // correct code no longer works either.
+  await assert.rejects(parcel.collect(ops,p.id,{code:wrong,receiverName:'Guess'}),{code:'PICKUP_LOCKED'});
+  await assert.rejects(parcel.collect(ops,p.id,{code:issued.code,receiverName:'Guess'}),{code:'PICKUP_LOCKED'});
+  const counted=await one('SELECT sum(attempts)::integer AS total FROM parcel_pickup_attempts WHERE parcel_id=$1',[p.id]);
+  assert.ok(counted.total>=10,'every refused attempt is recorded');
+  // Re-issuing is an authorised act, and it clears the lock.
+  const reissued=await parcel.issuePickupCode(ops,p.id);
+  assert.equal((await one('SELECT count(*)::integer AS n FROM parcel_pickup_attempts WHERE parcel_id=$1',[p.id])).n,0);
+  assert.equal((await parcel.collect(ops,p.id,{code:reissued.code,receiverName:'Receiver'})).status,'collected');
+});
+test('a caller with no access to a parcel can never lock its pickup',async()=>{
+  const {p}=await readyParcel();
+  await parcel.issuePickupCode(ops,p.id);
+  // The passenger who sent it is not a station: collect() refuses on role
+  // before any attempt is counted, so an outsider cannot deny the receiver.
+  await assert.rejects(parcel.collect(passenger,p.id,{code:'000000',receiverName:'X'}),{code:'FORBIDDEN'});
+  assert.equal((await one('SELECT count(*)::integer AS n FROM parcel_pickup_attempts WHERE parcel_id=$1',[p.id])).n,0);
+});
 test('duplicate and conflicting scans are idempotent and safe',async()=>{
   const p=await created();
   await parcel.accept(ops,p.id);

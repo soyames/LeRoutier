@@ -105,6 +105,11 @@ try {
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
   }
+  // A published source map hands every reader the original modules, comments
+  // and internal structure of the app. Nothing in this repository has a reason
+  // to ship one, so its presence is treated as a leak rather than as a setting
+  // — in a local build exactly as in a Vercel one, because the one that leaks
+  // is whichever gets deployed.
   function scanBundleDir(dir) {
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
@@ -112,7 +117,12 @@ try {
     for (const entry of entries) {
       const file = path.join(dir, entry.name);
       if (entry.isDirectory()) scanBundleDir(file);
-      else if (entry.isFile()) scan(fs.readFileSync(file, 'utf8'), true);
+      else if (entry.isFile()) {
+        if (entry.name.endsWith('.map')) { failures++; checked++; continue; }
+        const text = fs.readFileSync(file, 'utf8');
+        if (/\/\/[#@]\s*sourceMappingURL=/.test(text)) failures++;
+        scan(text, true);
+      }
     }
   }
   for (const app of apps) scanBundleDir(`apps/${app}/dist`);

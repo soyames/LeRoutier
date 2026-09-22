@@ -7,6 +7,8 @@
 // The SDK is loaded lazily. A visitor who only searches for a bus never pays
 // for an authentication library they do not use.
 
+import { clearQueuedActions } from './offline.js';
+
 const RETURN_TO = 'leroutier:return-to';
 const PENDING_REDIRECT = 'leroutier:auth-redirect';
 const FIREBASE_APP_NAME = 'leroutier-auth';
@@ -211,4 +213,8 @@ export async function signOutFirebase(config) {
     window.sessionStorage.removeItem(RETURN_TO);
     window.sessionStorage.removeItem(PENDING_REDIRECT);
   } catch { /* private mode */ }
+  // Crew work is queued in localStorage while offline, and a pending
+  // board/alight row carries the passenger's ticket code. Signing out on a
+  // shared station handset must leave nothing of the previous person behind.
+  try { clearQueuedActions(window.localStorage); } catch { /* private mode */ }
 }

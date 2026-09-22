@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { publicAuthConfig, serverConfig, authConfig, FIREBASE_JWKS_URL } from '../src/index.js';
 import { safeReturnPath } from '../src/firebase.js';
+import { createSyncQueue, clearQueuedActions } from '../src/offline.js';
 
 // The gate that decides whether sign-in is offered at all.
 //
@@ -123,4 +124,37 @@ test('the return path cannot be turned into an open redirect', () => {
 test('the callback route is never itself a return destination', () => {
   assert.equal(safeReturnPath('/auth/callback'), '/');
   assert.equal(safeReturnPath('/auth/callback?code=abc&state=xyz'), '/');
+});
+
+// ---------------------------------------------------- crew queue on sign-out --
+test('signing out clears every queued crew action left on the device', () => {
+  // A pending board/alight row carries the passenger's ticket code. The queue
+  // is keyed per user, so the app cannot show it to the next signed-in person
+  // — but it used to outlive sign-out in localStorage on a shared station
+  // handset, where anybody holding the device can read it.
+  const store = new Map();
+  /** @type {any} */
+  const storage = {
+    get length() { return store.size; },
+    key: i => [...store.keys()][i] ?? null,
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: k => { store.delete(k); },
+  };
+  const queue = createSyncQueue(storage, 'driver-1');
+  queue.enqueue('board', { serviceId: 'svc-1', bookingId: 'bk-1', stopSequence: 0, code: 'LR-AAAA-BBBB-CCCC-DDDD' });
+  createSyncQueue(storage, 'driver-2').enqueue('alight', { serviceId: 'svc-2', bookingId: 'bk-2', stopSequence: 3 });
+  storage.setItem('leroutier:unrelated', 'keep me');
+  assert.ok(JSON.stringify([...store.values()]).includes('LR-AAAA-BBBB-CCCC-DDDD'), 'the code is really there first');
+
+  assert.equal(clearQueuedActions(storage), 2, 'every crew queue on the device goes, not only the signed-in user’s');
+  assert.equal(queue.read().length, 0);
+  assert.ok(!JSON.stringify([...store.values()]).includes('LR-AAAA-BBBB-CCCC-DDDD'), 'no ticket code survives sign-out');
+  assert.equal(storage.getItem('leroutier:unrelated'), 'keep me', 'unrelated keys are left alone');
+});
+
+test('a storage that refuses to be read never breaks sign-out', () => {
+  /** @type {any} */
+  const denied = { get length() { throw new Error('private mode'); }, key: () => null, removeItem: () => {} };
+  assert.equal(clearQueuedActions(denied), 0);
 });

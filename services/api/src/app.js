@@ -294,9 +294,16 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     }
     // Human users authenticate first; service/agent principals (distinct identity
     // namespace) only apply to the dedicated agent API below.
+    //
+    // ANY failure here is a failure to identify the caller, not only a
+    // DomainError. Testing for DomainError alone let an unexpected error — a
+    // driver-level database error, for instance — become the `actor` object
+    // itself, which /me then returned with a 200 and the provider's internals
+    // (schema, table, constraint, source routine) inside it.
     const human=await auth.authenticate(req).catch(error=>error);
-    const agent=human instanceof DomainError ? await authenticateAgent(db,req) : null;
-    if(human instanceof DomainError && !agent) throw human;
+    const unidentified=human instanceof Error;
+    const agent=unidentified ? await authenticateAgent(db,req) : null;
+    if(unidentified && !agent) throw human;
     const actor=agent ?? human;
     if(method!=='GET') await limited(actor.id ?? actor.agent.id);
     if(actor.agent && !path.startsWith('/agent/') && !(method==='POST' && path==='/workflows/tick'))
@@ -429,7 +436,13 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='POST' && path==='/parcels') return parcel.create(actor,await body(),req.headers.get('idempotency-key'));
     if(method==='GET' && path==='/me/parcels') return parcel.listMine(actor);
     if(method==='GET' && path==='/driver/parcels') return parcel.listDriver(actor);
-    if(method==='GET' && path==='/driver/parcels/lookup') return parcel.lookupDriver(actor, url.searchParams.get('code'));
+    // A GET whose query string is a CREDENTIAL, not a filter: it accepts an LRP
+    // reference or a label token. Reads are otherwise unmetered, which left the
+    // one guessable secret on a read path with no ceiling at all.
+    if(method==='GET' && path==='/driver/parcels/lookup') {
+      await limited('parcel-lookup:'+actor.id);
+      return parcel.lookupDriver(actor, url.searchParams.get('code'));
+    }
     if(method==='GET' && path==='/ops/parcels') return parcel.listOps(actor,{status:url.searchParams.get('status')??undefined,q:url.searchParams.get('q')??undefined});
     if(method==='GET' && path==='/ops/parcel-rate-rules') return parcel.rateRules(actor);
     if(method==='POST' && path==='/ops/parcel-rate-rules') return parcel.rateRules(actor,await body(),req.headers.get('idempotency-key'));
