@@ -179,3 +179,40 @@ test('offline manual boarding remains unverified until the server accepts it aft
   await expect(driver.getByText('Embarquement confirmé.',{exact:true})).toBeVisible();
   await passenger.close();await driver.close();
 });
+
+// The platform summary is a GRID of cards, not a list of lines.
+//
+// `.stats-grid` shipped as a className with no CSS rule behind it at all, so
+// the four summary cards stacked one per row — on a 1280px console, four
+// almost-empty bands down the page. Nothing caught it: every existing check
+// asked whether the content was correct, whether anything overflowed, and
+// whether an alert was present, and all three stayed true while the layout
+// was wrong.
+//
+// So this asserts the one thing that distinguishes a grid from an unstyled
+// div: cards SHARE rows. Deliberately not "exactly four columns" — the column
+// count is a design decision that may change, whereas one-card-per-row at
+// desktop width is the bug.
+test('the platform summary lays its cards out as a grid, not one per line', async ({page}) => {
+  await page.setViewportSize({width:1280,height:900});
+  await login(page,'Exploitation plateforme');
+  const grid=page.locator('.stats-grid');
+  await expect(grid).toBeVisible();
+  await expect(grid).toHaveCSS('display','grid');
+
+  const rowsAt=async()=>page.evaluate(()=>{
+    const g=document.querySelector('.stats-grid');
+    const tops=[...g.children].map(c=>Math.round(c.getBoundingClientRect().top));
+    return {cards:g.children.length,rows:new Set(tops).size};
+  });
+
+  const wide=await rowsAt();
+  expect(wide.cards).toBeGreaterThan(1);
+  expect(wide.rows).toBe(1);
+
+  // Narrow: still a grid rather than a stack, and never wider than the phone.
+  await page.setViewportSize({width:390,height:844});
+  const narrow=await rowsAt();
+  expect(narrow.rows).toBeLessThan(narrow.cards);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);
+});
