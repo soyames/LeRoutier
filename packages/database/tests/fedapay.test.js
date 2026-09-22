@@ -206,3 +206,106 @@ test('unpaid bookings never produce a boarding QR; paid ones do',async()=>{
   const ticket=await tickets(db).issue(passenger,b.id);
   assert.ok(ticket.token.startsWith('LRT1.'));
 });
+
+// ------------------------------------------------- who may take the money --
+// The six ownership rules, asserted against the running domain rather than
+// inferred from where a button is drawn. A UI that hides a control is not a
+// control: every one of these has to fail at the server.
+test('revenue belongs to the operator, and only an independent owner may withdraw it',async()=>{
+  const {operatorSettlements}=await import('../src/operator-settlements.js');
+  const settle=operatorSettlements(db,adapter);
+  const company=await db.transaction(async tx=>(await tx.query(
+    `INSERT INTO operators(name,type,verification_status) VALUES('Compagnie Test','company','verified') RETURNING *`)).rows[0]);
+  const make=async(role,operatorId,extra={})=>{
+    const id=randomUUID();
+    await db.transaction(async tx=>{
+      await tx.query(`INSERT INTO users(id,display_name,role,operator_id,profile_completed_at)
+        VALUES($1,$2,$3,$4,now())`,[id,role+'-'+id.slice(0,4),role,operatorId]);
+      if(role==='driver')await tx.query(`INSERT INTO driver_profiles(user_id,operator_id,license_reference,active)
+        VALUES($1,$2,$3,true)`,[id,operatorId,'PC-'+id.slice(0,8)]);
+      if(role==='convoyeur')await tx.query('INSERT INTO convoyeur_profiles(user_id,operator_id,active) VALUES($1,$2,true)',[id,operatorId]);
+      if(extra.owns)await tx.query('UPDATE operators SET owner_user_id=$2 WHERE id=$1',[operatorId,id]);
+      if(extra.admins)await tx.query('UPDATE operators SET admin_user_id=$2 WHERE id=$1',[operatorId,id]);
+    });
+    return {id,role,operator_id:operatorId};
+  };
+  const companyDriver=await make('driver',company.id);
+  const companyOps=await make('ops',company.id,{admins:true});
+  const convoyeur=await make('convoyeur',company.id);
+  // Real revenue on the company ledger.
+  await db.transaction(tx=>settle.credit(tx,{operatorId:company.id,source:'ticket_online',
+    reference:'test:'+randomUUID(),grossMinor:100000,deductionMinor:10000}));
+
+  const withdrawal={amountMinor:1000,phoneNumber:'97000111',country:'BJ',network:null};
+  // A company driver is paid by their employer. The company revenue is not
+  // theirs to move, however senior they are.
+  await assert.rejects(settle.request(companyDriver,withdrawal,randomUUID()),{code:'FORBIDDEN'});
+  // Neither is it the administrator's: a company settles on its own terms, and
+  // the platform does not hand its balance to whoever holds the admin seat.
+  await assert.rejects(settle.request(companyOps,withdrawal,randomUUID()),{code:'FORBIDDEN'});
+  // A convoyeur collects cash and never owns revenue. This is the cash
+  // collector / revenue owner separation, stated as a refusal.
+  await assert.rejects(settle.request(convoyeur,withdrawal,randomUUID()),{code:'FORBIDDEN'});
+  await assert.rejects(payout.request(convoyeur,{destinationId:randomUUID(),amountMinor:1000},randomUUID()),{code:'FORBIDDEN'});
+  // And the company balance is still intact after all of that.
+  const balance=await db.transaction(async tx=>(await tx.query(
+    `SELECT sum(net_minor)::integer AS total FROM operator_settlements WHERE operator_id=$1 AND payout_state='available'`,[company.id])).rows[0]);
+  assert.equal(balance.total,90000,'nothing was reserved or moved by a refused request');
+});
+
+test('one operator can never approve, read or reconcile another operator payout',async()=>{
+  const {operatorSettlements}=await import('../src/operator-settlements.js');
+  const settle=operatorSettlements(db,adapter);
+  const foreignOps={id:randomUUID(),role:'ops',operator_id:randomUUID()};
+  const owner=await db.transaction(async tx=>{
+    const id=randomUUID();
+    await tx.query(`INSERT INTO users(id,display_name,role,operator_id,profile_completed_at)
+      VALUES($1,'Independant Retrait','driver',$2,now())`,[id,demo.operator]);
+    await tx.query(`INSERT INTO driver_profiles(user_id,operator_id,license_reference,active) VALUES($1,$2,'PC-IND-1',true)`,[id,demo.operator]);
+    await tx.query(`UPDATE operators SET owner_user_id=$2,type='independent',verification_status='verified' WHERE id=$1`,[demo.operator,id]);
+    return {id,role:'driver',operator_id:demo.operator};
+  });
+  await db.transaction(tx=>settle.credit(tx,{operatorId:demo.operator,source:'walk_up',
+    reference:'cash:'+randomUUID(),grossMinor:50000,deductionMinor:5000}));
+  const request=await settle.request(owner,{amountMinor:2000,phoneNumber:'97000222',country:'BJ',network:null},randomUUID());
+
+  // A different operator Ops cannot touch it, in any direction.
+  await assert.rejects(settle.approve(foreignOps,request.id),{code:'FORBIDDEN'});
+  await assert.rejects(settle.reconcile(foreignOps,request.id),{code:'FORBIDDEN'});
+  // The owner-driver cannot approve their own withdrawal: requesting and
+  // releasing money are two decisions, and one account never holds both.
+  await assert.rejects(settle.approve(owner,request.id),{code:'FORBIDDEN'});
+  // A passenger is nowhere near any of it.
+  await assert.rejects(settle.approve({id:demo.passenger,role:'passenger'},request.id),{code:'FORBIDDEN'});
+});
+
+test('a withdrawal is reserved once: approving twice cannot pay twice',async()=>{
+  const {operatorSettlements}=await import('../src/operator-settlements.js');
+  const settle=operatorSettlements(db,adapter);
+  const platformOps={id:demo.ops,role:'ops',operator_id:null};
+  const owner=await db.transaction(async tx=>{
+    const id=randomUUID();
+    await tx.query(`INSERT INTO users(id,display_name,role,operator_id,profile_completed_at)
+      VALUES($1,'Double Retrait','driver',$2,now())`,[id,demo.operator]);
+    await tx.query(`INSERT INTO driver_profiles(user_id,operator_id,license_reference,active) VALUES($1,$2,'PC-IND-2',true)`,[id,demo.operator]);
+    await tx.query(`UPDATE operators SET owner_user_id=$2,type='independent',verification_status='verified' WHERE id=$1`,[demo.operator,id]);
+    return {id,role:'driver',operator_id:demo.operator};
+  });
+  await db.transaction(tx=>settle.credit(tx,{operatorId:demo.operator,source:'walk_up',
+    reference:'cash:'+randomUUID(),grossMinor:20000,deductionMinor:0}));
+  const key=randomUUID();
+  const first=await settle.request(owner,{amountMinor:5000,phoneNumber:'97000444',country:'BJ',network:null},key);
+  // Same key, same request: one row, one reservation.
+  const repeat=await settle.request(owner,{amountMinor:5000,phoneNumber:'97000444',country:'BJ',network:null},key);
+  assert.equal(repeat.id,first.id);
+  // Same key, different amount: refused rather than silently answering about
+  // the first request.
+  await assert.rejects(settle.request(owner,{amountMinor:9000,phoneNumber:'97000444',country:'BJ',network:null},key),
+    {code:'IDEMPOTENCY_CONFLICT'});
+  await settle.approve(platformOps,first.id);
+  // Already processing: a second approval is a state error, not a second payout.
+  await assert.rejects(settle.approve(platformOps,first.id),{code:'PAYOUT_TRANSITION'});
+  const reserved=await db.transaction(async tx=>(await tx.query(
+    `SELECT sum(net_minor)::integer AS total FROM operator_settlements WHERE payout_request_id=$1`,[first.id])).rows[0]);
+  assert.equal(reserved.total,5000,'exactly the requested amount is held, once');
+});

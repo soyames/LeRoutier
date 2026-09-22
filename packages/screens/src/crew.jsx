@@ -9,7 +9,7 @@ import { ServiceTracking } from './tracking.jsx';
 import { ParcelDocuments } from './documents.jsx';
 import { ParcelPickup } from './parcel-pickup.jsx';
 import { VerificationDossier } from './operator-onboarding.jsx';
-import QrScanner from 'qr-scanner';
+import { QrCapture } from './qr-capture.jsx';
 import { Users, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw, Package, MapPin, Navigation,
   Wrench, HeartPulse, Ban, Fuel, Hourglass, Construction, TrafficCone, ShieldAlert } from 'lucide-react';
 
@@ -333,12 +333,9 @@ export function Scanner(){
   const {request}=useSession();
   const {user,service,s,manifest}=useService();
   const queue=useDriverQueue(user?.id,request);
-  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[code,setCode]=useState(''),[scanning,setScanning]=useState(false);
-  const scanner=useRef(null);
-  const video=useRef(null),reading=useRef(false);
+  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[code,setCode]=useState('');
   const [verified,setVerified]=useState(null),[queuedId,setQueuedId]=useState(null);
   const queued=queue.rows.find(row=>row.id===queuedId);
-  useEffect(()=>()=>{scanner.current?.stop();scanner.current?.destroy();},[]);
   async function act(type,payload){
     setBusy(true);setError('');setNotice('');
     try{
@@ -351,19 +348,6 @@ export function Scanner(){
       }
     }catch(e){setError(e.message);}
     finally{setBusy(false);manifest.reload();service.reload();}
-  }
-  async function scan(){
-    setError('');setScanning(true);
-    try{
-      scanner.current?.destroy();reading.current=false;
-      scanner.current=new QrScanner(video.current,result=>{
-        if(reading.current)return;
-        const match=/^LRT1\.[A-Za-z0-9_-]+$/.test(result.data)?result.data:null;
-        if(match){reading.current=true;scanner.current?.stop();setScanning(false);act('board',{code:match,serviceId:s.id,stopSequence:s.current_sequence});}
-        else setError('QR inconnu : il ne s’agit pas d’un billet LeRoutier.');
-      },{highlightScanRegion:true,preferredCamera:'environment'});
-      await scanner.current.start();
-    }catch{scanner.current?.destroy();setScanning(false);setError('Caméra indisponible : saisissez le code du billet manuellement.');}
   }
   if(!s) return <><SectionTitle icon={QrCode} title="Contrôle des billets"/><Card><p role="status">Aucun service affecté : le contrôle des billets n’est pas disponible.</p></Card></>;
   return <>
@@ -386,9 +370,11 @@ export function Scanner(){
       <div className="between wrap">
         <label className="grow">Code du billet<input className="control" placeholder="LRT1.… ou LR-XXXX-XXXX" value={code} onChange={e=>setCode(e.target.value)}/></label>
         <button className="btn btn-primary" disabled={busy || !code.trim()} onClick={()=>act('board',{code:code.trim(),serviceId:s.id,stopSequence:s.current_sequence})}>Valider le billet</button>
-        {!scanning?<button className="btn btn-soft" disabled={busy} onClick={scan}>Scanner le QR</button>:<button className="btn btn-soft" onClick={()=>{scanner.current?.stop();setScanning(false);}}>Arrêter la caméra</button>}
       </div>
-      <video ref={video} id="qr-video" className="qr-video" hidden={!scanning} muted playsInline aria-label="Lecture caméra QR"/>
+      <QrCapture label="Scanner le QR" rejectText="QR inconnu : il ne s’agit pas d’un billet LeRoutier."
+        deniedText="Caméra indisponible : saisissez le code du billet manuellement."
+        accept={value=>/^LRT1\.[A-Za-z0-9_-]+$/.test(value)?value:null}
+        onRead={value=>act('board',{code:value,serviceId:s.id,stopSequence:s.current_sequence})}/>
     </Card>
   </>;
 }
@@ -463,11 +449,8 @@ export function Parcels(){
   const {user,s,cargo}=useService();
   const queue=useDriverQueue(user?.id,request);
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
-  const [lookupCode,setLookupCode]=useState(''),[scannedParcel,setScannedParcel]=useState(null),[scanning,setScanning]=useState(false);
+  const [lookupCode,setLookupCode]=useState(''),[scannedParcel,setScannedParcel]=useState(null);
   const [documentParcel,setDocumentParcel]=useState(null);
-  const parcelScanner=useRef(null);
-  const parcelVideo=useRef(null),parcelReading=useRef(false);
-  useEffect(()=>()=>{parcelScanner.current?.stop();parcelScanner.current?.destroy();},[]);
   async function lookup(code){
     const value=String(code||'').trim();
     if(!value) return;
@@ -475,20 +458,6 @@ export function Parcels(){
     try{setScannedParcel(await request(`/driver/parcels/lookup?code=${encodeURIComponent(value)}`));setLookupCode(value);}
     catch(e){setScannedParcel(null);setError(e.message);}
     finally{setBusy(false);}
-  }
-  async function startParcelScan(){
-    setError('');setScanning(true);
-    try{
-      parcelScanner.current?.destroy();parcelReading.current=false;
-      parcelScanner.current=new QrScanner(parcelVideo.current,result=>{
-        if(parcelReading.current)return;
-        const value=result.data.trim();
-        if(/^LRP1\.[A-Za-z0-9_-]+$/.test(value) || /^(?:https:\/\/leroutier\.app\/parcels\/track\?ref=)?LRP-[0-9A-F]{8}$/i.test(value)){
-          parcelReading.current=true;parcelScanner.current?.stop();setScanning(false);lookup(value);
-        }else setError('QR colis inconnu : utilisez le numéro LRP manuscrit en secours.');
-      },{highlightScanRegion:true,preferredCamera:'environment'});
-      await parcelScanner.current.start();
-    }catch{parcelScanner.current?.destroy();setScanning(false);setError('Caméra indisponible : saisissez la référence LRP manuellement.');}
   }
   async function queueParcel(kind, parcelId=scannedParcel?.id){
     if(!parcelId || !s) return;
@@ -518,10 +487,11 @@ export function Parcels(){
       <div className="between wrap">
         <label className="grow">Référence LRP<input className="control" inputMode="text" autoCapitalize="characters" placeholder="LRP-XXXXXXXX" value={lookupCode} onChange={e=>setLookupCode(e.target.value.toUpperCase())}/></label>
         <button className="btn btn-primary" disabled={busy || !lookupCode.trim()} onClick={()=>lookup(lookupCode)}>Rechercher</button>
-        {!scanning?<button className="btn btn-soft" disabled={busy} onClick={startParcelScan}>Scanner le QR</button>
-          :<button className="btn btn-soft" onClick={()=>{parcelScanner.current?.stop();setScanning(false);}}>Arrêter la caméra</button>}
       </div>
-      <video ref={parcelVideo} id="parcel-qr-video" className="qr-video" hidden={!scanning} muted playsInline aria-label="Lecture caméra QR du colis"/>
+      <QrCapture label="Scanner le QR" rejectText="QR colis inconnu : utilisez le numéro LRP manuscrit en secours."
+        deniedText="Caméra indisponible : saisissez la référence LRP manuellement."
+        accept={value=>/^LRP1\.[A-Za-z0-9_-]+$/.test(value)||/^(?:https:\/\/leroutier\.app\/parcels\/track\?ref=)?LRP-[0-9A-F]{8}$/i.test(value)?value:null}
+        onRead={lookup}/>
       {scannedParcel && <div className="summary">
         <div className="row"><strong>{scannedParcel.trackingNumber}</strong><Badge tone={parcelTones[scannedParcel.status]}>{parcelLabels[scannedParcel.status]}</Badge></div>
         <div className="row"><span>{scannedParcel.category} · {scannedParcel.quantity} pièce(s)</span><span>{scannedParcel.originCity} → {scannedParcel.destinationCity}</span></div>

@@ -892,7 +892,10 @@ export function ParcelTracking() {
     <SectionTitle icon={Package} title="Suivre un colis"/>
     <Card className="stack">
       <form className="stack" onSubmit={track}>
-        <QrCapture onRead={value => { const match = value.match(/^(?:https:\/\/leroutier\.app\/parcels\/track\?ref=)?(LRP-[0-9A-F]{8})$/i); if (match) track(null, match[1].toUpperCase()); else setError('Ce QR ne contient pas de référence de suivi LeRoutier.'); }} label="Scanner le QR du colis"/>
+        <QrCapture label="Scanner le QR du colis"
+          rejectText="Ce QR ne contient pas de référence de suivi LeRoutier."
+          accept={value => value.match(/^(?:https:\/\/leroutier\.app\/parcels\/track\?ref=)?(LRP-[0-9A-F]{8})$/i)?.[1]?.toUpperCase() ?? null}
+          onRead={reference => track(null, reference)}/>
         <label>Numéro de suivi<input className="control" placeholder="LRP-XXXXXXXX" aria-label="Numéro de suivi" value={input} onChange={e => setInput(e.target.value)}/></label>
         <button className="btn btn-primary" disabled={!input.trim() || busy}>{busy ? 'Recherche…' : 'Suivre mon colis'}</button>
       </form>

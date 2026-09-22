@@ -65,7 +65,10 @@ export function serverConfig(env = process.env) {
       secretKey:env.FEDAPAY_SECRET_KEY,
       payoutSecretKey:env.FEDAPAY_PAYOUT_SECRET_KEY,
       webhookSecret:env.FEDAPAY_WEBHOOK_SECRET,
-      webhookUrl:env.FEDAPAY_WEBHOOK_URL,
+      // There is deliberately no webhookUrl. The callback address is registered
+      // in the FedaPay dashboard, not sent by this application, and a setting
+      // that looks like it configures something it does not is worse than no
+      // setting: it invites somebody to change it and expect an effect.
     },
     // Driver payout withdrawals default to requiring Ops approval; set PAYOUT_APPROVAL_REQUIRED=false
     // only when a documented pre-approved policy exists.
