@@ -21,13 +21,17 @@ const BREVO = { emailProvider: 'brevo', brevo: { apiKey: 'test-brevo-key', fromA
 let realPerson, testPerson, disabledPerson;
 
 /** Records what the transport was asked to do; never reaches the network. */
-function fakeBrevo({ status = 201 } = {}) {
+function fakeBrevo({ status = 201, code = null } = {}) {
   const calls = [];
   return {
     calls,
     fetcher: async (url, init) => {
       calls.push({ url, headers: init.headers, body: JSON.parse(init.body) });
-      return new Response(JSON.stringify({ messageId: '<test@brevo>' }), { status });
+      // Brevo reports the request-rate budget on EVERY response, not only 429.
+      return new Response(JSON.stringify(status === 201 ? { messageId: '<test@brevo>' } : { code }), {
+        status,
+        headers: { 'x-sib-ratelimit-remaining': '97', 'x-sib-ratelimit-reset': '11' },
+      });
     },
   };
 }
@@ -78,7 +82,11 @@ test('a real recipient produces one well-formed Brevo request', async () => {
   const { email } = notificationProviders(db, { notificationProviders: BREVO }, brevo.fetcher);
   const result = await email.send({ notification: notification(realPerson), idempotencyKey: randomUUID() });
 
-  assert.deepEqual(result, { accepted: true });
+  assert.equal(result.accepted, true);
+  // The rate budget rides along on success, so the channel's health is known
+  // without a second call just to ask for it.
+  assert.equal(result.rateLimitRemaining, 97);
+  assert.ok(result.rateLimitResetsAt instanceof Date);
   assert.equal(brevo.calls.length, 1);
   const call = brevo.calls[0];
   assert.equal(call.url, 'https://api.brevo.com/v3/smtp/email');
@@ -89,12 +97,16 @@ test('a real recipient produces one well-formed Brevo request', async () => {
   assert.match(call.body.textContent, /LeRoutier/);
 });
 
-test('a TEST identity never reaches the provider, and neither does a disabled account', async () => {
+test('a TEST identity never reaches the provider, and never looks like an outage', async () => {
   for (const person of [testPerson, disabledPerson]) {
     const brevo = fakeBrevo();
     const { email } = notificationProviders(db, { notificationProviders: BREVO }, brevo.fetcher);
-    await assert.rejects(email.send({ notification: notification(person), idempotencyKey: randomUUID() }));
+    const result = await email.send({ notification: notification(person), idempotencyKey: randomUUID() });
     assert.equal(brevo.calls.length, 0, 'the request must not be made at all, not merely discarded');
+    // "Nobody to send to", not "the provider failed". A throw here would retry
+    // five times and — now that failures colour the channel's health — let TEST
+    // data suppress real people's email.
+    assert.deepEqual(result, { accepted: false, unavailable: true });
   }
 });
 
@@ -108,13 +120,64 @@ test('a recipient with no address is unavailable, not a failure to retry forever
   assert.equal(brevo.calls.length, 0);
 });
 
-test('a provider refusal throws so the dispatcher retries, and never reports sent', async () => {
-  for (const status of [400, 401, 429, 500, 503]) {
-    const brevo = fakeBrevo({ status });
+test('each provider failure is classified as the different thing it is', async () => {
+  // The whole point: a spent allowance and a timeout both "fail", and retrying
+  // one is correct while retrying the other is a storm against a provider that
+  // has already said no.
+  /** @type {Array<[number, string|null, string, boolean]>} */
+  const cases = [
+    [402, 'not_enough_credits', 'quota_exhausted', true],
+    [400, 'not_enough_credits', 'quota_exhausted', true],
+    [429, null, 'rate_limited', true],
+    [401, null, 'invalid_configuration', true],
+    [403, null, 'invalid_configuration', true],
+    [400, 'invalid_parameter', 'recipient_rejected', false],
+    [500, null, 'provider_unavailable', false],
+    [503, null, 'provider_unavailable', false],
+  ];
+  for (const [status, code, reason, suppresses] of cases) {
+    const brevo = fakeBrevo({ status, code });
     const { email } = notificationProviders(db, { notificationProviders: BREVO }, brevo.fetcher);
-    await assert.rejects(email.send({ notification: notification(realPerson), idempotencyKey: randomUUID() }),
-      undefined, `HTTP ${status} must not be treated as accepted`);
+    const result = await email.send({ notification: notification(realPerson), idempotencyKey: randomUUID() });
+    assert.equal(result.accepted, false, `HTTP ${status} must never be treated as accepted`);
+    assert.equal(result.reason, reason, `HTTP ${status} / ${code} should read as ${reason}`);
+    assert.equal(Boolean(result.suppressUntil), suppresses,
+      `${reason} ${suppresses ? 'must' : 'must not'} suppress the whole channel`);
   }
+});
+
+test('a rate limit waits as long as the provider asked, not a fixed guess', async () => {
+  const brevo = fakeBrevo({ status: 429 });
+  const { email } = notificationProviders(db, { notificationProviders: BREVO }, brevo.fetcher);
+  const result = await email.send({ notification: notification(realPerson), idempotencyKey: randomUUID() });
+  assert.equal(result.reason, 'rate_limited');
+  const waitSeconds = Math.round((result.suppressUntil.getTime() - Date.now()) / 1000);
+  assert.ok(waitSeconds >= 9 && waitSeconds <= 13, `expected about 11s from the header, got ${waitSeconds}`);
+});
+
+test('a network failure is the provider being unreachable, not a rejected address', async () => {
+  const { email } = notificationProviders(db, { notificationProviders: BREVO },
+    async () => { throw new TypeError('fetch failed'); });
+  const result = await email.send({ notification: notification(realPerson), idempotencyKey: randomUUID() });
+  assert.equal(result.reason, 'provider_unavailable');
+  assert.ok(!result.suppressUntil, 'one unreachable moment must not stop the channel for a day');
+});
+
+test('nothing the provider says about a failure is carried out of the adapter', async () => {
+  // Brevo's own message echoes the recipient address back. It must not reach
+  // the delivery audit, a console, or anywhere a person could read it.
+  const leaky = async () => new Response(JSON.stringify({
+    code: 'invalid_parameter',
+    message: 'Invalid email address: voyageur@example.invalid is not valid',
+  }), { status: 400 });
+  const { email } = notificationProviders(db, { notificationProviders: BREVO }, leaky);
+  const result = await email.send({ notification: notification(realPerson), idempotencyKey: randomUUID() });
+  const surface = JSON.stringify(result);
+  assert.ok(!surface.includes('voyageur@example.invalid'), 'a recipient address escaped the adapter');
+  assert.ok(!surface.includes('Invalid email address'), 'a provider message escaped the adapter');
+  assert.ok(!/brevo|http/i.test(surface), 'provider terminology escaped the adapter');
+  assert.deepEqual(Object.keys(result).sort(),
+    ['accepted', 'rateLimitRemaining', 'rateLimitResetsAt', 'reason', 'suppressUntil']);
 });
 
 test('the API key never travels in a URL, a body, or anything returned to a caller', async () => {

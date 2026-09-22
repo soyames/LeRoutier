@@ -15,7 +15,8 @@
 import { createHash } from 'node:crypto';
 import { invariant } from '@leroutier/domain';
 
-const SUPPORT_EMAIL = 'leroutierbj@gmail.com';
+// One definition, shared with the messages that cite it.
+import { SUPPORT_EMAIL } from '@leroutier/notifications/content';
 const digest = x => createHash('sha256').update(JSON.stringify(x)).digest('hex');
 
 const MONEY = minor => `${Number(minor ?? 0).toLocaleString('fr-FR')} FCFA`;

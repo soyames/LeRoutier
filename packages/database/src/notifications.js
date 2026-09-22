@@ -1,5 +1,6 @@
 import { invariant, uuid } from '@leroutier/domain';
 import { CATEGORIES, CHANNELS, channelAvailability, resolveChannels } from '@leroutier/notifications';
+import { dailyUsage, channelState, quotaPressure, emailAdmitted, DEFAULT_QUOTA_THRESHOLDS } from './notification-channel-state.js';
 
 // Domain event -> policy -> recipient -> channel -> delivery record.
 // The outbox stays the only event stream: dispatch runs inside the same
@@ -167,6 +168,14 @@ export function notificationPolicies(db, config = {}) {
     }
     const policies = await rows(tx, `SELECT * FROM notification_policies
       WHERE active AND event_type=$1 AND $2::jsonb @> payload_match`, [event.event_type, JSON.stringify(payload)]);
+    // Read once per event rather than per policy per recipient: an event that
+    // fans out to forty passengers must not ask forty times.
+    const pressure = policies.some(p => (p.channels ?? []).includes('email'))
+      ? quotaPressure(
+        await dailyUsage(tx, 'email', config.emailDailyQuota ?? null),
+        await channelState(tx, 'email'),
+        config.emailQuotaThresholds ?? DEFAULT_QUOTA_THRESHOLDS)
+      : 'healthy';
     let created = 0;
     for (const policy of policies) {
       const resolve = AUDIENCES[policy.audience];
@@ -181,8 +190,18 @@ export function notificationPolicies(db, config = {}) {
           policy.template, JSON.stringify(safeData(payload)), policy.entity_type, recipient.entityId ?? null, event.id]);
         if (!inserted) continue;
         created++;
-        // Test-linked events are confined to the in-app inbox.
-        const policyChannels = synthetic ? [...new Set(['in_app', ...policy.channels])] : policy.channels;
+        // Test-linked events are confined to the in-app inbox — genuinely, not
+        // merely in the sense that the adapter would refuse them later. A TEST
+        // notification that reaches an outbound adapter costs attempts and can
+        // colour the channel's health with failures nobody caused.
+        const policyChannels = synthetic ? ['in_app']
+          // When the day's allowance is under pressure, spend what is left on
+          // the messages somebody has to act on. Only the EMAIL is dropped;
+          // the notification is created and delivered in-app exactly as
+          // before, because the application is where the state lives.
+          : emailAdmitted(policy.importance ?? 'normal', pressure)
+            ? policy.channels
+            : policy.channels.filter(channel => channel !== 'email');
         for (const channel of resolveChannels({ policyChannels, availability, mandatory: policy.mandatory, category: policy.category, preferences }).map(deliveryState)) {
           // A contact without an account has no in-app inbox to read.
           if (channel.channel === 'in_app' && !recipient.userId) continue;
@@ -212,6 +231,52 @@ export function notificationPolicies(db, config = {}) {
     availability: () => ({ ...availability }),
     // In-app notification centre. Superseded advice is hidden by default so the
     // list never shows two conflicting recommendations at once.
+    /**
+     * What Platform Ops needs to know about the email channel.
+     *
+     * Non-sensitive by construction: counts, one state word, and timestamps.
+     * No key, no recipient, no subject, no body, no signed link, and no
+     * provider string — the provider's own messages echo addresses back and
+     * never leave the adapter.
+     *
+     * `sentToday` is LEROUTIER'S count of sends this platform observed being
+     * accepted, not a balance read from the provider. Brevo Free does not
+     * expose a per-day remaining figure through the API, so inventing one
+     * would be a made-up metric; this is labelled for what it is and the
+     * provider's own refusal remains authoritative when it comes.
+     */
+    async channelHealth() {
+      return db.transaction(async tx => {
+        const usage = await dailyUsage(tx, 'email', config.emailDailyQuota ?? null);
+        const state = await channelState(tx, 'email');
+        const thresholds = config.emailQuotaThresholds ?? DEFAULT_QUOTA_THRESHOLDS;
+        const failures = await rows(tx, `SELECT detail, count(*)::int AS count
+          FROM notification_delivery_attempts a
+          JOIN notification_deliveries d ON d.id=a.delivery_id
+          WHERE d.channel='email' AND a.created_at > now()-interval '24 hours'
+            AND a.status <> 'provider_accepted'
+          GROUP BY detail ORDER BY count DESC`);
+        return {
+          available: availability.email === true,
+          provider: config.notificationProviders?.emailProvider ?? (config.notificationProviders?.email ? 'gateway' : null),
+          pressure: quotaPressure(usage, state, thresholds),
+          thresholds,
+          // Deliberately named so nobody mistakes it for the provider's number.
+          leRoutierSentToday: usage.sent,
+          configuredDailyAllowance: usage.allowance,
+          estimatedRemaining: usage.remaining,
+          usedPercent: usage.usedPercent,
+          suppressedUntil: state?.suppressed_until ?? null,
+          suppressionReason: state?.suppression_reason ?? null,
+          rateLimitRemaining: state?.rate_limit_remaining ?? null,
+          lastOutcome: state?.last_outcome ?? null,
+          lastOutcomeAt: state?.last_outcome_at ?? null,
+          lastSuccessAt: state?.last_success_at ?? null,
+          recentFailures: failures,
+        };
+      });
+    },
+
     async list(actor, { unreadOnly = false, limit = 50 } = {}) {
       invariant(actor?.id, 'UNAUTHORIZED', 'Sign in to continue.', 401);
       const max = Number.isInteger(limit) && limit > 0 && limit <= 100 ? limit : 50;

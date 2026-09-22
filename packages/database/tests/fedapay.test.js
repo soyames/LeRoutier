@@ -558,6 +558,10 @@ test('a TEST identity never reaches a real gateway',async()=>{
   const notification=await db.transaction(async tx=>(await tx.query(
     `INSERT INTO notifications(user_id,event_type,template,category,severity,data)
      VALUES($1,'parcel.created','parcel_created','operational','info','{}') RETURNING *`,[demoUser.id])).rows[0]);
-  await assert.rejects(providers.sms.send({notification,idempotencyKey:randomUUID()}));
+  // "Nobody to send to", not "the provider failed". A throw here would be
+  // retried five times and, now that failures colour the channel's health,
+  // would let TEST data suppress a real channel for real people.
+  const result=await providers.sms.send({notification,idempotencyKey:randomUUID()});
+  assert.deepEqual(result,{accepted:false,unavailable:true});
   assert.equal(reached,0,'synthetic traffic must not spend somebody’s airtime or reach a real handset');
 });

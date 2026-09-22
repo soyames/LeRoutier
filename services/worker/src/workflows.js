@@ -29,7 +29,7 @@ try {
   // they travel the same policy path as every other notification.
   const due = await reminders(db, config).tick();
   const result = await engine.processOutbox();
-  await notificationDelivery(db,providers).tick();
+  await notificationDelivery(db,providers,config).tick();
   // Retention runs DRY by default: the scan reports eligibility and never
   // deletes. Destructive execution is an explicit owner decision
   // (RETENTION_EXECUTE=true), never a surprise of the schedule.

@@ -183,13 +183,21 @@ test('parcel notifications reach the right party and never carry the pickup code
       [parcel.id,JSON.stringify({trackingNumber:parcel.tracking_number,pickupCode:'SHOULD-NEVER-TRAVEL'})]);
   });
   await drain();
-  const ready=await one("SELECT * FROM notifications WHERE template='parcel_ready_for_pickup'");
+  // Two policies carry this template — the sender is told as well — so the
+  // receiver's notification is selected explicitly. Taking whichever row came
+  // back first passed only by accident of physical row order.
+  const everyone=await all("SELECT * FROM notifications WHERE template='parcel_ready_for_pickup'");
+  assert.ok(everyone.length>=1,'somebody is told the parcel is ready');
+  const ready=everyone.find(n=>n.contact==='+22961000008');
   assert.ok(ready,'the receiver is told the parcel is ready');
-  assert.equal(ready.contact,'+22961000008','addressed to the receiver, not the sender');
   assert.equal(ready.user_id,null);
-  // The pickup code must never be copied into a notification payload.
-  assert.equal(JSON.stringify(ready.data).includes('SHOULD-NEVER-TRAVEL'),false);
-  assert.equal(ready.data.pickupCode,undefined);
+  // The pickup code must never be copied into ANY notification payload — the
+  // sender's copy is exactly where a leak would be easy to miss.
+  for(const n of everyone){
+    assert.equal(JSON.stringify(n.data).includes('SHOULD-NEVER-TRAVEL'),false,
+      'the pickup code travelled in a notification payload');
+    assert.equal(n.data.pickupCode,undefined);
+  }
   assert.equal(ready.data.trackingNumber,parcel.tracking_number);
   // A contact without an account gets no in-app row; outbound stays unavailable
   // because no SMS provider is configured, and is never reported as sent.

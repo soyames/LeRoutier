@@ -96,6 +96,17 @@ export function serverConfig(env = process.env) {
         fromName: env.EMAIL_FROM_NAME || 'LeRoutier',
       },
     },
+    // How many outbound emails a day this deployment may send.
+    //
+    // Brevo Free is 300 and that is the number this defaults to, stated rather
+    // than discovered: the platform counts its OWN sends against it and stops
+    // before the provider has to refuse, which is what keeps a spent allowance
+    // from becoming a retry storm. Set it to the real figure if the plan
+    // changes; set it to 0 or empty to stop pre-checking and rely only on the
+    // provider's own refusal.
+    emailDailyQuota: env.EMAIL_DAILY_QUOTA !== undefined && env.EMAIL_DAILY_QUOTA !== ''
+      ? (Number.isInteger(Number(env.EMAIL_DAILY_QUOTA)) && Number(env.EMAIL_DAILY_QUOTA) > 0 ? Number(env.EMAIL_DAILY_QUOTA) : null)
+      : 300,
     // First-mile timing policy: one configurable default, documented in
     // Keep these defaults centralized instead of inventing buffers per screen.
     firstMile: firstMilePolicy(env),

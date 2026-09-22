@@ -416,7 +416,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='POST' && path==='/workflows/tick') {
       invariant(actor.agent && actor.agent.scopes.includes('workflow.run'),'FORBIDDEN','Agent scope workflow.run is required.',403);
       const result=await workflows.processOutbox();
-      await notificationDelivery(db,providers).tick();
+      await notificationDelivery(db,providers,config).tick();
       return result;
     }
     if(method==='POST' && path==='/tickets/verify')return ticket.verify(actor,await body());
@@ -813,7 +813,13 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       requirePlatform(actor,'system');
       return reasoning.usage();
     }
-    if(method==='GET' && path==='/ops/health') { const h=await health.read(actor); return { ...h, channels: channelAvailability(config) }; }
+    if(method==='GET' && path==='/ops/health') { const h=await health.read(actor); return { ...h, channels: channelAvailability(config),
+        // Operational state of the outbound email channel. Counts, states and
+        // timestamps only — never a key, never an address, never a subject,
+        // never a body. `sent` is LeRoutier's OWN count of accepted sends
+        // today and is labelled as such: it is not Brevo's authoritative
+        // balance, which the free plan does not expose per-day.
+        email: await notify.channelHealth() }; }
     // The Platform Ops user register: searched and paginated server-side, so a
     // console never ships the whole directory to filter it in the browser and
     // never silently stops finding people past a fixed cap.

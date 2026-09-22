@@ -86,6 +86,86 @@ function EvidenceStorageCard(){
   </Card>;
 }
 
+
+// How each failure category reads to somebody deciding whether to worry.
+// LeRoutier's words throughout: no provider name, no HTTP status, no quota
+// message — those never leave the adapter.
+const EMAIL_PRESSURE = {
+  healthy: ['success', 'Normal'],
+  warning: ['warning', 'Consommation élevée'],
+  high: ['warning', 'Capacité réduite'],
+  critical: ['danger', 'Capacité presque épuisée'],
+  quota_exhausted: ['danger', 'Quota journalier épuisé'],
+  provider_rate_limited: ['warning', 'Envoi ralenti'],
+  provider_unavailable: ['danger', 'Fournisseur injoignable'],
+  configuration_error: ['danger', 'Configuration invalide'],
+};
+const FAILURE_LABELS = {
+  channel_quota_exhausted: 'Quota journalier atteint',
+  channel_rate_limited: 'Ralentissement fournisseur',
+  recipient_rejected: 'Adresse refusée',
+  invalid_configuration: 'Configuration invalide',
+  retry_scheduled: 'Nouvelle tentative programmée',
+  dead_letter: 'Abandonné après plusieurs tentatives',
+  recipient_unavailable: 'Aucun destinataire joignable',
+  provider_unavailable: 'Fournisseur indisponible',
+};
+
+/**
+ * The email channel's operational state.
+ *
+ * On the Système screen beside the database and the evidence store, because it
+ * is the same kind of fact. Counts, one state word and timestamps only: never
+ * a key, never an address, never a subject, never a body, never a provider
+ * string.
+ *
+ * The send count is labelled as LEROUTIER'S count on purpose. Brevo Free does
+ * not expose a per-day remaining balance through its API, so presenting our
+ * own tally as the provider's would be inventing a metric.
+ */
+function EmailChannelCard(){
+  const diagnostics=useApi('/ops/diagnostics');
+  if(diagnostics.loading) return <SkeletonCards count={1}/>;
+  if(diagnostics.error) return <Card><p role="alert">{diagnostics.error}</p></Card>;
+  const email=diagnostics.data?.email;
+  if(!email) return null;
+  const [tone,label]=EMAIL_PRESSURE[email.pressure]??['neutral',email.pressure];
+  return <Card className="stack">
+    <div className="between wrap"><strong>Notifications par e-mail</strong>
+      <Badge tone={email.available?tone:'warning'}>{email.available?label:'Canal non configuré'}</Badge></div>
+    {!email.available
+      ? <p className="small muted">Aucun fournisseur d’e-mail n’est configuré. Les notifications restent
+        disponibles dans l’application : c’est le canal qui ne fonctionne jamais sans configuration, pas la
+        notification elle-même.</p>
+      : <p className="small muted">L’application reste la source de vérité. Si l’e-mail ne part pas, la
+        notification reste lisible dans LeRoutier et l’opération concernée n’est jamais annulée.</p>}
+    <div className="summary">
+      <div className="row"><span>Canal application</span><span>Toujours disponible</span></div>
+      <div className="row"><span>Canal e-mail</span><span>{email.available?'Disponible':'Indisponible'}</span></div>
+      <div className="row"><span>Fournisseur</span><span>{email.provider??'Aucun'}</span></div>
+      <div className="row"><span>Allocation quotidienne configurée</span>
+        <span>{email.configuredDailyAllowance??'Non configurée'}</span></div>
+      <div className="row"><span>Envois comptés par LeRoutier (aujourd’hui)</span><span>{email.leRoutierSentToday}</span></div>
+      <div className="row"><span>Capacité restante estimée</span>
+        <span>{email.estimatedRemaining===null?'—':email.estimatedRemaining}
+          {email.usedPercent!==null?` · ${email.usedPercent} % utilisés`:''}</span></div>
+      <div className="row"><span>Dernier envoi réussi</span><span>{fmtDate(email.lastSuccessAt)}</span></div>
+      {email.suppressedUntil && <div className="row"><span>Envois suspendus jusqu’à</span>
+        <span>{fmtDate(email.suppressedUntil)}</span></div>}
+    </div>
+    {email.pressure==='quota_exhausted' && <p role="alert">L’allocation du jour est épuisée. Les messages
+      importants restent en file et partiront après la réinitialisation ; rien n’est perdu et aucune
+      opération n’est bloquée.</p>}
+    {email.pressure==='configuration_error' && <p role="alert">Le fournisseur refuse les identifiants ou
+      l’expéditeur. Aucun nouvel envoi ne sera tenté tant que la configuration n’est pas corrigée.</p>}
+    {(email.recentFailures??[]).length>0 && <div className="stack">
+      <span className="small muted">Échecs des 24 dernières heures, par catégorie</span>
+      <div className="summary">{email.recentFailures.map(f=>
+        <div className="row" key={f.detail}><span>{FAILURE_LABELS[f.detail]??f.detail}</span><span>{f.count}</span></div>)}</div>
+    </div>}
+  </Card>;
+}
+
 function PlatformOnly({children,grant=null}){
   const {user}=useSession();
   if(!user||user.role!=='ops'||user.operator_id)
@@ -263,7 +343,7 @@ export function PlatformVerification(){
 
 export function PlatformFinance(){const health=usePlatformHealth();return <PlatformOnly grant='finance'><div className="stack"><SectionTitle title="Finances & anomalies" icon={WalletCards}/>{health.loading?<SkeletonCards count={3}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<><Card className="stack"><h3>Paiements échoués</h3>{(health.data.paymentAnomalies||[]).length?health.data.paymentAnomalies.map(x=><div className="row" key={x.id}><span>{x.operator_name} · {x.amount_minor} {x.currency}</span><span>{fmtDate(x.created_at)}</span></div>):<p className="small muted">Aucun paiement échoué enregistré.</p>}</Card><Card className="stack"><h3>Versements échoués ou renversés</h3>{(health.data.payoutAnomalies||[]).length?health.data.payoutAnomalies.map(x=><div className="row" key={x.id}><span>{x.operator_name||'Opérateur'} · {x.beneficiary||'Bénéficiaire'} · {x.amount_minor} {x.currency}</span><span>{x.status} · {fmtDate(x.created_at)}</span></div>):<p className="small muted">Aucune anomalie de versement enregistrée.</p>}</Card></>}</div></PlatformOnly>;}
 export function PlatformIncidents(){const health=usePlatformHealth();return <PlatformOnly grant='incidents'><div className="stack"><SectionTitle title="Incidents plateforme" icon={TriangleAlert}/>{health.loading?<SkeletonCards count={3}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:(health.data.incidents||[]).length?health.data.incidents.map(i=><Card key={i.id} className="stack"><div className="between wrap"><strong>{i.operator_name} · {i.kind}</strong><Badge tone={i.severity==='high'?'danger':'warning'}>{i.severity}</Badge></div><p>{i.description||'Aucune description.'}</p><p className="small muted">{i.status} · {fmtDate(i.created_at)} · service {i.service_id}</p></Card>):<EmptyState icon={TriangleAlert} title="Aucun incident ouvert" text="Les incidents actifs de tous les opérateurs apparaîtront ici."/>}</div></PlatformOnly>;}
-export function PlatformSystem(){const health=usePlatformHealth();return <PlatformOnly grant='system'><div className="stack"><SectionTitle title="Système & capacité" icon={Database}/>{health.data?.migrations&&health.data.migrations.status!=='current'&&<Card><p role="alert">{schemaAlert(health.data.migrations)}</p></Card>}{health.loading?<SkeletonCards count={2}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<><StorageCard storage={health.data.storage}/><Card className="stack"><strong>Base de données</strong><div className="summary"><div className="row"><span>Stockage utilisé</span><span>{fmtBytes(health.data.storage.usedBytes)}</span></div><div className="row"><span>Limite appliquée</span><span>{health.data.storage.limitBytes?fmtBytes(health.data.storage.limitBytes):'Aucune'}</span></div><div className="row"><span>Limite configurée (DATABASE_STORAGE_LIMIT_MB)</span><span>{health.data.storage.configuredLimitBytes?fmtBytes(health.data.storage.configuredLimitBytes):'Non configurée'}</span></div><div className="row"><span>Limite imposée par la base</span><span>{health.data.storage.providerLimitBytes?fmtBytes(health.data.storage.providerLimitBytes):'Non publiée'}</span></div><div className="row"><span>Utilisation</span><span>{health.data.storage.usedPercent===null?'–':`${health.data.storage.usedPercent} %`}</span></div><div className="row"><span>Seuil d’arrêt des inscriptions</span><span>{health.data.storage.registrationStopPercent} %</span></div><div className="row"><span>Protection stockage</span><span>{health.data.storage.storageProtection==='armed'?'Armée':'Non armée'}</span></div><div className="row"><span>Inscriptions</span><span>{health.data.storage.registrationsOpen?'Ouvertes':'Suspendues'}</span></div></div></Card><EvidenceStorageCard/><Card className="stack"><h3>État technique</h3><div className="summary"><div className="row"><span>Migrations</span><span>{schemaLabel(health.data.migrations)}</span></div><div className="row"><span>Appliquées</span><span>{health.data.migrations.applied} / {health.data.migrations.expected}</span></div>{(health.data.migrations.pending||[]).length>0&&<div className="row"><span>En attente</span><span>{health.data.migrations.pending.join(', ')}</span></div>}{(health.data.migrations.drifted||[]).length>0&&<div className="row"><span>Empreinte modifiée</span><span>{health.data.migrations.drifted.join(', ')}</span></div>}{(health.data.migrations.unknown||[]).length>0&&<div className="row"><span>Appliquées hors de ce build</span><span>{health.data.migrations.unknown.join(', ')}</span></div>}<div className="row"><span>Notifications en échec</span><span>{health.data.counts.notification_failed}</span></div><div className="row"><span>Canaux indisponibles</span><span>{health.data.counts.notification_unavailable}</span></div><div className="row"><span>Événements à reprendre</span><span>{health.data.counts.dispatch_dead}</span></div><div className="row"><span>Échecs de routage (24h)</span><span>{health.data.counts.routing_failed}</span></div></div></Card></>}</div></PlatformOnly>;}
+export function PlatformSystem(){const health=usePlatformHealth();return <PlatformOnly grant='system'><div className="stack"><SectionTitle title="Système & capacité" icon={Database}/>{health.data?.migrations&&health.data.migrations.status!=='current'&&<Card><p role="alert">{schemaAlert(health.data.migrations)}</p></Card>}{health.loading?<SkeletonCards count={2}/>:health.error?<Card><p role="alert">{health.error}</p></Card>:<><StorageCard storage={health.data.storage}/><Card className="stack"><strong>Base de données</strong><div className="summary"><div className="row"><span>Stockage utilisé</span><span>{fmtBytes(health.data.storage.usedBytes)}</span></div><div className="row"><span>Limite appliquée</span><span>{health.data.storage.limitBytes?fmtBytes(health.data.storage.limitBytes):'Aucune'}</span></div><div className="row"><span>Limite configurée (DATABASE_STORAGE_LIMIT_MB)</span><span>{health.data.storage.configuredLimitBytes?fmtBytes(health.data.storage.configuredLimitBytes):'Non configurée'}</span></div><div className="row"><span>Limite imposée par la base</span><span>{health.data.storage.providerLimitBytes?fmtBytes(health.data.storage.providerLimitBytes):'Non publiée'}</span></div><div className="row"><span>Utilisation</span><span>{health.data.storage.usedPercent===null?'–':`${health.data.storage.usedPercent} %`}</span></div><div className="row"><span>Seuil d’arrêt des inscriptions</span><span>{health.data.storage.registrationStopPercent} %</span></div><div className="row"><span>Protection stockage</span><span>{health.data.storage.storageProtection==='armed'?'Armée':'Non armée'}</span></div><div className="row"><span>Inscriptions</span><span>{health.data.storage.registrationsOpen?'Ouvertes':'Suspendues'}</span></div></div></Card><EvidenceStorageCard/><EmailChannelCard/><Card className="stack"><h3>État technique</h3><div className="summary"><div className="row"><span>Migrations</span><span>{schemaLabel(health.data.migrations)}</span></div><div className="row"><span>Appliquées</span><span>{health.data.migrations.applied} / {health.data.migrations.expected}</span></div>{(health.data.migrations.pending||[]).length>0&&<div className="row"><span>En attente</span><span>{health.data.migrations.pending.join(', ')}</span></div>}{(health.data.migrations.drifted||[]).length>0&&<div className="row"><span>Empreinte modifiée</span><span>{health.data.migrations.drifted.join(', ')}</span></div>}{(health.data.migrations.unknown||[]).length>0&&<div className="row"><span>Appliquées hors de ce build</span><span>{health.data.migrations.unknown.join(', ')}</span></div>}<div className="row"><span>Notifications en échec</span><span>{health.data.counts.notification_failed}</span></div><div className="row"><span>Canaux indisponibles</span><span>{health.data.counts.notification_unavailable}</span></div><div className="row"><span>Événements à reprendre</span><span>{health.data.counts.dispatch_dead}</span></div><div className="row"><span>Échecs de routage (24h)</span><span>{health.data.counts.routing_failed}</span></div></div></Card></>}</div></PlatformOnly>;}
 // Any operator's dossier stays re-readable, not only the ones still queued
 // for a first decision: re-opening a verified company's file is exactly what
 // oversight means. The evidence is fetched on demand rather than shipped with

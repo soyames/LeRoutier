@@ -3,134 +3,263 @@
 LeRoutier has had a complete notification system for a while — domain events,
 policies, a queue, exponential backoff, dead-lettering, a per-attempt audit
 trail, and in-app delivery that always works because it is served from our own
-database. What it has never had is a way to reach somebody who is not looking
-at the app.
+database. Email is a transport bolted onto the side of that. It is not, and
+must never become, where LeRoutier's state lives.
 
-This file is about that last mile, and about the one honest fact underneath it:
-**no external channel is enabled today.**
+**The application is the source of truth. The inbox is a courtesy.**
 
-## What is already true
+## The constraint everything else follows from
+
+Brevo Free sends **300 emails a day**, permanently, with no card. That is
+comfortable for a controlled pilot and nowhere near enough to email somebody
+every time a vehicle reaches a stop. Two consequences run through this whole
+design:
+
+1. **Email is selective.** 17 of 75 policies carry it. The other 58 are in-app
+   only and cost nothing.
+2. **Running out is a normal state, not an incident.** It must not retry-storm,
+   must not fail a booking, and must not show a passenger a provider's error.
+
+## Which events get an email
+
+Stored on each policy in `notification_policies.channels`, beside the event —
+not decided in code. `importance` decides what survives when the day's
+allowance is nearly spent.
+
+### high — somebody must act, or something they planned has changed
+
+| Event | Who |
+|---|---|
+| `booking.cancelled` | passenger |
+| `service.status` (cancelled) | passengers on the service |
+| `service.rescheduled` | passengers on the service |
+| `service.boarding_point_changed` | passengers on the service |
+| `payment.failed` | passenger |
+| `payout.failed` | driver |
+| `operator_payout.failed` | operator owner |
+| `operator.evidence_reviewed` (rejected) | operator owner |
+| `operator.verification_changed` (rejected / suspended) | operator owner |
+| `parcel.ready_for_pickup` | receiver |
+
+### normal — the record of something that worked
+
+| Event | Who |
+|---|---|
+| `booking.confirmed` → `ticket_ready` | passenger — **the combined message, see below** |
+| `operator.verification_changed` (verified) | operator owner |
+| `payout.paid` | driver |
+| `operator_payout.paid` | operator owner |
+| `parcel.accepted` | sender |
+
+### optional — pleasant, and the first thing dropped
+
+| Event | Who |
+|---|---|
+| `parcel.collected` | sender |
+
+### in-app only, deliberately
+
+Position, progress, custody and internal state. High frequency, low value in an
+inbox, and the fastest way to spend 300 messages before lunch:
+
+boarding · alighting · arrival · seat held · walk-up sale · next station ·
+recovery · crew reschedule · parcel loaded, in transit, arrived, delayed, ETA ·
+crew load and unload lists · settlement credited · point moderation · every
+incident and Ops state · every technical signal.
+
+A test asserts none of these ever acquires an email channel.
+
+## One booking, one email
+
+A successful purchase produces **one** message, not three. `booking.confirmed`
+fires once payment is confirmed, and the `ticket_ready` template already
+carries the whole transaction:
+
+- the trip, the boarding point and the departure time
+- the seat
+- **the amount paid** and any refund recorded
+- a link to the ticket, the invoice and the receipt
+
+So `payment.succeeded`, `booking.held` and `passenger_boarded` deliberately do
+**not** get an email. Documents are linked rather than attached, because
+LeRoutier already serves them securely from the application and an attachment
+is a copy nobody can revoke.
+
+## Quota awareness
+
+### What Brevo tells us, and what it does not
 
 | | |
 |---|---|
-| `in_app` | always available — it is a row in our database, not a provider |
-| `email` | **unavailable** until a provider is configured |
-| `sms` | unavailable, and see below |
-| `whatsapp` | unavailable, and see below |
-| `web_push` | unavailable |
+| `x-sib-ratelimit-remaining` / `-reset` | request-rate budget, returned on **every** response — recorded |
+| HTTP 402 / `not_enough_credits` | the allowance is spent — authoritative, and acted on |
+| a per-day remaining balance | **not exposed on the free plan** |
 
-An unavailable channel is recorded as `unavailable` against the delivery, never
-as sent. Platform Ops reads the real state from `GET /ops/diagnostics`, which
-derives it from the adapters that actually exist rather than from a flag.
+Because that last one does not exist, LeRoutier counts its own accepted sends
+since midnight UTC from its own delivery ledger. It is labelled
+`leRoutierSentToday` everywhere it appears, and the remaining figure is labelled
+*estimated*, because presenting our tally as Brevo's balance would be inventing
+a provider metric. The provider's own refusal stays authoritative when it comes.
 
-## Why email, and why Brevo
+### Pressure states
 
-The pilot is in Benin, the users sign in with Google, and the account record
-already carries a verified `notification_email` taken from the sign-in token.
-Email is therefore the only channel whose recipient data the platform already
-holds.
+Computed from usage against `EMAIL_DAILY_QUOTA` (default 300). Provider trouble
+outranks usage — a wrong credential matters more than a quiet day.
 
-It is also the only one that can be switched on **without activating billing
-anywhere**, which is a standing constraint on this project:
+| State | Meaning |
+|---|---|
+| `healthy` | under 70% |
+| `warning` | 70–84% |
+| `high` | 85–94% — optional email stops |
+| `critical` | 95%+ — only `high` importance is sent |
+| `quota_exhausted` | the day's allowance is gone |
+| `provider_rate_limited` | asked to slow down |
+| `provider_unavailable` | the provider erred or was unreachable |
+| `configuration_error` | credential or sender rejected |
 
-- **SMS** to Benin is metered by every provider worth using. There is no free
-  tier that reaches a Beninese number.
-- **WhatsApp** needs a Meta Business account, a registered number and template
-  review before a single message can be sent. That is a commitment, not a
-  configuration change.
-- **Brevo** gives 300 transactional emails a day, permanently, with no credit
-  card and full REST API access on the free plan.
+Thresholds are configuration (`emailQuotaThresholds`), not constants.
 
-300 a day is comfortably more than a controlled pilot sends, and the ceiling is
-a daily reset rather than a monthly pool, which suits notification traffic —
-it trickles.
+### Preserving capacity
 
-## What is implemented
+When pressure reaches `high`, optional email stops. At `critical` or
+`quota_exhausted`, only `high` importance is sent. **Only the email is dropped**
+— the notification is still created, still delivered in-app, and still read
+exactly as before. The underlying application event is never suppressed.
 
-`packages/database/src/notification-providers.js` carries two adapters behind
-one contract. Nothing about the queue, the retry policy, the audit trail or
-the event catalogue changed; this is a transport.
+## When sending fails
 
-```
-GATEWAY  EMAIL_PROVIDER_URL + EMAIL_PROVIDER_KEY
-         A relay the owner runs, speaking LeRoutier's own contract. Kept,
-         because it is the only shape that can reach a channel nobody has
-         written an adapter for.
+Five different things go wrong, and treating them as one "it failed" is how an
+allowance of 300 turns into 1,500 refused requests.
 
-BREVO    EMAIL_PROVIDER=brevo + BREVO_API_KEY + EMAIL_FROM_ADDRESS
-         Speaks Brevo's REST API directly. No relay to run.
-```
+| Reason | Retry the message? | Stop the channel? |
+|---|---|---|
+| `quota_exhausted` | yes, after the daily reset | yes, until the reset |
+| `rate_limited` | yes, after the provider's own delay | yes, briefly |
+| `provider_unavailable` | yes — existing backoff and dead-letter | no |
+| `invalid_configuration` | **no** — no retry fixes a wrong key | yes, until a success clears it |
+| `recipient_rejected` | **no** | **no** — one bad address must not stop everybody's mail |
 
-Both compose their message through the same function, so the wording, the
-recipient rule and the refusals cannot drift apart between transports.
+A message deferred for quota is **not failed**. It is going to be delivered,
+after the reset. While the channel is suppressed the dispatcher does not call
+the provider at all — that single check is what turns a storm into one deferred
+message.
 
-### What the adapter refuses
+The existing queue, retry, backoff and dead-letter semantics are unchanged for
+everything that genuinely warrants a retry.
 
-- a **TEST identity** never reaches the provider — the request is not made at
-  all, rather than made and discarded;
-- a **disabled account** likewise;
-- a recipient with **no address** is `unavailable`, not a failure retried
-  forever;
-- **any non-2xx** from the provider throws, so the dispatcher retries and the
-  delivery is never recorded as sent;
-- a **plaintext relay URL** is refused rather than used.
+## What a user sees
 
-### On idempotency, precisely
+Never a provider name, an HTTP status, a quota message, an API error, a
+response body or a stack trace. Users see LeRoutier's own words, and the
+transaction is always authoritative:
 
-The dispatcher passes `delivery.id` — stable across retries — and only retries
-deliveries it did **not** observe the provider accept. A delivery recorded as
-`sent` is never retried.
+> Your booking is confirmed and available in LeRoutier. External sending is
+> temporarily unavailable.
 
-Brevo has no idempotency-key header, so one window remains: the provider
-accepts and the process dies before recording it, after which the retry sends
-again. That is at-least-once, and it is the right trade here. A passenger
-receiving their ticket confirmation twice is a nuisance; never receiving it is
-a passenger at a station without a ticket.
+- a booking stays confirmed if the email fails;
+- a payment stays confirmed;
+- a KYC decision stays visible in-app;
+- a payout state stays authoritative;
+- a ticket stays accessible inside the app.
 
-The gateway contract still receives the `Idempotency-Key` header and is still
-expected to deduplicate on it.
+**Email failure never rolls back a business transaction**, and LeRoutier never
+claims a message was sent when it was not. A test asserts that no delivery
+record or attempt row contains provider terminology.
 
-## Events that already exist and would carry
+## Sender configuration
 
-No new business event was invented to justify a channel. These are already
-emitted and already have policies:
+Transactional mail is sent as **`LeRoutier <noreply@leroutier.app>`**.
 
-KYC submitted · KYC rejected · correction requested · operator verified ·
-booking confirmed · payment confirmed · departure and service changes ·
-cancellation · parcel accepted · parcel movement · parcel ready for pickup ·
-payout requested · payout completed · payout failed.
+Verified from public DNS on 2026-09-22, independently of the Brevo dashboard:
 
-## EXTERNAL ACTION REQUIRED
+| Record | State |
+|---|---|
+| `brevo1._domainkey` → `b1.leroutier-app.dkim.brevo.com` | resolves; Brevo publishes a 2048-bit RSA key |
+| `brevo2._domainkey` → `b2.leroutier-app.dkim.brevo.com` | resolves; 2048-bit RSA key |
+| `_dmarc` | `v=DMARC1; p=none; rua=mailto:rua@dmarc.brevo.com` |
+| domain ownership | `brevo-code:…` TXT present on the apex |
+| **SPF** | **absent** — see below |
+| **MX** | **absent** — `noreply@` cannot receive mail |
 
-This is the blocker, and it cannot be done from the repository — creating an
-account is the owner's to do, not the agent's.
+Two things follow.
 
-1. Create a **Brevo** account on the free plan. No card.
-2. Wait for Brevo to **approve the account for sending**. New accounts cannot
-   send until this happens, and it is not instant.
-3. **Verify the sender**: either the single address `EMAIL_FROM_ADDRESS` will
-   use, or the whole `leroutier.app` domain. Domain verification needs DNS
-   records and gives materially better deliverability — worth doing before a
-   pilot, since a confirmation in a spam folder is a confirmation nobody read.
-4. Create an API key.
-5. Set on `le-routier-api`, production and preview:
+**No SPF record exists.** DMARC still passes, because DKIM aligns on
+`leroutier.app` and DMARC needs only one aligned mechanism. But some receivers
+weight SPF, and adding `v=spf1 include:spf.brevo.com -all` to the apex TXT would
+strengthen deliverability. Not done here: it is a DNS change and nobody asked
+for one.
 
-   | Variable | Value | Type |
-   |---|---|---|
-   | `EMAIL_PROVIDER` | `brevo` | plain — it is configuration |
-   | `BREVO_API_KEY` | the key | **Sensitive** |
-   | `EMAIL_FROM_ADDRESS` | the verified sender | plain |
-   | `EMAIL_FROM_NAME` | `LeRoutier` | plain |
+**`noreply@leroutier.app` cannot receive a reply.** There is no MX record, so a
+reply does not go unread — it fails at the sender's own provider, quietly, while
+the passenger believes they have asked for help. Every message therefore says so
+and names the existing support route, `leroutierbj@gmail.com`, defined once in
+`packages/notifications/src/content.js` and shared with the assistant.
 
-6. Confirm: Platform Ops → `GET /ops/diagnostics` should report
-   `channels.email: true`. Until then it reports `false`, which is the truth.
+## Configuration
 
-Do **not** enable a paid plan, a paid SMS provider, or WhatsApp Business
-without deciding to. The system is designed to say "unavailable" indefinitely
-without anybody being misled, which is the point.
+| Variable | Value | Type |
+|---|---|---|
+| `EMAIL_PROVIDER` | `brevo` | plain — configuration |
+| `BREVO_API_KEY` | the key | **Sensitive** |
+| `EMAIL_FROM_ADDRESS` | `noreply@leroutier.app` | plain |
+| `EMAIL_FROM_NAME` | `LeRoutier` | plain |
+| `EMAIL_DAILY_QUOTA` | `300` (default) | plain |
+
+The account already exists, the sender is verified and the domain is
+authenticated. **Do not create a second sender, a second API key, or duplicate
+variables.** Do not enable a paid plan, SMS credits, WhatsApp, or billing.
+
+### EXTERNAL ACTION REQUIRED
+
+The Brevo **API key value** is not available to this repository. The file
+supplied for verification contains the SDK sample with the literal placeholder
+`'YOUR_API_V3_KEY'`, Brevo's *"key has been generated"* confirmation, the SMTP
+host and login, and the DKIM record — but not the key itself. Nothing here can
+authenticate to Brevo until it is set.
+
+1. Copy the API key from Brevo (or generate one if it was never saved — that
+   replaces the unused key rather than adding a second sender).
+2. Set `BREVO_API_KEY` on `le-routier-api`, production and preview, as
+   **Sensitive**, together with the three plain values above.
+3. Confirm on Platform Ops → **Système** → *Notifications par e-mail*:
+   channel available, provider `brevo`, allowance 300.
+
+Until then `channels.email` is `false`, every surface says so, and in-app
+delivery carries everything.
+
+## How Platform Ops sees it
+
+The existing **Système** screen, beside the database and the evidence store —
+not a second dashboard. Non-sensitive only: counts, one state word, timestamps.
+
+In-app availability · email availability · provider · configured allowance ·
+LeRoutier's send count today · estimated remaining and percent used · pressure
+state · suppression and until when · last successful delivery · failure
+categories over 24 hours.
+
+Never: the API key, a recipient address, a subject, a body, a signed link, a
+provider message, or any KYC content.
+
+## Moving to another plan or provider later
+
+Business-event logic does not change.
+
+- **A bigger Brevo plan** — raise `EMAIL_DAILY_QUOTA`. Nothing else.
+- **A different provider** — add an adapter beside `brevoAdapter` in
+  `notification-providers.js` returning the same `{accepted, reason,
+  suppressUntil, rateLimit…}` shape, and name it in `EMAIL_PROVIDER`. The
+  policy catalogue, the importance rules, the quota accounting, the console and
+  every refusal stay exactly as they are.
+- **A relay you run** — the original `EMAIL_PROVIDER_URL` / `_KEY` gateway
+  contract is still supported and still deduplicates on `Idempotency-Key`.
 
 ## Testing
 
-`services/api/tests/brevo-provider.test.js` drives the adapter against a fake
-transport — a function, not the network. **No test sends a real message**, and
-the TEST-identity refusal is asserted by checking the request was never made.
+`services/api/tests/brevo-provider.test.js` and
+`packages/database/tests/email-policy.test.js`, both against fakes and TEST
+identities. **No test sends a real message.**
+
+A TEST identity is refused as *"nobody to send to"* rather than as a provider
+failure — deliberately, because a throw would retry five times and let TEST
+data suppress real people's email. The refusal is asserted by checking the
+request was never made at all.
