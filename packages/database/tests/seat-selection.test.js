@@ -65,7 +65,7 @@ test('a chosen seat is honoured, and the same seat cannot be sold twice on one l
   // The second passenger is told their seat went, not that the bus is full.
   await assert.rejects(
     domain.hold(passengerB, { serviceId: demo.service, origin: 0, destination: 1, seatNumber: wanted }, randomUUID()),
-    error => { assert.equal(error.code, 'SEAT_TAKEN'); assert.equal(error.status, 409); return true; });
+    /** @param {any} error */ error => { assert.equal(error.code, 'SEAT_TAKEN'); assert.equal(error.status, 409); return true; });
   // And can still travel by taking another one.
   const fallback = await domain.hold(passengerB, { serviceId: demo.service, origin: 0, destination: 1 }, randomUUID());
   assert.notEqual(fallback.seat_number, wanted);

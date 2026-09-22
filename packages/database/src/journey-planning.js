@@ -1,6 +1,8 @@
 // Door-to-destination journey planning over the existing transport domain.
 // Passenger exact coordinates are transient and never stored or exposed.
 import { invariant, uuid } from '@leroutier/domain';
+import { publicRating } from './ratings.js';
+import { describeAmenities } from './amenities.js';
 
 const WALK_MPS=1.25,DETOUR_FACTOR=1.35,MAX_FIRST_MILE_M=20_000,MAX_NEARBY_STOP_M=30_000,LIVE_FIX_S=120;
 const hav=(a,b)=>{const R=6_371_000,rad=d=>(d*Math.PI)/180,dLat=rad(b.latitude-a.latitude),dLon=rad(b.longitude-a.longitude);const h=Math.sin(dLat/2)**2+Math.cos(rad(a.latitude))*Math.cos(rad(b.latitude))*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(h));};
@@ -31,6 +33,7 @@ export function journeyPlanning(db,{boardingBufferS=600,positionFreshSeconds=LIV
         if(origin.id===destination.id)continue;
         const services=await db.transaction(async tx=>(await tx.query(`SELECT s.id,s.operator_id,s.route_id,s.departure_at,s.arrival_at,s.status,s.is_demo,s.capacity,s.current_sequence,
           o.name AS operator_name,o.type AS operator_type,o.verification_status AS operator_verification_status,r.name AS route_name,
+          o.rating_total,o.rating_count,v.amenities AS vehicle_amenities,
           d.display_name AS driver_name,dp.photo_url AS driver_photo_url,
           v.registration AS vehicle_registration,v.make AS vehicle_make,v.model AS vehicle_model,v.color AS vehicle_color,v.model_year AS vehicle_year,v.photo_url AS vehicle_photo_url,
           (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$1) AS origin_seq,
@@ -71,6 +74,7 @@ export function journeyPlanning(db,{boardingBufferS=600,positionFreshSeconds=LIV
           const independent=service.operator_type==='independent';
           options.push({
             serviceId:service.id,operatorName:service.operator_name,operatorType:service.operator_type,verified:service.operator_verification_status==='verified',
+            rating:publicRating(service),amenities:describeAmenities(service.vehicle_amenities),
             driver:independent?{name:service.driver_name??service.operator_name,photoUrl:service.driver_photo_url??null}:null,
             routeName:service.route_name,departureAt:service.departure_at,serviceStatus:service.status,originSequence:service.origin_seq,destinationSequence:service.destination_seq,
             pickupStop:{id:origin.id,name:origin.name,city:origin.city,latitude:origin.latitude,longitude:origin.longitude},dropoffStop:{id:destination.id,name:destination.name,city:destination.city,latitude:destination.latitude,longitude:destination.longitude},

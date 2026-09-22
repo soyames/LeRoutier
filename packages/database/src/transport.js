@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { DomainError, invariant, journeySegments, validateTransition, uuid, idempotencyKey } from '@leroutier/domain';
 import { audit } from './identities.js';
+import { publicRating } from './ratings.js';
+import { describeAmenities } from './amenities.js';
 
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const one = async (tx, sql, params = []) => (await tx.query(sql, params)).rows[0];
@@ -189,6 +191,7 @@ export function transport(db) {
       //    surveillance and is not needed to book a seat.
       const rows = await db.transaction(async tx => (await tx.query(`SELECT s.*,r.name AS route_name,o.name AS operator_name,
         o.type AS operator_type,o.verification_status AS operator_verification_status,v.registration,
+        o.rating_total,o.rating_count,v.amenities,
         v.make AS vehicle_make,v.model AS vehicle_model,v.color AS vehicle_color,v.model_year AS vehicle_year,
         CASE WHEN o.type='independent' THEN v.photo_url END AS vehicle_photo_url,
         bdp.name AS departure_point_name,bdp.description AS departure_point_landmark,bdp.latitude AS departure_point_latitude,bdp.longitude AS departure_point_longitude,
@@ -210,7 +213,12 @@ export function transport(db) {
         const to = destinationStopId ? service.destination
           : (await db.transaction(async tx => (await tx.query('SELECT max(sequence)::integer AS sequence FROM service_stops WHERE service_id=$1', [service.id])).rows))[0].sequence;
         if (from === null || to === null || from >= to || from < service.current_sequence) continue;
-        result.push({ ...service, availability: await this.availability(service.id, from, to) });
+        // The floor is applied here, server-side: a client cannot render a
+        // « 5,0 » from one rating because it never receives the average.
+        const { rating_total, rating_count, ...offer } = service;
+        result.push({ ...offer, rating: publicRating({ rating_total, rating_count }),
+          amenities: describeAmenities(service.amenities),
+          availability: await this.availability(service.id, from, to) });
       }
       return result;
     },

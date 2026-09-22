@@ -9,6 +9,7 @@ import { updateProfile, audit } from '@leroutier/database/identities';
 import { provisioning } from '@leroutier/database/provisioning';
 import { payments } from '@leroutier/database/payments';
 import { tickets } from '@leroutier/database/tickets';
+import { ratings } from '@leroutier/database/ratings';
 import { driverAction, recordIncident } from '@leroutier/database/driver-actions';
 import { earnings, payouts } from '@leroutier/database/payouts';
 import { recovery } from '@leroutier/database/recovery';
@@ -49,7 +50,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const fares=fareIntelligence(db);
   const commerce=commercial(db);
   const domain=transport(db), auth=authentication(db,config,keyResolver),provision=provisioning(db,config);
-  const pay=payments(db,adapter),ticket=tickets(db);
+  const pay=payments(db,adapter),ticket=tickets(db),rating=ratings(db);
   const earn=earnings(db),payout=payouts(db,adapter,config),recover=recovery(db),parcel=parcels(db);
   const onboard=onboarding(db),loc=locations(db),settle=operatorSettlements(db,adapter),walkUp=walkUpBookings(db);
   const notify=notificationPolicies(db,config),rides=mobility(db),journey=journeys(db,config);
@@ -496,6 +497,12 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       if(action==='cancel' && method==='POST') return parcel.cancel(actor,id);
       if(action==='payments' && method==='POST') return parcel.recordPayment(actor,id,await body(),req.headers.get('idempotency-key'));
     }
+    // Rating the operator that carried you. Gated on a completed journey by
+    // the domain, and keyed by the booking, so one journey rates once.
+    const ratingPath=path.match(/^\/bookings\/([^/]+)\/rating$/);
+    if(method==='GET' && ratingPath) return rating.forBooking(actor,uuid(ratingPath[1]));
+    if(method==='POST' && ratingPath) { await limited('rating:'+actor.id); return rating.rate(actor,uuid(ratingPath[1]),await body()); }
+    if(method==='GET' && path==='/ops/ratings') return rating.forOperator(actor,url.searchParams.get('operatorId'));
     const ticketPath=path.match(/^\/bookings\/([^/]+)\/ticket$/);
     if(method==='POST' && ticketPath)return ticket.issue(actor,uuid(ticketPath[1]));
     const paymentPath=path.match(/^\/bookings\/([^/]+)\/(payment-intents|payment-status|reconcile-manual)$/);
