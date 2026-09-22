@@ -9,7 +9,8 @@ import { ServiceTracking } from './tracking.jsx';
 import { ParcelDocuments } from './documents.jsx';
 import { ParcelPickup } from './parcel-pickup.jsx';
 import QrScanner from 'qr-scanner';
-import { Users, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw, Package, MapPin, Navigation } from 'lucide-react';
+import { Users, BusFront, QrCode, AlertTriangle, Wallet, RefreshCw, Package, MapPin, Navigation,
+  Wrench, HeartPulse, Ban, Fuel, Hourglass, Construction, TrafficCone, ShieldAlert } from 'lucide-react';
 
 // Board/alight/incident actions flow through the offline queue: the server
 // deduplicates by Idempotency-Key, so retries are always safe.
@@ -134,13 +135,84 @@ function VehicleTracking({serviceId,serviceStatus}){
 // The crew home screen answers, at a glance and one-handed: what am I running,
 // how full is it, what is next, and what do I press now. Dense tables, revenue
 // and long forms belong elsewhere.
+// Reporting an incident from behind a wheel.
+//
+// The previous form asked the driver to write what was happening, in a
+// textarea, on a phone, on an intercity road. Nobody does that while moving,
+// so in practice incidents went unreported — and the two that were sent
+// arrived as kind 'other', severity 'medium', because the form hardcoded
+// both and threw away what the API can actually record.
+//
+// Each preset below carries its own kind, severity and wording. One tap is
+// the whole interaction; the queue carries it, so a report made in a white
+// zone between Dassa and Savè still reaches operations when the signal does.
+// Free text stays available for a stopped vehicle, where it is worth having.
+const INCIDENT_PRESETS=[
+  {id:'accident',label:'Accident',icon:AlertTriangle,kind:'accident',severity:'high',
+    description:'Accident signalé par l’équipage depuis la route.'},
+  {id:'breakdown',label:'Panne mécanique',icon:Wrench,kind:'breakdown',severity:'high',
+    description:'Panne mécanique : le véhicule ne peut pas poursuivre normalement.'},
+  {id:'medical',label:'Urgence médicale',icon:HeartPulse,kind:'medical',severity:'high',
+    description:'Urgence médicale à bord, assistance requise.'},
+  {id:'blocked',label:'Route barrée',icon:Ban,kind:'other',severity:'high',
+    description:'Route barrée : passage impossible, itinéraire à revoir.'},
+  {id:'fuel',label:'Panne de carburant',icon:Fuel,kind:'breakdown',severity:'medium',
+    description:'Panne de carburant, ravitaillement nécessaire.'},
+  {id:'slowdown',label:'Ralentissement',icon:Hourglass,kind:'delay',severity:'medium',
+    description:'Circulation ralentie, retard probable à l’arrivée.'},
+  {id:'works',label:'Travaux sur la route',icon:Construction,kind:'other',severity:'medium',
+    description:'Travaux sur la chaussée, circulation perturbée.'},
+  {id:'obstacle',label:'Obstacle sur la chaussée',icon:TrafficCone,kind:'other',severity:'medium',
+    description:'Obstacle sur la chaussée signalé par l’équipage.'},
+  {id:'checkpoint',label:'Contrôle routier',icon:ShieldAlert,kind:'other',severity:'low',
+    description:'Contrôle routier en cours, arrêt temporaire du véhicule.'},
+];
+
+function IncidentReport({serviceId,queue,onReported}){
+  const [open,setOpen]=useState(false),[other,setOther]=useState(false);
+  function send(kind,severity,description){
+    queue.enqueue('incident',{serviceId,kind,severity,description});
+    if(navigator.onLine)queue.sync();
+    setOpen(false);setOther(false);
+    onReported('Signalement envoyé à l’exploitation.');
+  }
+  if(!open)return <Card className="stack">
+    <button className="btn btn-danger incident-open" onClick={()=>setOpen(true)}>
+      <AlertTriangle size={18} aria-hidden="true"/>Signaler un incident</button>
+    <p className="small muted">Un seul appui suffit. Le signalement part même sans réseau.</p>
+  </Card>;
+  return <Card className="stack incident-sheet">
+    <div className="between wrap">
+      <div><strong>Signaler un incident</strong>
+        <p className="small muted">N’appuyez que si vous êtes à l’arrêt ou en sécurité.</p></div>
+      <button className="btn btn-soft" aria-label="Fermer" onClick={()=>{setOpen(false);setOther(false);}}>Fermer</button>
+    </div>
+    <div className="incident-grid" role="group" aria-label="Type d’incident">
+      {INCIDENT_PRESETS.map(preset=>{const Icon=preset.icon;return <button key={preset.id} type="button"
+        className={`incident-tile sev-${preset.severity}`}
+        onClick={()=>send(preset.kind,preset.severity,preset.description)}>
+        <span className="incident-icon" aria-hidden="true"><Icon size={24}/></span>
+        <span>{preset.label}</span></button>;})}
+    </div>
+    {!other
+      ? <button type="button" className="btn btn-soft" onClick={()=>setOther(true)}>Autre : décrire (à l’arrêt)</button>
+      : <form className="stack" onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);
+        const text=String(f.get('description')||'').trim();if(!text)return;
+        send('other','medium',text);}}>
+        <label>Que se passe-t-il ?<textarea className="control" name="description" maxLength={2000} required rows={3}
+          placeholder="Décrivez la situation"/></label>
+        <div className="controls"><button className="btn btn-danger">Envoyer</button>
+          <button type="button" className="btn btn-soft" onClick={()=>setOther(false)}>Retour</button></div>
+      </form>}
+  </Card>;
+}
+
 export function Today(){
   const {user,request,online}=useSession();
   const navigate=useNavigate();
   const {service,s,manifest,cargo}=useService();
   const queue=useDriverQueue(user?.id,request);
   const [error,setError]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState('');
-  const [incidentOpen,setIncidentOpen]=useState(false);
   const convoyeur=user?.role==='convoyeur';
 
   if(!user) return <><SectionTitle title="Aujourd’hui"/><Card className="stack"><strong>Connectez-vous</strong>
@@ -217,24 +289,7 @@ export function Today(){
     {!convoyeur && <VehicleTracking serviceId={s.id} serviceStatus={s.status}/>}
     <ServiceTracking serviceId={s.id}/>
 
-    {/* Reporting is deliberately behind one tap: it is a stopped-vehicle task. */}
-    <Card className="stack">
-      {!incidentOpen
-        ? <button className="btn btn-soft" onClick={()=>setIncidentOpen(true)}><AlertTriangle size={16}/>Signaler un problème</button>
-        : <form className="stack" onSubmit={e=>{
-          e.preventDefault();const f=new FormData(e.target);
-          queue.enqueue('incident',{serviceId:s.id,kind:'other',severity:'medium',description:String(f.get('description')||'')});
-          e.target.reset();setIncidentOpen(false);setNotice('Problème signalé à l’exploitation.');if(navigator.onLine)queue.sync();
-        }}>
-          <label>Que se passe-t-il ?<textarea className="control" name="description" maxLength={2000} required rows={3}
-            placeholder="Panne, retard, route bloquée…"/></label>
-          <div className="controls">
-            <button className="btn btn-danger">Envoyer le signalement</button>
-            <button type="button" className="btn btn-soft" onClick={()=>setIncidentOpen(false)}>Annuler</button>
-          </div>
-          <p className="small muted">Fonctionne hors ligne : le signalement partira dès le retour du réseau.</p>
-        </form>}
-    </Card>
+    <IncidentReport serviceId={s.id} queue={queue} onReported={setNotice}/>
   </>;
 }
 
