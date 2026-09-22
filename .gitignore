@@ -50,3 +50,8 @@ pnpm-debug.log*
 .vercel
 .env*
 !.env.example
+
+# Agent worktrees and local session scratch. A worktree under the repo root
+# is a second checkout of this same project; linting or committing it would
+# duplicate every file in the tree.
+.claude/

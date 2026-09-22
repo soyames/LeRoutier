@@ -3,7 +3,7 @@ import globals from 'globals';
 import hooks from 'eslint-plugin-react-hooks';
 
 export default [
-  { ignores: ['**/dist/**', '**/node_modules/**', '**/.vercel/**', '.tmp/**', 'playwright-report/**', 'test-results/**'] },
+  { ignores: ['**/dist/**', '**/node_modules/**', '**/.vercel/**', '.tmp/**', 'playwright-report/**', 'test-results/**', '.claude/**'] },
   js.configs.recommended,
   {
     files: ['**/*.{js,jsx,mjs}'],
