@@ -3,19 +3,26 @@
  *
  * READ THIS BEFORE CHANGING ANYTHING HERE.
  *
- * LeRoutier does not host KYC/KYB documents today. An operator supplies an
- * https link to a document they host themselves, and that link is what gets
- * stored, reviewed and — for the two deliberately public images — displayed.
- * That has a consequence which must never be glossed over in the product:
+ * There are TWO arrangements, and the difference between them is the whole
+ * reason this module exists as a boundary.
+ *
+ * MANAGED (a provider is configured, Backblaze B2 today). LeRoutier holds the
+ * bytes in a private bucket. Every read is a server-authorized grant that
+ * EXPIRES, the uploaded file's type is read from its own first bytes, and a
+ * redaction genuinely deletes the object.
+ *
+ * OPERATOR-HOSTED LINK (no provider configured). An operator supplies an https
+ * link to a document they host themselves. That carries a consequence which
+ * must never be glossed over in the product:
  *
  *   ACCESS TO THE DOCUMENT IS NOT SERVER-AUTHORIZED. Anybody holding the link
  *   can open it. LeRoutier cannot revoke it, cannot expire it, and cannot tell
  *   whether it was ever private in the first place.
  *
- * So this module is not "document storage". It is the boundary around the fact
- * that there is none: one place that decides what a document reference may
- * look like, and one place to replace when real private object storage arrives.
- * Everything else in the codebase goes through `documentReference`.
+ * Both shapes coexist so a dossier submitted under one stays readable after
+ * the other arrives. Everything else in the codebase goes through
+ * `documentReference` for links and the four-member store interface for
+ * managed objects; no vendor call appears anywhere but here.
  *
  * What is genuinely enforced without a storage provider:
  *   - the link is a plain, credential-free, port-free https URL on a real
@@ -30,12 +37,10 @@
  *   - its real MIME type, its size, or that it is a document at all;
  *   - expiry, revocation, or an audit trail of who opened it.
  *
- * Replacing this: implement upload + signed short-lived read against a private
- * bucket, keep `documentReference` as the validator for whatever handle that
- * produces, and flip `EVIDENCE_STORAGE.managed` to true. Nothing outside this
- * module encodes the current arrangement.
+ * Adding another provider: implement the four members below and name it in
+ * `evidenceStore`. Nothing outside this module encodes which one is in use.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { invariant } from '@leroutier/domain';
 
 /**
@@ -234,17 +239,188 @@ export const EVIDENCE_READ_TTL_SECONDS = 120;
  * store rather than one that fails on the first upload — the same rule
  * sign-in follows.
  *
- * @param {{evidenceStorage?: {provider?: string|null, token?: string}}} [config]
+ * @param {{evidenceStorage?: {provider?: string|null,
+ *   b2?: {keyId?: string, applicationKey?: string, bucketId?: string, bucketName?: string}}}} [config]
+ * @param {typeof fetch} [http]
  * @returns {EvidenceStore|null}
  */
-export function evidenceStore(config = {}) {
+export function evidenceStore(config = {}, http = fetch) {
   const settings = config.evidenceStorage ?? {};
-  // No provider is configured today. When one is, it is constructed here and
-  // nowhere else; see docs/KYC-EVIDENCE-STORAGE.md for what each provider
-  // needs and which of the four members it has to satisfy.
+  // Constructed here and nowhere else; see docs/KYC-EVIDENCE-STORAGE.md for
+  // what each provider needs and which of the four members it has to satisfy.
   if (!settings.provider) return null;
+  if (settings.provider === 'b2') return backblazeEvidenceStore(settings.b2 ?? {}, http);
   invariant(false, 'EVIDENCE_STORAGE_UNAVAILABLE',
     `Le fournisseur de stockage « ${String(settings.provider).slice(0, 40) }» n'est pas implémenté.`, 503);
+}
+
+const B2_API = 'https://api.backblazeb2.com/b2api/v3';
+
+/**
+ * Backblaze B2, through its native API.
+ *
+ * Deliberately not the S3-compatible surface: SigV4 would mean an AWS SDK in a
+ * serverless function that otherwise has none, to sign requests to an endpoint
+ * whose own API is plain HTTPS and JSON. Fewer moving parts, and nothing new to
+ * keep patched.
+ *
+ * Three facts about the bucket this is written against, because the code
+ * depends on all three:
+ *
+ *   Private. Objects are unreachable without an authorization token, so the
+ *   expiring grant IS the access control rather than a courtesy on top of a
+ *   public URL.
+ *
+ *   "Keep all versions". Deleting one version of a file leaves the previous
+ *   ones, so `remove` deletes EVERY version. A redaction that leaves an older
+ *   copy behind has not deleted the document, and the retention scan would
+ *   record that LeRoutier forgot something it still holds.
+ *
+ *   eu-central. Identity documents belonging to people in Benin stay in the
+ *   EU rather than crossing to a US region by default.
+ *
+ * Credentials come from a BUCKET-SCOPED application key with exactly
+ * listFiles, readFiles, writeFiles, deleteFiles and shareFiles. The account's
+ * master key can delete buckets and mint further keys, and has no business in
+ * a request handler.
+ *
+ * @param {{keyId?:string,applicationKey?:string,bucketId?:string,bucketName?:string}} settings
+ * @param {typeof fetch} http
+ */
+export function backblazeEvidenceStore(settings, http = fetch) {
+  const { keyId, applicationKey, bucketId, bucketName } = settings;
+  // A half-configured provider produces NO store rather than one that fails on
+  // the first upload — the same rule sign-in follows.
+  if (!keyId || !applicationKey || !bucketId || !bucketName) return null;
+
+  /** Account authorization, reused until it expires. Valid ~24h; refreshed at 12. */
+  let session = null;
+  async function authorize(force = false) {
+    if (!force && session && session.until > Date.now()) return session;
+    const basic = Buffer.from(`${keyId}:${applicationKey}`).toString('base64');
+    const response = await http(`${B2_API}/b2_authorize_account`, {
+      headers: { authorization: `Basic ${basic}` }, signal: AbortSignal.timeout(10_000),
+    });
+    // Never the key, never the Authorization header, never the raw body.
+    invariant(response.ok, 'EVIDENCE_STORAGE_UNAVAILABLE',
+      'Le stockage des justificatifs est indisponible. Réessayez plus tard.', 503);
+    const body = await response.json();
+    const api = body.apiInfo?.storageApi ?? body;
+    invariant(api?.apiUrl && api?.downloadUrl && body.authorizationToken, 'EVIDENCE_STORAGE_UNAVAILABLE',
+      'Le stockage des justificatifs est indisponible. Réessayez plus tard.', 503);
+    session = { token: body.authorizationToken, apiUrl: api.apiUrl, downloadUrl: api.downloadUrl,
+      until: Date.now() + 12 * 3600_000 };
+    return session;
+  }
+
+  /**
+   * One B2 call, retried once against a token that expired mid-flight.
+   *
+   * `tolerate` names B2 error codes that mean the call already got what it
+   * wanted, and resolves them to null. Everything else throws: a caller that
+   * cannot tell "already gone" from "Backblaze is down" will eventually record
+   * a deletion that did not happen.
+   */
+  async function call(path, body, { retry = true, tolerate = [] } = {}) {
+    const current = await authorize();
+    const response = await http(`${current.apiUrl}/b2api/v3/${path}`, {
+      method: 'POST', signal: AbortSignal.timeout(15_000),
+      headers: { authorization: current.token, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (response.status === 401 && retry) { await authorize(true); return call(path, body, { retry: false, tolerate }); }
+    if (!response.ok && tolerate.length) {
+      const failure = await response.json().catch(() => ({}));
+      if (tolerate.includes(failure?.code)) return null;
+    }
+    invariant(response.ok, 'EVIDENCE_STORAGE_UNAVAILABLE',
+      'Le stockage des justificatifs est indisponible. Réessayez plus tard.', 503);
+    return response.json();
+  }
+
+  return {
+    name: 'b2',
+
+    async put({ operatorId, kind, bytes }) {
+      const contentType = detectEvidenceType(bytes);
+      // Opaque and unguessable. Naming an object after the operator and the
+      // document kind alone would make one reviewer's URL a template for
+      // everybody else's; the random segment is what stops that.
+      const key = `evidence/${operatorId}/${kind}/${randomUUID()}`;
+      const sha1 = createHash('sha1').update(bytes).digest('hex');
+      const upload = await call('b2_get_upload_url', { bucketId });
+      const response = await http(upload.uploadUrl, {
+        method: 'POST', body: bytes, signal: AbortSignal.timeout(30_000),
+        headers: {
+          authorization: upload.authorizationToken,
+          // B2 wants the name percent-encoded in the header.
+          'x-bz-file-name': encodeURIComponent(key),
+          'content-type': contentType,
+          'content-length': String(bytes.length),
+          'x-bz-content-sha1': sha1,
+        },
+      });
+      invariant(response.ok, 'EVIDENCE_STORAGE_UNAVAILABLE',
+        'L’envoi du justificatif a échoué. Réessayez.', 503);
+      return { key, contentType, byteSize: bytes.length };
+    },
+
+    async read(key, { ttlSeconds = EVIDENCE_READ_TTL_SECONDS } = {}) {
+      const current = await authorize();
+      // Scoped to this one object by prefix, and to a couple of minutes. The
+      // token is the access control: without it the object is unreachable.
+      // A reviewer opening an identity card wants to look at it, not download
+      // it. Safe because the object is served from Backblaze's own origin,
+      // never LeRoutier's, and because what it contains was checked by
+      // signature at upload — active content never got in.
+      const disposition = 'inline';
+      const grant = await call('b2_get_download_authorization', {
+        bucketId, fileNamePrefix: key,
+        validDurationInSeconds: Math.max(1, Math.min(604_800, Math.trunc(ttlSeconds))),
+        b2ContentDisposition: disposition,
+      });
+      // B2 BINDS the token to the override parameters it was issued with, so
+      // the disposition has to appear on the request too. Ask for a token with
+      // b2ContentDisposition and then omit it from the URL and every download
+      // is 401 bad_auth_token — which looks exactly like a broken credential
+      // and is not.
+      const path = key.split('/').map(encodeURIComponent).join('/');
+      const query = new URLSearchParams({
+        Authorization: grant.authorizationToken,
+        b2ContentDisposition: disposition,
+      });
+      return {
+        url: `${current.downloadUrl}/file/${encodeURIComponent(bucketName)}/${path}?${query}`,
+        expiresAt: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+      };
+    },
+
+    async remove(key) {
+      // EVERY version. The bucket keeps all of them, so deleting the newest
+      // and stopping would leave the document in place behind a redaction that
+      // claims it is gone.
+      let startFileName = key, startFileId;
+      for (let page = 0; page < 50; page++) {
+        /** @type {any} */
+        const listing = await call('b2_list_file_versions', {
+          bucketId, prefix: key, startFileName, startFileId, maxFileCount: 100,
+        });
+        const files = (listing.files ?? []).filter(file => file.fileName === key);
+        for (const file of files) {
+          // Already gone is the desired state, so removal stays idempotent —
+          // but ONLY that. Any other failure propagates, because the retention
+          // scan clears the database row on success and must not do so while
+          // the document is still sitting in the bucket.
+          await call('b2_delete_file_version',
+            { fileName: file.fileName, fileId: file.fileId },
+            { tolerate: ['file_not_present', 'not_found'] });
+        }
+        if (!listing.nextFileName) return;
+        startFileName = listing.nextFileName;
+        startFileId = listing.nextFileId;
+      }
+    },
+  };
 }
 
 /**

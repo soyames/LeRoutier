@@ -1158,3 +1158,234 @@ test('replacing a managed document removes the one it replaced', async () => {
   assert.equal(store.has(first), false, 'the superseded document is not left paid for and forgotten');
   assert.equal(store.has(second), true);
 });
+
+// ------------------------------------------------- Backblaze B2 adapter ----
+// Against a fake B2 transport. No real bucket, no real credentials, and no
+// real document: what is under test is that the adapter speaks B2 correctly
+// and keeps the four promises the review flow depends on.
+function fakeB2({ failAuthOnce = false, deleteFailure = null } = {}) {
+  const objects = new Map();   // fileId -> { name, bytes, contentType }
+  const grants = new Map();    // token -> { prefix, until }
+  const state = { authorizations: 0, uploads: 0, deletes: 0, sentAuthHeader: [] };
+  let nextId = 1000, expireTokens = false;
+  const json = (body, status = 200) => new Response(JSON.stringify(body), { status });
+
+  const http = async (url, init = {}) => {
+    const headers = new Headers(init.headers ?? {});
+    if (headers.get('authorization')) state.sentAuthHeader.push(headers.get('authorization'));
+    if (String(url).includes('b2_authorize_account')) {
+      state.authorizations++;
+      if (failAuthOnce && state.authorizations === 1) return json({ code: 'bad_auth' }, 401);
+      // v3 nests the storage API; the adapter must read it from there.
+      return json({ authorizationToken: 'acct-' + state.authorizations,
+        apiInfo: { storageApi: { apiUrl: 'https://api003.example.test', downloadUrl: 'https://f003.example.test' } } });
+    }
+    if (String(url).includes('b2_get_upload_url')) {
+      return json({ uploadUrl: 'https://pod-upload.example.test/upload', authorizationToken: 'upl-1' });
+    }
+    if (String(url).includes('pod-upload')) {
+      state.uploads++;
+      const name = decodeURIComponent(headers.get('x-bz-file-name'));
+      const id = 'f' + (++nextId);
+      objects.set(id, { name, bytes: init.body, contentType: headers.get('content-type') });
+      return json({ fileId: id, fileName: name });
+    }
+    if (String(url).includes('b2_get_download_authorization')) {
+      const body = JSON.parse(init.body);
+      const token = 'dl-' + (++nextId);
+      grants.set(token, { prefix: body.fileNamePrefix, seconds: body.validDurationInSeconds,
+        disposition: body.b2ContentDisposition });
+      return json({ authorizationToken: token });
+      // NOTE: resolve() below enforces that a token issued WITH a
+      // b2ContentDisposition is only accepted on a request carrying the same
+      // one. B2 really does bind them, and omitting it produced 401
+      // bad_auth_token on every download — which looks exactly like a broken
+      // credential and is not.
+    }
+    if (String(url).includes('b2_list_file_versions')) {
+      const body = JSON.parse(init.body);
+      const files = [...objects.entries()].filter(([, o]) => o.name.startsWith(body.prefix))
+        .map(([fileId, o]) => ({ fileId, fileName: o.name }));
+      return json({ files, nextFileName: null, nextFileId: null });
+    }
+    if (String(url).includes('b2_delete_file_version')) {
+      const body = JSON.parse(init.body);
+      state.deletes++;
+      if (deleteFailure) return json({ code: deleteFailure.code }, deleteFailure.status);
+      objects.delete(body.fileId);
+      return json({ fileId: body.fileId });
+    }
+    return json({ code: 'unexpected', url: String(url) }, 404);
+  };
+
+  return { http, state, objects, grants,
+    /** Follow a download URL the way a browser navigating to it would. */
+    resolve(url) {
+      const parsed = new URL(url);
+      const token = parsed.searchParams.get('Authorization');
+      const grant = grants.get(token);
+      if (!grant || expireTokens) return null;
+      // B2 binds a download token to the override parameters it was issued
+      // with. A token requested with b2ContentDisposition is refused on a
+      // request that omits it.
+      if ((grant.disposition ?? null) !== parsed.searchParams.get('b2ContentDisposition')) return null;
+      const name = decodeURIComponent(parsed.pathname.split('/').slice(3).join('/'));
+      if (!name.startsWith(grant.prefix)) return null;
+      return [...objects.values()].find(o => o.name === name) ?? null;
+    },
+    expire() { expireTokens = true; } };
+}
+
+const B2_SETTINGS = { keyId: 'test-key-id', applicationKey: 'test-application-key',
+  bucketId: 'test-bucket-id', bucketName: 'leroutier-kyc-evidence-eu' };
+
+test('a half-configured B2 produces no store, never one that fails on first upload', async () => {
+  const { evidenceStore, backblazeEvidenceStore } = await import('../src/evidence-storage.js');
+  for (const missing of ['keyId', 'applicationKey', 'bucketId', 'bucketName']) {
+    const partial = { ...B2_SETTINGS, [missing]: undefined };
+    assert.equal(backblazeEvidenceStore(partial, fakeB2().http), null, `${missing} missing must disable the store`);
+    assert.equal(evidenceStore({ evidenceStorage: { provider: 'b2', b2: partial } }, fakeB2().http), null);
+  }
+  // Complete, and selected by name through the one place that constructs it.
+  const store = evidenceStore({ evidenceStorage: { provider: 'b2', b2: B2_SETTINGS } }, fakeB2().http);
+  assert.equal(store.name, 'b2');
+  // An unconfigured deployment still selects nothing at all.
+  assert.equal(evidenceStore({}), null);
+  // And a provider nobody implemented refuses rather than silently doing nothing.
+  assert.throws(() => evidenceStore({ evidenceStorage: { provider: 'gcs' } }), { code: 'EVIDENCE_STORAGE_UNAVAILABLE' });
+});
+
+test('B2 stores a proof under an unguessable key and serves it only with a grant', async () => {
+  const { backblazeEvidenceStore } = await import('../src/evidence-storage.js');
+  const b2 = fakeB2();
+  const store = backblazeEvidenceStore(B2_SETTINGS, b2.http);
+  const operatorId = randomUUID();
+
+  const stored = await store.put({ operatorId, kind: 'identity', bytes: PDF() });
+  assert.equal(stored.contentType, 'application/pdf', 'the type is the file’s own, not a claim');
+  assert.equal(stored.byteSize, PDF().length);
+  assert.match(stored.key, new RegExp(`^evidence/${operatorId}/identity/[0-9a-f-]{36}$`));
+  assert.equal(b2.state.uploads, 1);
+  // The upload carried a content hash: B2 rejects a body that does not match,
+  // so a truncated transfer cannot land as a valid document.
+  assert.ok(b2.objects.size === 1);
+
+  // A grant is scoped to this one object and to a couple of minutes.
+  const grant = await store.read(stored.key, { ttlSeconds: 120 });
+  const issued = [...b2.grants.values()].at(-1);
+  assert.equal(issued.prefix, stored.key, 'the token opens this object and nothing else');
+  assert.equal(issued.seconds, 120);
+  assert.equal(issued.disposition, 'inline', 'a reviewer looks at an identity card rather than downloading it');
+  assert.match(grant.url, /b2ContentDisposition=inline/,
+    'the disposition the token was bound to must also be on the request, or B2 answers 401');
+  assert.ok(grant.expiresAt);
+  assert.ok(b2.resolve(grant.url), 'the grant works while it lasts');
+
+  // The URL is a plain navigation target — no bucket credential, no key.
+  assert.ok(!grant.url.includes(B2_SETTINGS.applicationKey));
+  assert.ok(!grant.url.includes(B2_SETTINGS.keyId));
+  assert.match(grant.url, /^https:\/\//);
+
+  // A token for one object does not open another.
+  const other = await store.put({ operatorId, kind: 'driving_license', bytes: PNG() });
+  const forged = new URL(grant.url);
+  forged.pathname = `/file/${B2_SETTINGS.bucketName}/${other.key}`;
+  assert.equal(b2.resolve(forged.href), null, 'a grant is not a key to the bucket');
+});
+
+test('an expired grant stops working, which a hosted link never could', async () => {
+  const { backblazeEvidenceStore } = await import('../src/evidence-storage.js');
+  const b2 = fakeB2();
+  const store = backblazeEvidenceStore(B2_SETTINGS, b2.http);
+  const stored = await store.put({ operatorId: randomUUID(), kind: 'insurance', bytes: PDF() });
+  const grant = await store.read(stored.key);
+  assert.ok(b2.resolve(grant.url));
+  b2.expire();
+  assert.equal(b2.resolve(grant.url), null);
+});
+
+test('removing a proof deletes every version the bucket kept', async () => {
+  const { backblazeEvidenceStore } = await import('../src/evidence-storage.js');
+  const b2 = fakeB2();
+  const store = backblazeEvidenceStore(B2_SETTINGS, b2.http);
+  const operatorId = randomUUID();
+  const stored = await store.put({ operatorId, kind: 'roadworthiness', bytes: PDF() });
+  // The bucket keeps all versions, so the same name can hold several. Deleting
+  // the newest and stopping would leave the document in place behind a
+  // redaction that claims it is gone.
+  await b2.http('https://pod-upload.example.test/upload', {
+    headers: { 'x-bz-file-name': encodeURIComponent(stored.key), 'content-type': 'application/pdf' }, body: PDF() });
+  assert.equal(b2.objects.size, 2, 'two versions of one document');
+
+  await store.remove(stored.key);
+  assert.equal(b2.objects.size, 0, 'an older version left behind is the document still being there');
+  assert.equal(b2.state.deletes, 2);
+  // Removing something already gone is the desired state, not an error.
+  await store.remove(stored.key);
+});
+
+test('a removal B2 refuses is reported, never reported as a deletion', async () => {
+  const { backblazeEvidenceStore } = await import('../src/evidence-storage.js');
+  // The retention scan deletes the object and only then clears the row. So a
+  // removal that did not happen MUST throw: swallowing it would clear the row
+  // while the identity document is still sitting in the bucket, and LeRoutier
+  // would have recorded forgetting something it still holds.
+  for (const failure of [{ code: 'service_unavailable', status: 503 },
+                         { code: 'bad_request', status: 400 },
+                         { code: 'unauthorized', status: 403 }]) {
+    const b2 = fakeB2({ deleteFailure: failure });
+    const store = backblazeEvidenceStore(B2_SETTINGS, b2.http);
+    const stored = await store.put({ operatorId: randomUUID(), kind: 'identity', bytes: PDF() });
+    await assert.rejects(store.remove(stored.key), { code: 'EVIDENCE_STORAGE_UNAVAILABLE' },
+      `${failure.code} must not pass for a deletion`);
+    assert.equal(b2.objects.size, 1, 'the object is still there, which is exactly why this throws');
+  }
+
+  // Only "it was already gone" resolves, because that IS the desired state.
+  for (const code of ['file_not_present', 'not_found']) {
+    const b2 = fakeB2({ deleteFailure: { code, status: 400 } });
+    const store = backblazeEvidenceStore(B2_SETTINGS, b2.http);
+    const stored = await store.put({ operatorId: randomUUID(), kind: 'identity', bytes: PDF() });
+    await store.remove(stored.key);
+  }
+});
+
+test('an expired account token is renewed once rather than failing the request', async () => {
+  const { backblazeEvidenceStore } = await import('../src/evidence-storage.js');
+  const b2 = fakeB2({ failAuthOnce: true });
+  const store = backblazeEvidenceStore(B2_SETTINGS, b2.http);
+  // The first authorization is refused, which is what a rotated or expired
+  // credential looks like. A reviewer must not see that as a dead button.
+  await assert.rejects(store.put({ operatorId: randomUUID(), kind: 'identity', bytes: PDF() }),
+    { code: 'EVIDENCE_STORAGE_UNAVAILABLE' });
+  // The next attempt authorizes cleanly and works.
+  const stored = await store.put({ operatorId: randomUUID(), kind: 'identity', bytes: PDF() });
+  assert.ok(stored.key);
+  assert.ok(b2.state.authorizations >= 2);
+});
+
+test('B2 refuses scriptable content before it is ever uploaded', async () => {
+  const { backblazeEvidenceStore } = await import('../src/evidence-storage.js');
+  const b2 = fakeB2();
+  const store = backblazeEvidenceStore(B2_SETTINGS, b2.http);
+  for (const bytes of [SVG(), HTML(), new Uint8Array(0)]) {
+    await assert.rejects(store.put({ operatorId: randomUUID(), kind: 'identity', bytes }),
+      { code: 'INVALID_EVIDENCE_FILE' });
+  }
+  assert.equal(b2.state.uploads, 0, 'nothing that is not a document reaches the bucket at all');
+});
+
+test('the credential never appears in anything the adapter hands back', async () => {
+  const { backblazeEvidenceStore } = await import('../src/evidence-storage.js');
+  const b2 = fakeB2();
+  const store = backblazeEvidenceStore(B2_SETTINGS, b2.http);
+  const stored = await store.put({ operatorId: randomUUID(), kind: 'identity', bytes: PDF() });
+  const grant = await store.read(stored.key);
+  const surface = JSON.stringify({ stored, grant });
+  for (const secret of [B2_SETTINGS.applicationKey, B2_SETTINGS.keyId, B2_SETTINGS.bucketId]) {
+    assert.ok(!surface.includes(secret), 'a credential reached a caller of the store');
+  }
+  // The account token goes in a header, never in a returned URL.
+  assert.ok(b2.state.sentAuthHeader.some(h => h.startsWith('Basic ')), 'the key is sent as Basic auth, once');
+  assert.ok(!grant.url.includes('Basic'));
+});

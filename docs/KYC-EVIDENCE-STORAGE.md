@@ -6,17 +6,22 @@ authorization.
 
 ## Where things stand
 
-**No storage provider is configured.** Operators supply an https link to a
-document they host themselves. That is a supported state, not a broken one, and
-the product says so plainly on the submission form and in Platform Ops — but it
-carries one consequence that must never be glossed over:
+**Backblaze B2 is configured**, in the `eu-central-003` region: a private,
+encrypted bucket holding KYC/KYB documents, reached through a bucket-scoped
+application key. Identity documents belonging to people in Benin stay in the
+EU rather than crossing to a US region by default.
 
-> Access to the document is **not** server-authorized. Anybody holding the link
-> can open it. LeRoutier cannot revoke it, cannot expire it, and cannot tell
-> whether it was ever private.
+The operator-hosted-link arrangement still works for dossiers submitted before
+the bucket existed, and the product keeps saying plainly which arrangement each
+proof is under. A hosted link carries one consequence that must never be
+glossed over:
 
-Everything below the link itself is already in place, and works the same way
-under either arrangement:
+> Access to an operator-hosted document is **not** server-authorized. Anybody
+> holding the link can open it. LeRoutier cannot revoke it, cannot expire it,
+> and cannot tell whether it was ever private.
+
+Everything below the storage layer works the same way under either
+arrangement:
 
 - the reviewer fetches **one grant per document, at the moment they open it**.
   No list payload carries a document address, so a URL never sits in a JSON
@@ -27,7 +32,7 @@ under either arrangement:
 - the 90-day redaction of refused dossiers works, and account deletion clears
   the driver photograph published to passengers along with identity references.
 
-## What changes once a provider is configured
+## What managed storage adds
 
 The evidence row points at an object LeRoutier holds instead of somebody
 else's URL, and three things become true that a link can never offer:
@@ -71,25 +76,66 @@ steps and a misleading "managed" badge.
 - credentials supplied by environment variable, never committed;
 - a region choice that is defensible for Beninese personal data.
 
-### Vercel Blob
+## CORS: deliberately none
 
-The platform already in use offers `access: "private"` stores, which keeps the
-vendor count where it is. It is **not** provisioned: creating one is a billable
-resource, and that is the project owner's decision rather than a detail of this
-implementation. Provisioning it produces a `BLOB_READ_WRITE_TOKEN`, which is
-what `evidenceStore()` would read.
+The bucket has **no CORS rules, and needs none.** The reviewer console opens a
+document with
+
+```js
+window.open(access.url, '_blank', 'noopener,noreferrer');
+```
+
+which is a top-level browser navigation, not a JavaScript `fetch`. Navigations
+are not subject to CORS — the browser simply goes to the URL and renders what
+comes back. Verified end to end against the real bucket: a plain request with
+no custom headers returns `200`, `content-type: application/pdf`,
+`content-disposition: inline`.
+
+`noreferrer` also means Backblaze never learns which origin opened the
+document, so an origin-based rule would have nothing to match on anyway.
+
+**Do not add a CORS rule** unless the console is changed to read a document
+with `fetch`/XHR — for example to render a PDF inside the page rather than in
+a tab. If that day comes, the rule should name the LeRoutier Ops origin
+exactly, allow `GET` and `HEAD` only, and nothing else.
+
+## One B2 behaviour worth knowing
+
+`b2_get_download_authorization` **binds the token to the override parameters it
+was issued with.** Ask for a token with `b2ContentDisposition` and then omit
+that parameter from the download URL, and every request returns
+`401 bad_auth_token` — which looks exactly like a broken credential and is not.
+The adapter puts the disposition on both, and the test double enforces the
+binding so this cannot regress quietly.
+
+## Configuration
+
+Set on `le-routier-api`, production and preview, all as sensitive values:
+
+| Variable | Meaning |
+|---|---|
+| `EVIDENCE_STORAGE_PROVIDER` | `b2` |
+| `B2_BUCKET_NAME` | bucket holding the evidence |
+| `B2_BUCKET_ID` | same bucket, by id |
+| `B2_KEY_ID` | bucket-scoped application key id |
+| `B2_APPLICATION_KEY` | its secret |
+
+The key is scoped to this one bucket with exactly `listFiles`, `readFiles`,
+`writeFiles`, `deleteFiles` and `shareFiles`. **The account's master key is not
+used and must never be:** it can delete buckets and mint further keys, and has
+no business in a request handler.
 
 ## External action still required
 
-1. Choose and provision a private object store.
-2. Set its credential on `le-routier-api` for production and preview.
-3. Implement the four members for that provider.
-4. Confirm the region and retention terms are acceptable for identity documents
-   belonging to people in Benin.
-
-Until then the operator-hosted-link arrangement stands, the product states its
-limits on every surface that touches a document, and **no real identity
-document should be submitted to production.**
+1. **Delete or rotate the master application key** if it has been in a
+   downloaded file or pasted anywhere. A bucket-scoped key now does the work.
+2. Decide the bucket's lifecycle policy. It currently keeps all versions, which
+   the adapter handles by deleting every version on redaction — but a lifecycle
+   rule that hides rather than deletes would undermine that.
+3. Watch the daily caps. They are set low (10 GB storage, 1 GB download,
+   2,500 class B/C transactions) with alerts to the project mailbox; a pilot
+   should stay far inside them, and a reviewer session costs one class B
+   transaction per document opened.
 
 ## Testing
 

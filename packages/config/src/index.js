@@ -116,6 +116,23 @@ export function serverConfig(env = process.env) {
       // creates one.
       trustProviderMsisdn: env.USSD_TRUST_PROVIDER_MSISDN === 'true',
     },
+    // Private object storage for KYC/KYB evidence.
+    //
+    // A bucket-scoped application key, never the account's master key: that one
+    // can delete buckets and mint further keys, and has no business in a
+    // request handler. An unset provider keeps the operator-hosted-link
+    // arrangement, which is a supported state rather than a degraded one, and
+    // a half-configured one produces no store rather than one that fails on
+    // the first upload.
+    evidenceStorage: {
+      provider: env.EVIDENCE_STORAGE_PROVIDER || null,
+      b2: {
+        keyId: env.B2_KEY_ID,
+        applicationKey: env.B2_APPLICATION_KEY,
+        bucketId: env.B2_BUCKET_ID,
+        bucketName: env.B2_BUCKET_NAME,
+      },
+    },
     // Road routing engine. Unset means routes simply have no road geometry and
     // every surface says so — a straight line is never substituted. The public
     // OSRM/Valhalla demo servers forbid production use, so no default endpoint
