@@ -21,6 +21,8 @@ doing them once, deliberately, and recording the result.
 | Payout capability | same response | `fedapay.payouts.state` — see below |
 | Webhook registered | FedaPay dashboard | points at `https://api.leroutier.app/api/v1/webhooks/fedapay` |
 | Webhook secret matches | `FEDAPAY_WEBHOOK_SECRET` on `le-routier-api` | equals the dashboard's signing secret |
+| Webhook endpoint answers | `curl -X POST .../webhooks/fedapay -d '{}'` | `401 INVALID_WEBHOOK` — verified 2026-09-22 |
+| No competing variables | `vercel env ls le-routier-api` | one of each FedaPay name — verified 2026-09-22 |
 
 The payout states, in increasing order of what is actually proven:
 
@@ -70,10 +72,53 @@ a Mobile Money number you own, for the smallest amount the provider accepts.
 | 2.6 | Webhook settles it | `paid`, ledger rows `paid` | | |
 | 2.7 | Capability afterwards | `available` | | |
 | 2.8 | Approve the same request again | refused, `PAYOUT_TRANSITION` — never a second transfer | | |
+| 2.9 | Provider rejection path | if the transfer is refused: request returns to a retryable state, reserved balance released back to withdrawable, capability reads `provider_not_activated` rather than `available` | | |
+| 2.10 | Balance reconciles | withdrawable balance equals the settlement ledger again, with no amount stranded in reserve | | |
 
 If 2.4 fails with `PAYOUT_UNAVAILABLE`, FedaPay has not activated Payouts for
 this account. The balance is released automatically and the capability moves to
 `provider_not_activated`; ask FedaPay to activate transfers before retrying.
+
+## Verified on 2026-09-22, without moving money
+
+Three things that can be checked against live production and were:
+
+**The webhook endpoint exists and is signature-guarded.** An unsigned POST to
+`https://api.leroutier.app/api/v1/webhooks/fedapay` returns
+`401 INVALID_WEBHOOK` — "Webhook signature is missing." — so the route is
+deployed and refuses before any processing. What this does NOT prove is that
+FedaPay's dashboard points at this URL; only the dashboard can answer that, and
+it is the first row of the pre-flight table for that reason.
+
+**The secrets exist once, under the expected names.** Production carries
+exactly one each of `FEDAPAY_SECRET_KEY`, `FEDAPAY_PUBLIC_KEY`,
+`FEDAPAY_WEBHOOK_SECRET` and `FEDAPAY_PAYOUT_SECRET_KEY`, plus one each of
+`FEDAPAY_ENVIRONMENT`, `PAYMENT_PROVIDER` and `PAYOUT_APPROVAL_REQUIRED`. No
+duplicates, no alternates, nothing hidden. Preview carries the two
+configuration values and **none of the keys**, so a preview deployment cannot
+move money.
+
+**The capability is honest.** `GET /api/v1/payments/config` on production
+returns:
+
+```json
+{"available":true,"payouts":{"available":false,"state":"configured","canRequest":true,"provider":"fedapay"}}
+```
+
+`available:true` for collections means an adapter and a secret key are present.
+It does **not** mean a passenger has ever paid. `payouts.state:"configured"`
+says precisely that credentials exist and no transfer has ever completed — and
+`payouts.available:false` alongside it is the whole point of the distinction.
+Only section 2 below can move either to proven.
+
+### One thing worth fixing while you are in there
+
+`FEDAPAY_ENVIRONMENT`, `PAYMENT_PROVIDER` and `PAYOUT_APPROVAL_REQUIRED` are
+stored as **Sensitive**, which makes them write-only. They are configuration,
+not credentials, and nobody — including you — can read back whether
+`FEDAPAY_ENVIRONMENT` currently says `live` or `sandbox` without deploying and
+observing. A wrong value here is silent. Re-add them with `--no-sensitive` when
+convenient; the three keys stay Sensitive, as they should.
 
 ## What must never be done to test this
 

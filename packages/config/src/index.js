@@ -83,6 +83,18 @@ export function serverConfig(env = process.env) {
       whatsapp: env.WHATSAPP_PROVIDER_URL && env.WHATSAPP_PROVIDER_KEY ? {url:env.WHATSAPP_PROVIDER_URL.trim(),key:env.WHATSAPP_PROVIDER_KEY.trim()} : null,
       email: env.EMAIL_PROVIDER_URL && env.EMAIL_PROVIDER_KEY ? {url:env.EMAIL_PROVIDER_URL.trim(),key:env.EMAIL_PROVIDER_KEY.trim()} : null,
       webPushPublicKey: env.WEB_PUSH_PUBLIC_KEY, webPushPrivateKey: env.WEB_PUSH_PRIVATE_KEY,
+      // A named email provider LeRoutier speaks directly, instead of a relay
+      // the owner has to run. Unset keeps the gateway contract above, which
+      // stays the escape hatch for a channel nobody has written an adapter
+      // for. Half-configured produces no provider at all.
+      emailProvider: env.EMAIL_PROVIDER || null,
+      brevo: {
+        apiKey: env.BREVO_API_KEY,
+        // Brevo will only send from an address it has verified, so this is
+        // configuration rather than a default worth inventing.
+        fromAddress: env.EMAIL_FROM_ADDRESS,
+        fromName: env.EMAIL_FROM_NAME || 'LeRoutier',
+      },
     },
     // First-mile timing policy: one configurable default, documented in
     // Keep these defaults centralized instead of inventing buffers per screen.
