@@ -34,6 +34,13 @@ console.log(`Production smoke against ${api}`);
     body.data.demoLogin === false ? ok('Auth config public; demo login disabled') : fail('Auth config', 'demo login enabled in production');
     body.data.firebase?.projectId && body.data.firebase?.apiKey && body.data.firebase?.authDomain && body.data.firebase?.appId
       ? ok('Firebase public configuration populated') : fail('Firebase public configuration','missing identifiers');
+    // The browser pins the branded auth origin itself; no localhost value may
+    // ever be served as the auth domain, and no value may leak server-side
+    // material.
+    const payload = JSON.stringify(body.data.firebase ?? {});
+    /localhost|127\.0\.0\.1/.test(payload)
+      ? fail('Auth config', 'a localhost auth value is shipped to production browsers')
+      : ok('Auth config carries no localhost values');
   } else fail('Auth config', `status ${response.status}`);
 }
 for (const path of ['/privacy','/terms','/legal','/cancellations','/cookies']) {
@@ -43,14 +50,44 @@ for (const path of ['/privacy','/terms','/legal','/cancellations','/cookies']) {
 {
   // The custom authDomain proxy: leroutier.app serves Firebase's auth helper
   // for the SAME project, without Firebase Hosting or any billing. The SPA
-  // rewrite must never swallow it.
-  const response=await fetch(unified+'/__/auth/handler');
+  // rewrite must never swallow it — handler, iframe and the helper scripts
+  // are all part of the SDK's redirect and popup flows.
+  for (const path of ['/__/auth/handler','/__/auth/iframe','/__/auth/handler.js']) {
+    const response=await fetch(unified+path);
+    const text=await response.text();
+    const notSpa=!text.includes('id="root"') && text.length>0;
+    response.status===200 && notSpa
+      ? ok(`Firebase auth helper proxied: ${path}`) : fail('Firebase auth helper proxy',`${path} status ${response.status} spa=${!notSpa}`);
+  }
+}
+{
+  // The apex is the ONE authoritative auth origin: Google returns to
+  // https://leroutier.app/__/auth/handler. The platform's apex→www redirect,
+  // while it exists, must preserve the callback (308 keeps the query string)
+  // and must never turn the handler into the app shell.
+  const response=await fetch(unified+'/__/auth/handler',{redirect:'follow'});
   const text=await response.text();
   response.status===200 && text.length>200 && !text.includes('id="root"')
-    ? ok('Firebase auth helper proxied on the app domain') : fail('Firebase auth helper proxy',`status ${response.status}`);
+    ? ok('Auth handler reachable through the apex→www chain') : fail('Auth handler apex chain',`status ${response.status}`);
+}
+{
+  // The installed PWA's service worker is revalidated on every launch: an
+  // app that cannot be told about a new auth implementation would stay broken
+  // forever on phones that installed the old one.
+  const response=await fetch(unified+'/sw.js',{redirect:'follow'});
+  const cacheControl=response.headers.get('cache-control') ?? '';
+  /max-age=0/.test(cacheControl)
+    ? ok('Service worker revalidated on every launch') : fail('Service worker cache headers',`cache-control: ${cacheControl}`);
+}
+{
+  // The pinned auth origin must be allowed from either branded host: with the
+  // apex as the auth domain, the helper iframe/popup URL is apex even when
+  // the app itself serves on www.
+  const response=await fetch(unified+'/');
   const csp=response.headers.get('content-security-policy') ?? '';
   cspHasSource(csp, 'frame-src', "'self'") && cspHasSource(csp, 'frame-src', 'https://accounts.google.com')
-    ? ok('PWA CSP allows same-origin auth iframe and Google') : fail('PWA CSP','auth iframe origins missing');
+    && cspHasSource(csp, 'frame-src', 'https://*.leroutier.app')
+    ? ok('PWA CSP allows the auth iframe and Google from either branded host') : fail('PWA CSP','auth iframe origins missing');
 }
 {
   const {response,body}=await get('/api/v1/services');
