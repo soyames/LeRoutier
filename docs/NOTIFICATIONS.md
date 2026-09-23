@@ -227,6 +227,40 @@ authenticate to Brevo until it is set.
 Until then `channels.email` is `false`, every surface says so, and in-app
 delivery carries everything.
 
+## Rotating the Brevo API key
+
+Brevo shows a key once. There is no way to read an existing one back, so
+"rotate" always means "create a new one and replace the stored value".
+
+1. Brevo → **SMTP & API** → **API keys** → *Generate a new API key*.
+2. Set it on `le-routier-api`, production, as **Sensitive**. Replace the
+   existing `BREVO_API_KEY` rather than adding a second variable:
+
+   ```bash
+   vercel env rm BREVO_API_KEY production --yes
+   vercel env add BREVO_API_KEY production --sensitive
+   # paste at the prompt; do not pass --value, which puts the secret in shell history
+   ```
+
+3. Delete the old key in Brevo.
+4. Redeploy — a running deployment keeps the environment it started with:
+
+   ```bash
+   vercel redeploy <current-production-url>
+   ```
+
+5. Confirm on Platform Ops → **Système** → *Notifications par e-mail*: channel
+   available, provider `brevo`, allowance 300.
+
+**Do not create a second sender** while doing this. The sender is separate from
+the key: `LeRoutier <noreply@leroutier.app>` is verified, `leroutier.app` is
+authenticated, and rotating a key does not touch either.
+
+If the channel reports unavailable after a rotation, the usual cause is not the
+key. `brevoAdapter` requires **both** `BREVO_API_KEY` and `EMAIL_FROM_ADDRESS`;
+with only one of them it returns no adapter at all and email stays honestly
+unavailable rather than failing on the first send.
+
 ## How Platform Ops sees it
 
 The existing **Système** screen, beside the database and the evidence store —

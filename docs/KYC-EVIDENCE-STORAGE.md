@@ -174,14 +174,60 @@ and **explicitly deletes the old one immediately**, rather than leaving it to
 the lifecycle rule. The rule is the safety net for the case the application
 does not produce; the application is the guarantee.
 
+## Rotating the application key
+
+```bash
+pnpm rotate:b2 "C:/path/to/your/Backblaze-export.txt"
+```
+
+Then redeploy, because a running deployment keeps the environment it started
+with:
+
+```bash
+vercel redeploy <current-production-url>
+```
+
+Confirm on Platform Ops → **Système** → *Justificatifs KYC*: provider `b2`,
+region `eu-central-003`, key limited to the bucket, recent last check.
+
+### Why a script rather than the console
+
+Rotating by hand went wrong twice in one sitting on 2026-09-23, in two
+different ways, and the script exists to remove both.
+
+**The console pre-ticks capabilities.** A key created there arrived with
+nineteen of them, including `writeBuckets`, `writeBucketEncryption` and
+`writeBucketLifecycleRules` — any one of which could make the KYC bucket
+public or delete its retention rule. A request handler that only puts, reads
+and deletes objects must not be able to do that. The script fixes the set in
+code and refuses to install anything broader.
+
+**Moving a secret by hand means handling it.** One was pasted into a place it
+should never have reached and had to be revoked immediately. The script takes
+the secret from Backblaze's own response straight into Vercel's API: no shell,
+no argument, no file, no log line, nothing rendered.
+
+It also mints and verifies BEFORE revoking the old key, so an interrupted
+rotation leaves a working credential rather than none — and it proves the new
+one end to end (upload, reviewer grant, unauthenticated request still refused,
+delete, nothing left behind) on a generated fixture, never a real document.
+
+The one thing it cannot do is remove the need for an account-level credential:
+minting a bucket-scoped key requires one. That is the argument you pass it, and
+it is read for two lines and nothing else.
+
 ## External action still required
 
-1. **Rotate the master application key.** It is LIVE — it authorizes today,
-   scoped to the entire account, with 38 capabilities including `writeKeys`,
-   `deleteKeys`, `deleteBuckets` and `bypassGovernance` — and it sits in a
-   downloaded file. Production does not use it: `b2_list_keys` shows exactly
-   one application key, `leroutier-kyc-evidence-api`, confined to this bucket
-   with five capabilities and nothing privileged.
+1. **Rotate the master application key.** Still outstanding, and now more
+   pressing rather than less: it is LIVE, scoped to the entire account, with 38
+   capabilities including `writeKeys`, `deleteKeys`, `deleteBuckets` and
+   `bypassGovernance`; it sits in a downloaded file; and it has since been used
+   to mint the production key, which is exactly the power it should not need to
+   be lying around with. Production does not use it — `b2_list_keys` shows one
+   application key, `leroutier-kyc-evidence-api`, confined to this bucket with
+   five capabilities and nothing privileged.
+
+   Rotate it AFTER any pending `pnpm rotate:b2`, since that command needs it.
 
    Backblaze has **no API for regenerating the master key**; it is a console
    action, which is why this cannot be done for you:
