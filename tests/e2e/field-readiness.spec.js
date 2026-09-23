@@ -238,7 +238,7 @@ test('a denied camera names the manual fallback, and granting it later revives t
     // gives up, so a realistic denial rejects every call while it lasts.
     Object.defineProperty(window, '__denyCamera', { value: true, writable: true });
     Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => {
-      if (window.__denyCamera) throw new DOMException('Permission denied', 'NotAllowedError');
+      if (/** @type {any} */ (window).__denyCamera) throw new DOMException('Permission denied', 'NotAllowedError');
       state.opened++; state.live++;
       const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 320;
       const ctx = canvas.getContext('2d'); ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 320, 320);
@@ -259,7 +259,7 @@ test('a denied camera names the manual fallback, and granting it later revives t
 
   // The passenger grants the permission in the browser afterwards: scanning
   // starts working again without reinstalling or signing in again.
-  await page.evaluate(() => { window.__denyCamera = false; });
+  await page.evaluate(() => { /** @type {any} */ (window).__denyCamera = false; });
   await page.getByRole('button', { name: 'Scanner le QR', exact: true }).click();
   await expect.poll(() => page.evaluate(() => /** @type {any} */ (window).__camera.opened)).toBe(1);
   await expect(page.getByRole('button', { name: 'Arrêter la caméra' })).toBeVisible();
@@ -311,8 +311,9 @@ test('queued offline actions replay by themselves when the signal returns', asyn
   await expect(page.getByText(/en attente/i).first()).toBeVisible();
   await page.context().setOffline(false);
   await expect.poll(() => posted, 'reconnect must drain the queue without a tap').not.toBeNull();
-  expect(posted.body.type).toBe('board');
-  expect(posted.body.payload.code).toBe(code);
+  const landed = /** @type {{key:string,body:{type:string,payload:{code:string}}}} */ (posted);
+  expect(landed.body.type).toBe('board');
+  expect(landed.body.payload.code).toBe(code);
   await expect(page.getByText(/en attente/i)).toHaveCount(0);
 });
 
@@ -333,8 +334,9 @@ test('queued offline actions replay by themselves when the app reopens with a co
   });
   await crew(page, '/work/scanner');
   await expect.poll(() => posted, 'the queued action must leave without any tap or network toggle').not.toBeNull();
-  expect(posted.key).toBe('queued-before-restart');
-  expect(posted.body.type).toBe('board');
+  const landed = /** @type {{key:string,body:{type:string,payload:{code:string}}}} */ (posted);
+  expect(landed.key).toBe('queued-before-restart');
+  expect(landed.body.type).toBe('board');
   // Landed: the pending badge is gone, the row is succeeded, and the ticket
   // code has been scrubbed from the payload.
   await expect(page.getByText(/en attente/i)).toHaveCount(0);

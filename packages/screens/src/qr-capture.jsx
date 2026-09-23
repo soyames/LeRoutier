@@ -37,7 +37,8 @@ export function QrCapture({ onRead, accept = value => value, label = 'Scanner le
       const cards = [...document.querySelectorAll('main .card')].filter(node => node.getBoundingClientRect().height > 0);
       const target = explicit || cards.at(-1);
       target?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-      target?.querySelector?.('button, [href], input, [tabindex]:not([tabindex="-1"])')?.focus?.({ preventScroll: true });
+      const focusable = target?.querySelector?.('button, [href], input, [tabindex]:not([tabindex="-1"])');
+      if (focusable instanceof HTMLElement) focusable.focus({ preventScroll: true });
     }));
   }
 

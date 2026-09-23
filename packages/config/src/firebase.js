@@ -46,7 +46,7 @@ export function takeReturnPath() {
  * Local development keeps the configured Firebase domain because localhost
  * does not proxy /__/auth to the Firebase project.
  */
-export function browserAuthDomain(config, location = globalThis.window?.location) {
+export function browserAuthDomain(config, /** @type {{hostname?: string}|undefined} */ location = globalThis.window?.location) {
   const hostname = String(location?.hostname || '').toLowerCase();
   return BRANDED_AUTH_HOSTS.has(hostname) ? hostname : config?.authDomain;
 }
@@ -133,7 +133,10 @@ export async function firebaseAuth(config) {
 function preferGoogleRedirect() {
   try {
     if (window.matchMedia?.('(display-mode: standalone)').matches) return true;
-    if (navigator.userAgentData?.mobile === true) return true;
+    // The UA-data shape varies by browser and by TS lib version; read the
+    // mobile flag defensively and fall back to the user-agent string.
+    const uaData = /** @type {{mobile?: boolean}|undefined} */ (navigator.userAgentData);
+    if (uaData?.mobile === true) return true;
   } catch { /* older browsers */ }
   return /Android|iPhone|iPad|iPod|Mobile/i.test(String(globalThis.navigator?.userAgent || ''));
 }
