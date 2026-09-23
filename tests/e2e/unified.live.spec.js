@@ -16,13 +16,21 @@ test('the unified PWA carries a real database-backed journey across workspaces',
   await passenger.goto(APP + '/?testMode=1');
   await expect(passenger.getByRole('button', { name: 'Rechercher un trajet' })).toBeVisible();
   await passenger.getByLabel('Départ', { exact: true }).selectOption('place');
+  // Each city is resolved by a real lookup against the live geography, and each
+  // is waited for BEFORE touching the next field. Filling both and asserting
+  // both afterwards raced: the departure lookup is the first API round trip
+  // after mount — it pays the cold start for the function and the connection
+  // pool — while focus had already moved on, and CI failed on 2026-09-22 with
+  // the departure chip simply never arriving. Same assertions, in an order
+  // that does not depend on which resolves first.
   await passenger.getByLabel('Ville de départ').click();
   await passenger.getByLabel('Ville de départ').fill('Cotonou');
   await passenger.getByLabel('Ville de départ').press('Enter');
+  await expect(passenger.getByRole('button', { name: /Ville de départ : Cotonou/ }))
+    .toBeVisible({ timeout: 20000 });
   await passenger.getByLabel('Destination').click();
   await passenger.getByLabel('Destination').fill('Parakou');
   await passenger.getByLabel('Destination').press('Enter');
-  await expect(passenger.getByRole('button', { name: /Ville de départ : Cotonou/ })).toBeVisible();
   await expect(passenger.getByRole('button', { name: /Destination : Parakou/ })).toBeVisible();
   await passenger.getByRole('button', { name: 'Rechercher un trajet' }).click();
   // The home search carries its criteria into the results URL.
