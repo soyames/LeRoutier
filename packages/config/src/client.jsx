@@ -49,12 +49,9 @@ export function ApiProvider({baseUrl='',role,children}) {
     return payload.data;
   },[base,authorization]);
 
-  // Provider authentication is only half of sign-in. Keep the login action
+  // Provider authentication is only half of sign-in. Keep popup/password login
   // pending until LeRoutier has resolved the Firebase identity through /me and
-  // the workspace actually has a session to render. Previously the provider
-  // promise completed first, the button/form became active again, and users
-  // understandably tried to sign in several more times while /me was still in
-  // flight.
+  // the workspace actually has a session to render.
   const establishSession=useCallback(async()=>{
     const user=await request('/me');
     setSession({token:null,user});
@@ -76,15 +73,12 @@ export function ApiProvider({baseUrl='',role,children}) {
           const outcome=await completeRedirectSignIn(data.firebase).catch(error=>({user:null,error}));
           if(outcome && !cancelled){
             const destination=takeReturnPath();
-            if(outcome.user){
-              try{
-                await establishSession();
-                if(!cancelled)window.history.replaceState({},'',destination);
-              }catch(error){
-                if(!cancelled){setSession(null);setAuth(a=>({...a,error:error.message}));}
-                if(error?.code==='REGISTRATION_SUSPENDED')await signOutFirebase(data.firebase).catch(()=>{});
-              }
-            }
+            // A redirect completes during the same effect that first publishes
+            // Firebase config. Do not call /me from this stale render: the
+            // authorization callback still sees auth.firebase=null. Clean the
+            // URL here; the auth-state listener below runs after the state
+            // commit and establishes the LeRoutier session with a real token.
+            if(outcome.user)window.history.replaceState({},'',destination);
             else setAuth(a=>({...a,error:outcome.error?.message ?? 'La connexion a échoué. Réessayez.'}));
           }
         }
@@ -93,7 +87,7 @@ export function ApiProvider({baseUrl='',role,children}) {
       }
     })();
     return()=>{cancelled=true;};
-  },[base,establishSession]);
+  },[base]);
 
   useEffect(()=>{
     if(!auth.firebase)return;
@@ -117,8 +111,6 @@ export function ApiProvider({baseUrl='',role,children}) {
   const login=useCallback(async()=>{
     if(!auth.firebase)throw new Error('La connexion sécurisée n’est pas encore configurée.');
     const firebaseUser=await signInWithGoogle(auth.firebase,window.location.pathname+window.location.search);
-    // Redirect sign-in navigates away and therefore has no user to establish
-    // on this page. Popup sign-in stays here, so complete /me before resolving.
     if(firebaseUser)await establishSession();
   },[auth.firebase,establishSession]);
 
