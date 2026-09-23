@@ -68,7 +68,9 @@ test('production login unavailable fails closed without token input or demo logi
   await isolateProvider(page);
   await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: { demoLogin: false, firebase: null } } }));
   await page.goto('http://127.0.0.1:4173/account');
-  await expect(page.getByRole('button', { name: 'Connexion indisponible' })).toBeDisabled();
+  // No configured identity provider: no Google button, no form — an honest
+  // message instead of an entry that can only fail.
+  await expect(page.getByRole('button', { name: 'Continuer avec Google' })).toHaveCount(0);
   await expect(page.getByText('La connexion sécurisée n’est pas encore configurée.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connexion de développement' })).toHaveCount(0);
   // No password field, no token box: there is no second way in.
@@ -123,7 +125,10 @@ test('a passenger completes their profile and signs out leaving nothing behind',
   await expect(page).toHaveURL(/\/tickets\//, { timeout: 15000 });
 
   await page.getByRole('button', { name: 'Déconnexion' }).click();
-  await expect(page.getByRole('button', { name: 'Connexion indisponible' })).toBeVisible();
+  // The development fixture has no configured identity provider: the entry
+  // after sign-out is the local demo entry, never a dead Google button.
+  await expect(page.getByRole('button', { name: 'Connexion de développement' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continuer avec Google' })).toHaveCount(0);
 
   // Signing out leaves no authentication material anywhere a next user could
   // reach it — this is a shared handset at a station, not a personal laptop.

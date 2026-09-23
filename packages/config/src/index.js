@@ -19,6 +19,12 @@ export function authConfig(env = process.env) {
   const projectId = env.FIREBASE_PROJECT_ID;
   return {
     demoLogin: env.ALLOW_DEMO_LOGIN === 'true' && !env.VERCEL && env.NODE_ENV !== 'production',
+    // Google sign-in is a strict opt-in: the OAuth redirect URI was rejected
+    // by Google on the installed PWA, and a broken provider must never be
+    // offered. Unset (the production default) means hidden; setting
+    // GOOGLE_AUTH_ENABLED=true re-enables it — in Vercel for production, in
+    // the local env file for development. The implementation stays in place.
+    googleAuthEnabled: env.GOOGLE_AUTH_ENABLED === 'true',
     firebaseProjectId: projectId,
     // Issuer, audience and key set are **derived** from the project id, never
     // entered by hand. Firebase fixes all three, and a mistyped issuer or
@@ -370,9 +376,12 @@ export function publicAuthConfig(config) {
       ? {
         apiKey: web.apiKey, authDomain: web.authDomain,
         projectId: web.projectId, appId: web.appId,
-        // Identity and basic profile only. Nothing here asks for Gmail,
-        // Drive, Calendar or Contacts, and the privacy policy says so.
-        providers: ['google'],
+        // The UI derives what to offer from this list — a provider not listed
+        // here is not rendered, so hiding Google is one flag, not a screen
+        // edit. E-mail/password needs the Firebase identifiers above and
+        // stays available even when the list is empty. Google's scopes remain
+        // identity and basic profile only; the privacy policy says so.
+        providers: config.googleAuthEnabled ? ['google'] : [],
       }
       : null,
   };

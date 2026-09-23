@@ -16,6 +16,9 @@ const env = extra => ({
   FIREBASE_API_KEY: 'web-api-key-value',
   FIREBASE_AUTH_DOMAIN: `${PROJECT}.firebaseapp.com`,
   FIREBASE_APP_ID: '1:123:web:abc',
+  // Local development keeps Google available for regression work; the
+  // production default (absent) is tested separately below.
+  GOOGLE_AUTH_ENABLED: 'true',
   ...extra,
 });
 
@@ -57,6 +60,32 @@ test('a complete configuration is published to the browser', () => {
 test('only the four browser-facing identifiers, and the providers', () => {
   const published = publicAuthConfig(authConfig(env()));
   assert.deepEqual(Object.keys(published.firebase).sort(), ['apiKey', 'appId', 'authDomain', 'projectId', 'providers']);
+});
+
+// ---------------------------------------------------- the Google feature gate --
+test('Google sign-in is offered only when explicitly enabled', () => {
+  assert.deepEqual(publicAuthConfig(authConfig(env())).firebase.providers, ['google']);
+  assert.deepEqual(publicAuthConfig(authConfig(env({ GOOGLE_AUTH_ENABLED: 'false' }))).firebase.providers, []);
+});
+
+test('an absent or unrecognised flag hides Google — the production default', () => {
+  // Production sets nothing, and "nothing" must mean hidden: a broken OAuth
+  // provider is never offered by accident. Any value that is not literally
+  // 'true' behaves like unset.
+  assert.deepEqual(publicAuthConfig(authConfig(env({ GOOGLE_AUTH_ENABLED: undefined }))).firebase.providers, []);
+  for (const value of ['', 'TRUE', 'yes', '1', 'on', 'true ']) {
+    assert.deepEqual(publicAuthConfig(authConfig(env({ GOOGLE_AUTH_ENABLED: value }))).firebase.providers, [],
+      `${JSON.stringify(value)} must not enable Google`);
+  }
+});
+
+test('hiding Google never hides e-mail/password sign-in', () => {
+  // E-mail/password needs the same Firebase identifiers, not the provider
+  // list: the published config stays complete with an empty provider list.
+  const published = publicAuthConfig(authConfig(env({ GOOGLE_AUTH_ENABLED: undefined })));
+  assert.ok(published.firebase, 'the Firebase identifiers must still be published');
+  assert.deepEqual(published.firebase.providers, []);
+  assert.equal(published.firebase.apiKey, 'web-api-key-value');
 });
 
 test('nothing server-side is published alongside it', () => {

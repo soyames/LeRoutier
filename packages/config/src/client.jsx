@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { signInWithGoogle, completeRedirectSignIn, signOutFirebase, idToken, onAuthChange, takeReturnPath,
-  safeReturnPath, createAccountWithEmail, signInWithEmail, sendPasswordReset } from './firebase.js';
+  safeReturnPath, clearRedirectMarker, createAccountWithEmail, signInWithEmail, sendPasswordReset } from './firebase.js';
 import { clearQueuedActions } from './offline.js';
 
 const Context=createContext(null);
@@ -24,7 +24,7 @@ const ERROR_COPY={
 };
 
 export function ApiProvider({baseUrl='',role,children}) {
-  const [session,setSession]=useState(null),[auth,setAuth]=useState({loading:true,demoLogin:false,firebase:null,error:'',hydrating:false});
+  const [session,setSession]=useState(null),[auth,setAuth]=useState({loading:true,demoLogin:false,firebase:null,googleAuth:false,error:'',hydrating:false});
   const online=useSyncExternalStore(subscribe,()=>navigator.onLine,()=>true),base=baseUrl.replace(/\/$/,'');
   // Hoisted so the memoization dependency is exactly the value read: the
   // session object changes on every /me refresh, but session.token is only set
@@ -101,9 +101,19 @@ export function ApiProvider({baseUrl='',role,children}) {
         if(!response.ok)throw new Error();
         const {data}=await response.json();
         if(cancelled)return;
-        setAuth({loading:false,demoLogin:data.demoLogin===true,firebase:data.firebase ?? null,error:'',hydrating:false});
+        // The provider list is the one source of truth for what sign-in offers.
+        // A provider not listed is not rendered — and when the API says nothing
+        // about providers (an older API, a fixture), fail hidden.
+        const googleAuth=Array.isArray(data.firebase?.providers) && data.firebase.providers.includes('google');
+        setAuth({loading:false,demoLogin:data.demoLogin===true,firebase:data.firebase ?? null,googleAuth,error:'',hydrating:false});
 
-        if(data.firebase){
+        if(!googleAuth){
+          // The provider is disabled: a redirect attempt that started under an
+          // earlier configuration can no longer complete, and its "retry
+          // Google" error would describe a method the UI no longer offers.
+          // Drop the marker silently — the credential, if any, expired with it.
+          clearRedirectMarker();
+        }else if(data.firebase){
           const outcome=await completeRedirectSignIn(data.firebase).catch(error=>({user:null,error,returnTo:null}));
           if(outcome && !cancelled){
             if(outcome.user){
@@ -232,7 +242,8 @@ export function ApiProvider({baseUrl='',role,children}) {
   const value=useMemo(()=>({request,identity:session?.user,user:session?.user && roles.includes(session.user.role)?session.user:null,role,online,configured:!!base,
     // Hydrating (a redirect just delivered its user and /me is in flight) is
     // loading too: the login UI must not offer a second attempt mid-hydration.
-    demoLogin:auth.demoLogin,authLoading:auth.loading||auth.hydrating,authError:auth.error,canSignin:!!auth.firebase,login,loginDemo:demoLogin,logout,updateProfile,refresh,
+    demoLogin:auth.demoLogin,authLoading:auth.loading||auth.hydrating,authError:auth.error,canSignin:!!auth.firebase,
+    googleAuth:auth.googleAuth,login,loginDemo:demoLogin,logout,updateProfile,refresh,
     createAccount,loginEmail,resetPassword}),
   [request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles,createAccount,loginEmail,resetPassword]);
   return <Context.Provider value={value}>{children}</Context.Provider>;

@@ -19,7 +19,9 @@ test('with no identity provider the app fails closed and says so', async ({ page
   // Production shape: no OIDC block, no demo login.
   await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: { demoLogin: false, oidc: null } } }));
   await page.goto(APP + '/account');
-  await expect(page.getByRole('button', { name: 'Connexion indisponible' })).toBeDisabled();
+  // No configured provider: no Google button, no form — an honest message
+  // instead of an entry that can only fail.
+  await expect(page.getByRole('button', { name: 'Continuer avec Google' })).toHaveCount(0);
   await expect(page.getByText(/connexion sécurisée n’est pas encore configurée/)).toBeVisible();
   // No password or code entry is ever offered as a fallback.
   await expect(page.locator('input[type="password"]')).toHaveCount(0);

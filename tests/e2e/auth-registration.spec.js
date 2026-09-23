@@ -11,7 +11,7 @@ const APP = 'http://127.0.0.1:4173';
 const FIREBASE_HOST = /^(?:[a-z0-9-]+\.)*(?:googleapis\.com|google\.com|firebaseapp\.com|gstatic\.com)$/i;
 const FIREBASE = {
   apiKey: 'browser-test-api-key', authDomain: 'example.firebaseapp.com',
-  projectId: 'example-project', appId: '1:1:web:test',
+  projectId: 'example-project', appId: '1:1:web:test', providers: ['google'],
 };
 
 async function mockFirebase(page, { signUp = null, signIn = null, reset = null } = {}) {

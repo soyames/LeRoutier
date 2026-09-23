@@ -33,7 +33,7 @@ test('public sign-in config stays unavailable until complete',()=>{
   assert.equal(publicAuthConfig({firebaseWeb:FIREBASE_WEB}).firebase,null,'no project id must disable sign-in');
 });
 test('public sign-in config carries only browser-facing Firebase identifiers',()=>{
-  const result=publicAuthConfig({firebaseProjectId:'example-project',firebaseWeb:FIREBASE_WEB,
+  const result=publicAuthConfig({googleAuthEnabled:true,firebaseProjectId:'example-project',firebaseWeb:FIREBASE_WEB,
     databaseUrl:'private-placeholder',fedapay:{secretKey:'sk-private'},issuer:'https://securetoken.google.com/example-project'});
   assert.deepEqual(Object.keys(result.firebase).sort(),['apiKey','appId','authDomain','projectId','providers']);
   assert.deepEqual(result.firebase.providers,['google']);
@@ -43,4 +43,12 @@ test('public sign-in config carries only browser-facing Firebase identifiers',()
   for(const secret of ['private-placeholder','sk-private','securetoken.google.com','jwks']) {
     assert.equal(text.includes(secret),false,`${secret} reached the browser payload`);
   }
+});
+
+test('Google is hidden by default and e-mail/password configuration survives it',()=>{
+  // Production sets no flag; the published provider list must then be empty
+  // while the Firebase identifiers that e-mail/password needs stay present.
+  const result=publicAuthConfig({firebaseProjectId:'example-project',firebaseWeb:FIREBASE_WEB});
+  assert.deepEqual(result.firebase.providers,[]);
+  assert.equal(result.firebase.appId,FIREBASE_WEB.appId);
 });

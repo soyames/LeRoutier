@@ -34,6 +34,11 @@ console.log(`Production smoke against ${api}`);
     body.data.demoLogin === false ? ok('Auth config public; demo login disabled') : fail('Auth config', 'demo login enabled in production');
     body.data.firebase?.projectId && body.data.firebase?.apiKey && body.data.firebase?.authDomain && body.data.firebase?.appId
       ? ok('Firebase public configuration populated') : fail('Firebase public configuration','missing identifiers');
+    // Google sign-in stays hidden in production until GOOGLE_AUTH_ENABLED=true
+    // is set on the API. The published provider list is what the login UI
+    // renders from — empty means e-mail/password only.
+    Array.isArray(body.data.firebase?.providers) && !body.data.firebase.providers.includes('google')
+      ? ok('Google provider hidden in production config') : fail('Auth config','google provider still published');
     // The browser pins the branded auth origin itself; no localhost value may
     // ever be served as the auth domain, and no value may leak server-side
     // material.

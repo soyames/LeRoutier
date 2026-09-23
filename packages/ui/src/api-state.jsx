@@ -10,7 +10,7 @@ function isDriverApp(role){return Array.isArray(role)?role.includes('driver')||r
 // only — the LeRoutier API never sees them.
 export function SessionPanel({onWorkspace=undefined}) {
   const {user,identity,role,login,loginDemo,logout,demoLogin,configured,online,authLoading,authError,canSignin,
-    createAccount,loginEmail,resetPassword}=useSession();
+    googleAuth,createAccount,loginEmail,resetPassword}=useSession();
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const [mode,setMode]=useState('signin'); // signin | register | reset
   const [email,setEmail]=useState(''),[password,setPassword]=useState('');
@@ -61,8 +61,10 @@ export function SessionPanel({onWorkspace=undefined}) {
       {user?.needs_profile && <ProfileForm/>}</> : <>
       <h3>Bienvenue sur LeRoutier</h3>
       {authLoading ? <p role="status">Connexion en cours…</p> : <>
-        <button type="button" className="btn btn-primary" disabled={busy || !online || !canSignin} onClick={()=>run(login)}>
-          {busy?'Connexion en cours…':canSignin?'Continuer avec Google':'Connexion indisponible'}</button>
+        {/* The Google entry exists only when the published provider list says
+            so — one flag decides the whole surface, button and separator. */}
+        {googleAuth && <button type="button" className="btn btn-primary" disabled={busy || !online || !canSignin} onClick={()=>run(login)}>
+          {busy?'Connexion en cours…':canSignin?'Continuer avec Google':'Connexion indisponible'}</button>}
         {!canSignin && !demoLogin && <p role="status">La connexion sécurisée n’est pas encore configurée.</p>}
         {devSignIn && <button type="button" className="btn btn-soft" disabled={busy || !online} onClick={()=>run(loginDemo)}>Connexion de développement</button>}
         {devSignIn && Array.isArray(role) && role.length>1 && <div className="controls">
@@ -79,7 +81,7 @@ export function SessionPanel({onWorkspace=undefined}) {
             onClick={()=>run(async()=>{await loginDemo({profile});onWorkspace?.(path);})}>TEST : {label}</button>)}</div>
         </details>}
         {canSignin && mode==='signin' && <form className="stack" onSubmit={submitSignin}>
-          <p className="small muted">ou</p>
+          {googleAuth && <p className="small muted">ou</p>}
           <label>Adresse e-mail<input name="email" className="control" type="email" autoComplete="email" inputMode="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>
           <label>Mot de passe<input name="password" className="control" type="password" autoComplete="current-password" required minLength={6} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)}/></label>
           <button type="submit" className="btn btn-soft" disabled={busy || !online}>{busy?'Connexion en cours…':'Se connecter avec mon adresse e-mail'}</button>
