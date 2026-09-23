@@ -115,10 +115,11 @@ export function QrCapture({ onRead, accept = value => value, label = 'Scanner le
   }, [active]);
 
   useEffect(() => {
+    const gen = generation;
     const hide = () => { if (document.hidden) stop(); };
     document.addEventListener('visibilitychange', hide);
     return () => {
-      generation.current++;
+      gen.current++;
       scanner.current?.destroy();
       scanner.current = null;
       document.removeEventListener('visibilitychange', hide);

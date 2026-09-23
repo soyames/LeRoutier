@@ -41,9 +41,17 @@ product; these decide whether it may run at all.
 | An operator is onboarded, reviewed and published | 5.1, 5.4, 5.7 |
 | A reviewer can open a submitted document | 5.3 |
 | A crew phone survives a departure | 4.4 |
+| A parcel is handed off phone-to-phone | 3.1 |
+| A parcel is accepted and custody recorded | 3.3 |
+| A recipient is told their parcel is ready | 3.7 |
+| A parcel is collected with the right code | 3.8 |
 
 If parcels are part of the first pilot, add **3.1, 3.3, 3.7, 3.8**. If they are
 not, say so explicitly rather than leaving the parcel section ambiguous.
+
+**Decision (2026-09-23): parcels ARE part of the first pilot.** Rows **3.1,
+3.3, 3.7, 3.8** join the minimum pilot gate below. None has been physically
+performed yet.
 
 **Do not claim pilot readiness while any gate row is `NOT RUN`.**
 
@@ -66,6 +74,55 @@ answer.
   and that code is rate-limited per parcel.
 - KYC evidence is held privately, each reviewer grant expires, and a redaction
   really deletes the object. See `docs/KYC-EVIDENCE-STORAGE.md`.
+
+Proven by the 2026-09-23 field-validation pass (commit `c5fd68c` and its
+parents; every claim is an automated test, listed in the evidence map below):
+
+- A foreign QR really decoded from the camera stream is explained and the
+  camera keeps looking (`tests/e2e/field-readiness.spec.js`).
+- A denied camera names the manual fallback, and granting the permission
+  afterwards revives the scanner without reinstalling or signing in.
+- A torch control appears only where the camera reports one, and toggles.
+- An expired ticket is refused with the invalidation message; the manual code
+  answers the same rule (`services/api/tests/test-profiles.test.js`).
+- A reused idempotency key with a different payload is refused with
+  `IDEMPOTENCY_CONFLICT`, never double-applied.
+- Queued crew actions replay by themselves when the app reopens with a
+  connection, and when the signal returns; expired queued rows are dropped
+  from storage with their ticket codes (`packages/config/tests/auth-config.test.js`).
+- A 401 mid-replay returns the action to pending and names reconnection; three
+  failed attempts park it visibly and retry resets it.
+- GPS fixes captured without signal are buffered and flushed on reconnect;
+  a device with no usable position says so (`tests/e2e/tracking.spec.js`).
+- Boarding changes no capacity; alighting frees exactly the downstream
+  segments; an idempotent hold replay never writes a second set of segment
+  rows (`packages/domain/tests/capacity.test.js`,
+  `packages/database/tests/capacity.test.js`).
+- The journey planner and the trip screen share one freshness definition:
+  search never calls a fix live that tracking would call delayed
+  (`packages/database/tests/journey-planning.test.js`).
+- A screen whose lazy chunk fails mid-load keeps the shell and navigation
+  alive and recovers through a reload (`apps/web/src/App.jsx`,
+  `tests/e2e/field-readiness.spec.js`).
+- No ticket code stays on screen after signing out on a shared handset.
+
+## Automated evidence map
+
+Automated tests support a row; they never perform it. A row stays `NOT RUN`
+until a human holds the device.
+
+| Row | Automated evidence (2026-09-23 pass) |
+|---|---|
+| 1.1–1.6, 1.12 | `services/api/tests/test-profiles.test.js` (verify + board + replay + expiry + conflict), `packages/database/tests/*.test.js`, `tests/e2e/roles.live.spec.js` |
+| 1.7–1.11 | decoder exercised against real QR renders only; optics untested |
+| 1.13 | `tests/e2e/field-readiness.spec.js` (ticket QR visible, cleared on sign-out) |
+| 1.14–1.16 | `tests/e2e/field-readiness.spec.js` (denied/restored camera, background release, foreign QR) |
+| 2.2–2.4 | `tests/e2e/tracking.spec.js` (granted, denied, unavailable, offline buffer + flush) |
+| 2.8–2.9 | `packages/domain/tests/capacity.test.js`, `packages/database/tests/capacity.test.js` (segment model, alighting release, concurrency) |
+| 3.4 | `packages/database/tests/parcels.test.js` (scan replay never duplicates custody), offline queue tests |
+| 4.2–4.3, 4.12–4.13 | `tests/e2e/field-readiness.spec.js` (queue visible, restart replay, reconnect replay), `packages/config/tests/auth-config.test.js` (TTL, relogin, retry) |
+| 5.1–5.12 | `packages/database/tests/verification.test.js`, `onboarding.test.js`, `platform-access.test.js`, `privacy.test.js` |
+| 6 | `docs/PAYMENT-GO-LIVE.md` rows remain the authority |
 
 ## Devices
 
@@ -138,6 +195,9 @@ Full lifecycle with a real parcel, from a sender who has no printer.
 *Prerequisites: a published departure, a real package, a recipient reachable at
 the destination. Skip this section only if parcels are out of scope for the
 first pilot — and record that decision.*
+
+**Parcels are in scope for the first pilot (decision 2026-09-23).** Rows 3.1,
+3.3, 3.7 and 3.8 are part of the minimum pilot gate.
 
 | # | Test | Role · device | Environment | Expected | Status | Actual · evidence | Blocker |
 |---|---|---|---|---|---|---|---|
@@ -218,7 +278,7 @@ which rows were attempted. A row that was attempted and inconclusive is a
 
 | Session | Date | Present | Devices | Network | Rows attempted |
 |---|---|---|---|---|---|
-| | | | | | |
+| Automated field-validation pass (no physical session) | 2026-09-23 | Claude Code QA | none — headless Chromium + local Postgres only | local | 0 physical rows attempted; automated evidence recorded above |
 
 ### Tally
 
@@ -231,7 +291,7 @@ actually turns on.
 | FAIL | 0 |
 | BLOCKED | 0 |
 | NOT RUN | 69 |
-| **Gate criteria still unmet** | **12 of 12** |
+| **Gate criteria still unmet** | **16 of 16** (12 base + 4 parcels, decision 2026-09-23) |
 
 69 rows across five sections: 17 ticket QR, 12 trip and position, 13 parcel,
 15 device and field, 12 Platform Ops. None performed.
