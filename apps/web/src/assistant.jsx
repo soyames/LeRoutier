@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSession } from '@leroutier/config/client';
 import { MessagesSquare, RotateCcw, Send, Sparkles, X } from 'lucide-react';
+import { canPrompt, installSteps, isInstalled, promptInstall, INSTALL_VALUE } from './pwa-install.js';
 
 // LeRoutier Assistant.
 //
@@ -23,6 +24,12 @@ import { MessagesSquare, RotateCcw, Send, Sparkles, X } from 'lucide-react';
 // focus to whatever opened it; the thread is a polite live region.
 
 const WELCOME = 'Bonjour. Je réponds à partir des services réellement publiés : départs entre deux villes, tarifs, suivi de colis, état de vos réservations. Si aucune offre n’existe sur un trajet, je vous le dis plutôt que d’inventer un horaire.';
+
+// Answered here, not by the server. Installing is something only this browser
+// can do — the install dialog is a browser API tied to a user gesture, and no
+// round trip can open it. Routing this to /assistant would produce "je ne
+// comprends pas" for the one question the client can answer perfectly.
+export const INSTALL_QUESTION = 'Installer LeRoutier sur mon téléphone';
 
 // Grouped so the panel shows what the assistant is *for*, not a flat pile of
 // sentences. Each entry is a question the deterministic router recognises.
@@ -59,12 +66,18 @@ const SUGGESTION_GROUPS = [
   {
     title: 'Aide et données',
     items: [
+      INSTALL_QUESTION,
       'Aide et contact',
       'Quelles données avez-vous sur moi ?',
       'Comment télécharger mes données ?',
     ],
   },
 ];
+
+// Typed variants of the same request. The chip sends the exact sentence, but
+// somebody who types "installer l'appli sur mon téléphone" is asking for the
+// same thing and must not be told the assistant does not understand.
+const ASKS_ABOUT_INSTALL = /\b(install|t[ée]l[ée]charg)\w*\b.*\b(appli|app|leroutier|t[ée]l[ée]phone|portable|mobile|iphone|android|[ée]cran)\b/i;
 
 // What to offer once the server tells us which intent it just answered. Keyed
 // by that intent, so the next step follows the conversation instead of
@@ -82,7 +95,9 @@ const FOLLOW_UPS = {
   privacy_summary: ['Comment télécharger mes données ?', 'Aide et contact'],
   data_export: ['Quelles données avez-vous sur moi ?', 'Aide et contact'],
   account_deletion: ['Quelles données avez-vous sur moi ?', 'Aide et contact'],
-  support: ['Quels départs depuis Cotonou ?', 'Où en est mon colis ?'],
+  support: ['Quels départs depuis Cotonou ?', INSTALL_QUESTION],
+  // After installing, the next useful thing is using it.
+  install_app: ['Quels départs depuis Cotonou ?', 'Comment envoyer un colis ?', 'Aide et contact'],
 };
 const DEFAULT_FOLLOW_UPS = ['Quels départs depuis Cotonou ?', 'Où en est mon colis ?', 'Aide et contact'];
 
@@ -169,8 +184,45 @@ export function Assistant() {
     } finally { setBusy(false); }
   }, [request]);
 
+  /**
+   * Install, answered locally and immediately.
+   *
+   * On Chromium this opens the browser's own install dialog. That call has to
+   * happen inside the gesture that started it, so nothing is awaited before
+   * it: the two bubbles are queued synchronously, then the dialog opens. A
+   * dismissal is not a dead end — the manual steps follow, so somebody who
+   * tapped by accident still knows how to finish later.
+   */
+  const answerInstall = useCallback(async () => {
+    const ask = nextId(), reply = nextId();
+    setMessages(m => [...m, { id: ask, from: 'user', text: INSTALL_QUESTION },
+      { id: reply, from: 'assistant', busy: true }]);
+    const steps = installSteps();
+    let text;
+    if (isInstalled()) text = steps.text;
+    else if (canPrompt()) {
+      const outcome = await promptInstall();
+      text = outcome === 'installed'
+        ? 'C’est fait. LeRoutier est installé : vous le trouverez avec vos autres applications, et il s’ouvrira en plein écran sans barre de navigateur.'
+        : outcome === 'dismissed'
+          ? `Installation annulée, aucun problème. Pour la relancer plus tard : ${installSteps().text}`
+          : `${INSTALL_VALUE} ${installSteps().text}`;
+    } else text = `${INSTALL_VALUE} ${steps.text}`;
+    setMessages(m => m.map(x => x.id === reply ? { id: reply, from: 'assistant', text } : x));
+    setLastIntent('install_app');
+    setShowAll(false);
+  }, []);
+
   const send = useCallback(async text => {
     const message = String(text ?? '').trim();
+    // Before the online guard on purpose: installing is a local act and works
+    // perfectly with no network.
+    if (message === INSTALL_QUESTION || ASKS_ABOUT_INSTALL.test(message)) {
+      if (busy) return;
+      setDraft('');
+      await answerInstall();
+      return;
+    }
     if (!message || busy || !online) return;
     setDraft('');
     setShowAll(false);
@@ -180,7 +232,7 @@ export function Assistant() {
     const pending = nextId();
     setMessages(m => [...m, { id: nextId(), from: 'user', text: message }, { id: pending, from: 'assistant', busy: true }]);
     await resolve(pending, message);
-  }, [busy, online, resolve]);
+  }, [busy, online, resolve, answerInstall]);
 
   // Retrying reuses the failed bubble. The user asked once, so the thread
   // shows one question — not their words repeated under a stale error.

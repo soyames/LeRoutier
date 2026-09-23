@@ -12,6 +12,10 @@ import { LegalNotice, PrivacyPolicy, TermsOfUse, CancellationPolicy, CookiePolic
 import { Seo } from './seo.jsx';
 import { BusBeninPage, RoutePage, ColisBeninPage, StationsBeninPage, TransporteursBeninPage } from './seo-pages.jsx';
 import { CORRIDORS } from './corridors.js';
+// Imported for its side effect and imported EARLY: it listens for
+// `beforeinstallprompt`, which Chromium fires once, soon after load. Miss it
+// and the assistant can only describe the install instead of opening it.
+import './pwa-install.js';
 
 // VITE_API_URL may be an absolute API origin, or the literal "same-origin" to
 // call /api/v1 on whatever domain serves the app. Same-origin goes through the
