@@ -75,6 +75,22 @@ test('availability is real and zero seats are stated, not hidden',async()=>{
   assert.ok(plan.options.every(o=>Number.isInteger(o.available)&&o.available>=0));
 });
 
+test('a position the tracking screen would call delayed is never labelled live',async()=>{
+  // One shared definition of freshness: the trip screen downgrades a fix at
+  // 90 s, so the search card must not call the same fix "live" at 100 s.
+  await sql(`INSERT INTO vehicle_positions(service_id,vehicle_id,actor_id,latitude,longitude,observed_at)
+    VALUES($1,(SELECT id FROM vehicles ORDER BY id LIMIT 1),(SELECT id FROM users ORDER BY id LIMIT 1),7.18,2.07,now()-interval '100 seconds')`,[demo.service]);
+  const plan=await planner.plan({includeDemo:true,originStopId:demoId(200),destinationStopId:demoId(203)});
+  const option=plan.options.find(o=>o.serviceId===demo.service);
+  assert.ok(option?.livePosition,'the seeded fix is part of the offer');
+  assert.equal(option.livePosition.signal,'stale','100 s without a fix is not live anywhere in the product');
+  assert.equal(option.livePosition.ageSeconds>=90&&option.livePosition.ageSeconds<=120,true);
+
+  await sql(`UPDATE vehicle_positions SET observed_at=now()-interval '30 seconds' WHERE service_id=$1`,[demo.service]);
+  const refreshed=await planner.plan({includeDemo:true,originStopId:demoId(200),destinationStopId:demoId(203)});
+  assert.equal(refreshed.options.find(o=>o.serviceId===demo.service).livePosition.signal,'live','a 30 s fix is genuinely live');
+});
+
 test('an unreachable pickup is never presented as feasible',async()=>{
   // Departure in 3 hours, first mile far enough that walking + buffer fails.
   const far={latitude:6.75,longitude:2.4}; // ~44 km from Cotonou stop

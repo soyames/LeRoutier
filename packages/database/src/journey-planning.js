@@ -3,8 +3,9 @@
 import { invariant, uuid } from '@leroutier/domain';
 import { publicRating } from './ratings.js';
 import { describeAmenities } from './amenities.js';
+import { FRESHNESS } from '@leroutier/geo';
 
-const WALK_MPS=1.25,DETOUR_FACTOR=1.35,MAX_FIRST_MILE_M=20_000,MAX_NEARBY_STOP_M=30_000,LIVE_FIX_S=120;
+const WALK_MPS=1.25,DETOUR_FACTOR=1.35,MAX_FIRST_MILE_M=20_000,MAX_NEARBY_STOP_M=30_000;
 const hav=(a,b)=>{const R=6_371_000,rad=d=>(d*Math.PI)/180,dLat=rad(b.latitude-a.latitude),dLon=rad(b.longitude-a.longitude);const h=Math.sin(dLat/2)**2+Math.cos(rad(a.latitude))*Math.cos(rad(b.latitude))*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(h));};
 const walkLeg=distanceM=>({mode:'walking',distanceM:Math.round(distanceM*DETOUR_FACTOR),durationS:Math.round((distanceM*DETOUR_FACTOR)/WALK_MPS),source:'open_routing_estimate'});
 function normalizeGeometry(value,origin,destination){
@@ -13,7 +14,10 @@ function normalizeGeometry(value,origin,destination){
   const from=nearest(origin),to=nearest(destination);return from<to?value.slice(from,to+1):null;
 }
 
-export function journeyPlanning(db,{boardingBufferS=600,positionFreshSeconds=LIVE_FIX_S}={}){
+// The search card and the trip screen must agree on what "live" means: this
+// is the same FRESHNESS the tracking layer uses, so a position one screen
+// calls delayed is never sold as live by the other.
+export function journeyPlanning(db,{boardingBufferS=600,positionFreshSeconds=FRESHNESS.liveSeconds}={}){
   return {async plan(input={}){
     invariant(input&&typeof input==='object','INVALID_JOURNEY','Journey fields are invalid.');
     if(input.originStopId)uuid(input.originStopId);else if(input.origin)invariant(Number.isFinite(input.origin.latitude)&&Number.isFinite(input.origin.longitude)&&Math.abs(input.origin.latitude)<=90&&Math.abs(input.origin.longitude)<=180,'INVALID_JOURNEY','Origin coordinates are invalid.');else invariant(false,'INVALID_JOURNEY','An origin and a destination are required.',409);
