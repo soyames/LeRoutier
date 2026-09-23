@@ -71,5 +71,7 @@ pnpm-debug.log*
 #
 # Put machine-specific notes, scratch investigations and anything carrying
 # production internals under docs/local/ or name it *.local.md.
+docs
+docs/
 docs/local/
 docs/**/*.local.md
