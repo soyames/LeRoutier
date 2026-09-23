@@ -35,6 +35,11 @@ function useDriverQueue(userId, request) {
     refresh();
     const kick=()=>{sync();refresh();};
     window.addEventListener('online',kick);
+    // Reopening the app with a connection is a reconnect. Waiting for a
+    // network flap or for the crew to notice the badge and tap "Synchroniser
+    // maintenant" left passengers boarded hours earlier in limbo; a phone
+    // killed to save battery must not hold their tickets hostage.
+    if(navigator.onLine)sync();
     return()=>window.removeEventListener('online',kick);
   },[userId,sync]);
   const enqueue=useCallback((type,payload)=>{const row=queue.current?.enqueue(type,payload);refresh();if(navigator.onLine)sync();return row;},[sync]);
