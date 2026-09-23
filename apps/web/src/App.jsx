@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState } from 'react';
+import { Suspense, lazy, useState, Component } from 'react';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router';
 import { AppShell, Card, Badge, SectionTitle, SessionPanel, EmptyState } from '@leroutier/ui';
 import { useSession } from '@leroutier/config/client';
@@ -50,6 +50,27 @@ function trimTrailingSlashes(value) {
   let end = value.length;
   while (end > 1 && value.charCodeAt(end - 1) === 47) end--;
   return value.slice(0, end);
+}
+
+// A screen whose lazy chunk fails to load — the classic case is a network
+// drop mid-fetch on a moving vehicle — used to unmount the entire app, leaving
+// the crew staring at a blank handset while their queued work sat invisibly
+// behind it. The boundary keeps the shell and navigation alive, says what
+// happened in plain words, and retries by remounting the screen.
+class ScreenBoundary extends Component {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    if (this.state.failed) return <Card className="stack">
+      <SectionTitle icon={Radio} title="Écran indisponible"/>
+      <p className="small muted">Le chargement de cet écran a échoué, souvent à cause d’une coupure réseau. Vos actions déjà enregistrées sur l’appareil sont conservées.</p>
+      {/* A reload, not an in-place reset: React caches a rejected lazy chunk,
+          so re-rendering the same screen would fail again instantly. A fresh
+          page re-downloads the chunk and the queue lives in localStorage. */}
+      <div className="controls"><button className="btn btn-primary" onClick={() => window.location.reload()}>Recharger</button></div>
+    </Card>;
+    return this.props.children;
+  }
 }
 
 function TicketsRoute() {
@@ -251,7 +272,9 @@ export default function App() {
         Signing into operations and tapping "Colis" before the chunk arrived
         landed on the passenger parcel page, because that is whose nav was
         still rendered. On a slow connection that window is seconds. */}
-    <Suspense key={`${workspace}:${page}`} fallback={<Card><p role="status">Chargement de votre espace…</p></Card>}>{content}</Suspense>
+    <ScreenBoundary>
+      <Suspense key={`${workspace}:${page}`} fallback={<Card><p role="status">Chargement de votre espace…</p></Card>}>{content}</Suspense>
+    </ScreenBoundary>
   </AppShell>;
 
   if (!known) return <Navigate to={workspace===OPS&&can.platformOps?'/ops/platform':scoped.prefix || '/'} replace/>;
