@@ -403,6 +403,11 @@ export function Tickets({ focusId = null }) {
   const ticketOpener = useRef(null);
   const onlinePayments = paymentsConfig.data?.available === true;
 
+  // Signing out on a shared handset must take every ticket code off the screen.
+  // The list is hidden behind the sign-in panel, but the opened QR used to stay
+  // rendered until the next sign-in because the state outlived the session.
+  useEffect(() => { if (!user) { setOpenedTicket(null); setPayStates({}); setError(''); } }, [user]);
+
   // After returning from the payment page, poll trusted server state: only the
   // provider's verified callback can confirm a booking.
   const dataRef = useRef(bookings.data), reloadRef = useRef(bookings.reload);
