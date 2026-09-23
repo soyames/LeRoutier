@@ -56,9 +56,14 @@
 .steps{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;font-weight:800}
 .steps .step{display:flex;align-items:center;gap:6px;color:var(--muted)}
 .steps .step .num{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--soft);color:var(--muted);font-size:10px}
-.steps .step.active{color:var(--navy)}.steps .step.active .num{background:var(--primary);color:#fff}
+.steps .step.active{color:var(--navy)}.steps .step.active .num{background:var(--primary-strong);color:#fff}
 .steps .step.done{color:var(--green)}.steps .step.done .num{background:var(--green-soft);color:var(--green)}
-.steps .sep{color:#cbd5e1}
+/* --primary-strong, not --primary: white on #d97706 is 3.18:1 and the step
+   number is 10px, so it needed 4.5:1. #b45309 gives 4.77:1 and is the token
+   every other white-on-amber surface already uses. The separator was #cbd5e1
+   at 1.48:1 — present in the DOM, invisible on screen, which is the worst of
+   both. */
+.steps .sep{color:var(--muted)}
 
 /* ── Summary rail kept visible through a flow ─────────────────────────────── */
 .summary{background:var(--soft);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:6px}
@@ -282,7 +287,7 @@ summary{cursor:pointer;min-height:44px;padding-block:10px}
 .field>span:first-child{font-weight:700;color:var(--muted)}
 .field input,.field select,.field textarea{
   font:inherit;font-size:13px;padding:10px 12px;border:1px solid var(--line);
-  border-radius:12px;background:#fff;color:var(--navy);min-height:42px}
+  border-radius:12px;background:#fff;color:var(--navy);min-height:44px}
 .field input:focus-visible,.field select:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
 
 /* The insurance add-on.

@@ -5,7 +5,11 @@ test('passenger sends a parcel through a stepped flow and tracks it publicly',as
   // Session tokens are memory-only: navigate first, then sign in.
   await mockApi(page);
   await page.goto('http://127.0.0.1:4173/parcels');
-  await expect(page.getByText('Envoyez un colis entre les villes.')).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Envoyer un colis entre les villes' })).toBeVisible();
+  // Exactly one. The screen used to carry its own hero underneath the one the
+  // parcel shell already draws, so the page announced the same sentence twice
+  // as two competing <h1>s.
+  await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
   await page.getByRole('button',{name:'Connexion de développement'}).click();
 
   // Step 1 — where is it going. Only route fields are asked for here.

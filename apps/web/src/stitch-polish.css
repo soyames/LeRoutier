@@ -46,7 +46,11 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .lr-role-strip span{display:inline-flex;align-items:center;min-height:26px;padding:4px 10px;border-radius:999px;background:var(--lr-primary-soft);color:#6e3900!important}
 .lr-role-strip small{font-weight:600}
 .lr-header-actions>.badge{box-shadow:none}
-.icon-btn,.avatar-btn{min-width:42px!important;min-height:42px!important;border-radius:50%!important;box-shadow:none!important;border:1px solid rgba(216,227,251,.85)!important;background:rgba(255,255,255,.82)!important}
+/* 44, not 42. These two are the notification bell and the account button in
+   the header of every single screen, and this !important was quietly
+   overriding the `.btn,.control,.icon-btn{min-height:44px}` floor in the base
+   stylesheet — costing 2px on the most-present controls in the product. */
+.icon-btn,.avatar-btn{min-width:44px!important;min-height:44px!important;border-radius:50%!important;box-shadow:none!important;border:1px solid rgba(216,227,251,.85)!important;background:rgba(255,255,255,.82)!important}
 .workspace-switch{min-height:40px!important;border-radius:999px!important;background:var(--lr-surface-mid)!important;padding-inline:12px!important}
 .workspace-menu{background:rgba(249,249,255,.98);padding:8px;border-radius:18px;box-shadow:var(--lr-shadow);border:1px solid rgba(216,227,251,.85)}
 .workspace-menu button{border:0!important;background:transparent!important;border-radius:13px!important}

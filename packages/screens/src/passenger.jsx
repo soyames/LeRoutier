@@ -827,12 +827,12 @@ export function Parcels() {
   const canRoute = origin && destination && origin !== destination;
   const canPeople = receiverName.trim() && receiverPhone.trim() && senderName.trim() && senderPhone.trim();
 
+  // No hero here. ParcelExperience (passenger-entry.jsx) already wraps this
+  // screen in one — kicker, h1 and lead — and this card repeated all three,
+  // giving the page two <h1>s whose text was the same sentence in two moods:
+  // "Envoyer un colis entre les villes" above, "Envoyez un colis entre les
+  // villes." 200px below. The shell's hero is the one that survives.
   return <>
-    <Card className="hero stack">
-      <span className="eyebrow">Colis</span>
-      <h1>Envoyez un colis entre les villes.</h1>
-      <p>Remise en gare, transport sur les départs existants, retrait sécurisé par code.</p>
-    </Card>
     {error && <ErrorState title="Envoi impossible" text={error}/>}
 
     {label ? <Card className="card-success stack">
