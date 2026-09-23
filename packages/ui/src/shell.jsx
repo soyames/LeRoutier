@@ -24,7 +24,15 @@ export function AppShell({ role, title, subtitle, nav = [], active, onNavigate, 
             <Bell size={19}/>{unread > 0 && <span className="icon-badge" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>}
           </button>{avatar}</div>
       </div>
-      <div className="lr-role-strip"><span>{role}</span><small>{title} · LeRoutier Bénin</small></div>
+      {/* Where "what page am I on" lives below 720px, because .lr-page-title is
+          display:none there. Above 720px that title is already on screen two
+          elements away, so this half is hidden rather than repeated.
+
+          It used to read `{title} · LeRoutier Bénin`, which on the passenger
+          home — where the title IS "LeRoutier" — rendered "LeRoutier ·
+          LeRoutier Bénin". The brand name appeared four times in the top 100px
+          (logo, page title, its subtitle, and this), one of them stuttering. */}
+      <div className="lr-role-strip"><span>{role}</span><small>{title}</small></div>
     </header>
     <main className="lr-main" id="lr-content">{children}</main>
     {nav.length > 0 && <nav className="lr-bottom-nav" aria-label={`Navigation ${role}`}>{nav.map(item => { const Icon = item.icon; const selected = active === item.id; return <button key={item.id} className={selected ? 'active' : ''} onClick={() => onNavigate?.(item.id)} aria-current={selected ? 'page' : undefined}><Icon size={22}/><span>{item.label}</span></button>; })}</nav>}

@@ -145,7 +145,11 @@ export default function App() {
     notifications: <NotificationCentre onOpen={to => navigate(to)}/>,
   };
   const passengerTitles = {
-    '': 'LeRoutier', trips: 'Voyager', tickets: 'Mes billets', stations: 'Gares & arrêts',
+    // "Accueil", not "LeRoutier": this string is the answer to "what page am I
+    // on", shown in the header on desktop and in the role strip on a phone.
+    // The brand name answers a question nobody asked and is already on screen
+    // twice in the logo and the subtitle.
+    '': 'Accueil', trips: 'Voyager', tickets: 'Mes billets', stations: 'Gares & arrêts',
     parcels: 'Colis', tracking: 'Suivi', account: 'Mon compte', onboarding: 'Travailler avec LeRoutier',
     professionnel: 'Espace professionnel',
     checkout: 'Paiement', notifications: 'Notifications',

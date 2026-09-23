@@ -234,7 +234,7 @@ summary{cursor:pointer;min-height:44px;padding-block:10px}
 .qr-video{width:100%;max-height:55dvh;object-fit:cover;border-radius:16px}
 .manifest-row>div{min-width:0;overflow-wrap:anywhere}
 @media(max-width:640px){.workspace-switch{max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lr-header-main{gap:8px}.big-actions{grid-template-columns:1fr}.controls>.btn{min-height:48px}}
-@media(max-width:640px){.lr-header-actions>.badge{display:none}.lr-logo{width:100px}.lr-brand-wrap{flex-shrink:0}.lr-header-actions{min-width:0;gap:6px}.workspace-switch{max-width:120px;min-height:44px}.lr-header-main{padding-inline:12px}.lr-role-strip small{display:none}}
+@media(max-width:640px){.lr-header-actions>.badge{display:none}.lr-logo{width:100px}.lr-brand-wrap{flex-shrink:0}.lr-header-actions{min-width:0;gap:6px}.workspace-switch{max-width:120px;min-height:44px}.lr-header-main{padding-inline:12px}}
 .offer-details{border:0;width:100%;max-width:none;max-height:100%;margin:0;color:var(--navy)}
 .offer-details[open]{display:flex;flex-direction:column;gap:16px}
 .offer-details::backdrop{background:rgba(15,23,42,.5)}
@@ -305,3 +305,27 @@ summary{cursor:pointer;min-height:44px;padding-block:10px}
    transposed digit in a phone number is a policy nobody can issue. */
 .referral-block{margin:0;padding:12px;border-radius:12px;background:var(--soft);
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
+
+/* Which page am I on.
+   `.lr-page-title` only exists at >=720px, and the role strip's label used to
+   be hidden at <=640px — so between them a phone showed the role and nothing
+   else, while a desktop showed the page name twice. Backwards on both counts:
+   the small screen is where wayfinding is scarce. The label now carries the
+   page name below 720px and steps aside above it, so exactly one is on screen
+   at every width. */
+@media(min-width:720px){.lr-role-strip small{display:none}}
+
+/* Buttons do not inherit font-family. Four of them (.lr-brand-btn, .icon-btn,
+   .avatar-btn, .swap-btn) were therefore rendering in Arial while the other
+   234 elements on the page used Plus Jakarta Sans — visible today in the
+   signed-in user's initials in the header avatar. Fixed once at the element
+   rather than four times at the class, so the next button added is correct by
+   default. Class-level font-size/weight still win: this sets family only. */
+button,input,select,textarea{font-family:inherit}
+
+/* Touch targets are fixed where each control is defined, not here: the app's
+   polish layer loads after this file and carries !important, so a rule added
+   here would lose. See .corridor-pill and .swap-btn in stitch-polish.css.
+   Footer links stay at 32px — above the WCAG 2.5.8 AA floor of 24px, and
+   inflating 27 links to 44px would add ~320px of footer for no real gain in
+   reachability. */

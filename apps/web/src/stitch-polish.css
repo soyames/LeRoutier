@@ -97,9 +97,9 @@ overflow:hidden}
 .hero h1{font-size:clamp(26px,6vw,38px)!important;letter-spacing:-.035em!important;font-weight:800!important}
 .hero p{font-size:14px!important}
 .trip-search{gap:13px!important}
-.trip-endpoints{display:grid!important;grid-template-columns:minmax(0,1fr) 42px minmax(0,1fr)!important;align-items:end!important;gap:8px!important;padding:10px;border-radius:18px;background:rgba(240,243,255,.72)}
+.trip-endpoints{display:grid!important;grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr)!important;align-items:end!important;gap:8px!important;padding:10px;border-radius:18px;background:rgba(240,243,255,.72)}
 .endpoint-cell{min-width:0}
-.swap-btn{width:42px!important;height:42px!important;border-radius:50%!important;background:#fff!important;border:1px solid #dae2fd!important;color:var(--lr-primary-strong)!important;box-shadow:0 3px 10px rgba(15,23,42,.06)}
+.swap-btn{width:44px!important;height:44px!important;border-radius:50%!important;background:#fff!important;border:1px solid #dae2fd!important;color:var(--lr-primary-strong)!important;box-shadow:0 3px 10px rgba(15,23,42,.06)}
 .swap-btn:active:not(:disabled){transform:rotate(180deg)}
 .place-combobox{position:relative}
 .combobox-control{position:relative}
@@ -193,8 +193,12 @@ overflow:hidden}
   .lr-role-strip small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .lr-main{padding:14px!important;padding-bottom:98px!important;gap:14px!important}
   .card{padding:15px!important}
-  .trip-endpoints{grid-template-columns:1fr 38px 1fr!important;padding:8px!important}
-  .swap-btn{width:38px!important;height:38px!important}
+  /* The swap control sits between the two pickers a thumb is already aiming
+     at, so it was the worst thing on the page to shrink. This block used to
+     force it to 38px on exactly the devices where 44px is the floor (Apple
+     HIG, WCAG 2.5.5), overriding a base rule that was already correct. The
+     column it lives in widens to match. */
+  .trip-endpoints{grid-template-columns:1fr 44px 1fr!important;padding:8px!important}
   .results-summary{top:106px}
   /* On a phone the results summary was sticky between a sticky header and a
      fixed bottom navigation, and an offer card is taller than the band left
@@ -285,8 +289,11 @@ overflow:hidden}
    reachable without a swipe and nothing sits outside the card. */
 .corridor-pills{display:flex;flex-direction:column;gap:7px}
 .corridor-pill-row{display:flex;flex-wrap:wrap;gap:7px}
+/* 44px, not 38: these chips are the one-tap shortcut on the primary task
+   surface, so they are the most-tapped control in the product and the least
+   affordable place to sit under the Apple HIG / WCAG 2.5.5 floor. */
 .corridor-pill{border:1px solid var(--line);background:#fff;color:var(--navy);border-radius:999px;
-  padding:9px 13px;min-height:38px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;
+  padding:9px 13px;min-height:44px;font:inherit;font-size:12px;font-weight:700;cursor:pointer;
   display:inline-flex;align-items:center;gap:6px}
 .corridor-pill:hover{border-color:var(--lr-primary);color:var(--lr-primary-strong)}
 .corridor-pill:focus-visible{outline:3px solid rgba(177,95,0,.25);outline-offset:1px}
