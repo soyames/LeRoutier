@@ -1,15 +1,17 @@
 import { test, expect } from '@playwright/test';
 import { mockApi } from './api-fixture.js';
+import { CORRIDORS } from '../../apps/web/src/corridors.js';
 
 const APP = 'http://127.0.0.1:4173';
+
+// Every corridor in the catalogue is a real indexable page, checked by the
+// same rules as the hand-written ones. Adding a corridor adds a test.
+const corridorPages = CORRIDORS.map(c => [`/${c.slug}`, new RegExp(c.label), new RegExp(c.h1)]);
 
 const publicPages = [
   ['/', /Transport interurbain et colis au Bénin/, /Où allez-vous \?/],
   ['/bus-benin', /Bus et transport interurbain au Bénin/, /Bus et transport interurbain au Bénin/],
-  ['/cotonou-parakou', /Cotonou – Parakou/, /Transport Cotonou – Parakou/],
-  ['/cotonou-porto-novo', /Cotonou – Porto-Novo/, /Transport Cotonou – Porto-Novo/],
-  ['/cotonou-bohicon', /Cotonou – Bohicon/, /Transport Cotonou – Bohicon/],
-  ['/cotonou-natitingou', /Cotonou – Natitingou/, /Transport Cotonou – Natitingou/],
+  ...corridorPages,
   ['/colis-benin', /Envoi et suivi de colis/, /Envoi et suivi de colis au Bénin/],
   ['/gares-routieres-benin', /Gares routières/, /Gares routières et points d’embarquement au Bénin/],
   ['/transporteurs-benin', /Chauffeurs et compagnies/, /Chauffeurs indépendants et compagnies de transport au Bénin/],
@@ -49,7 +51,9 @@ test.describe('SEO foundations', () => {
     const robots = await (await request.get(APP + '/robots.txt')).text();
     expect(robots).toContain('Sitemap: https://leroutier.app/sitemap.xml');
     const sitemap = await (await request.get(APP + '/sitemap.xml')).text();
-    expect(sitemap).toContain('https://leroutier.app/cotonou-parakou');
+    // The sitemap is a static file while the corridors are code, so the one
+    // way they can disagree is somebody adding a corridor and forgetting it.
+    for (const corridor of CORRIDORS) expect(sitemap).toContain(`https://leroutier.app/${corridor.slug}`);
     expect(sitemap).toContain('https://leroutier.app/colis-benin');
     expect(sitemap).not.toContain('/work/');
     expect(sitemap).not.toContain('/ops/');

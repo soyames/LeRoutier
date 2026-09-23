@@ -245,6 +245,9 @@ overflow:hidden}
 .site-footer-group ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
 .site-footer-group a{color:var(--navy);text-decoration:none}
 .site-footer-group a:hover,.site-footer-group a:focus-visible{text-decoration:underline}
+/* The qualifier under a footer group. Smaller than the links it explains, and
+   allowed a wider measure than the column so it reads as a sentence. */
+.site-footer-note{margin:10px 0 0;font-size:11px;line-height:1.45}
 .site-footer-legal{margin-top:20px;padding-top:14px;border-top:1px solid var(--line);text-align:center}
 .site-footer-legal-links{display:flex;flex-wrap:wrap;justify-content:center;gap:8px 16px}
 .site-footer-legal p{margin:10px 0 0}

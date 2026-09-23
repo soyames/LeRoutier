@@ -1,38 +1,19 @@
 import { Link } from 'react-router';
 import { Card } from '@leroutier/ui';
 import { LegalFooter } from './legal.jsx';
+import { CORRIDORS, CORRIDOR_BY_SLUG, CORRIDOR_NOTE } from './corridors.js';
 
-const ROUTES = {
-  'cotonou-parakou': {
-    h1: 'Transport Cotonou – Parakou',
-    lead: 'Recherchez les services interurbains publiés entre Cotonou et Parakou, avec points d’embarquement, places disponibles et informations de trajet.',
-    keywords: ['bus Cotonou Parakou', 'transport Cotonou Parakou', 'billet Cotonou Parakou', 'voyage Cotonou Parakou', 'gare Cotonou Parakou'],
-  },
-  'cotonou-porto-novo': {
-    h1: 'Transport Cotonou – Porto-Novo',
-    lead: 'Préparez un déplacement interurbain entre Cotonou et Porto-Novo et consultez les services réellement publiés sur LeRoutier.',
-    keywords: ['bus Cotonou Porto-Novo', 'transport Cotonou Porto-Novo', 'billet Cotonou Porto-Novo', 'voyage Cotonou Porto-Novo'],
-  },
-  'cotonou-bohicon': {
-    h1: 'Transport Cotonou – Bohicon',
-    lead: 'Recherchez les départs disponibles entre Cotonou et Bohicon, les points de prise en charge et les informations utiles avant le voyage.',
-    keywords: ['bus Cotonou Bohicon', 'transport Cotonou Bohicon', 'billet Cotonou Bohicon', 'voyage Cotonou Bohicon'],
-  },
-  'cotonou-natitingou': {
-    h1: 'Transport Cotonou – Natitingou',
-    lead: 'Consultez les services publiés entre Cotonou et Natitingou, les arrêts, les places et les informations opérationnelles disponibles sur LeRoutier.',
-    keywords: ['bus Cotonou Natitingou', 'transport Cotonou Natitingou', 'billet Cotonou Natitingou', 'voyage Cotonou Natitingou'],
-  },
-};
-
+// The direction is shown beside each pair on purpose. Eight links out of a
+// single city read as the whole network; eight links labelled sud, est, ouest,
+// centre and nord read as a sample of a country.
 function SearchLinks() {
   return <div className="stack">
     <h2>Recherches populaires au Bénin</h2>
+    <p className="muted">{CORRIDOR_NOTE}</p>
     <div className="home-actions">
-      <Link className="home-action" to="/cotonou-parakou">Cotonou – Parakou</Link>
-      <Link className="home-action" to="/cotonou-porto-novo">Cotonou – Porto-Novo</Link>
-      <Link className="home-action" to="/cotonou-bohicon">Cotonou – Bohicon</Link>
-      <Link className="home-action" to="/cotonou-natitingou">Cotonou – Natitingou</Link>
+      {CORRIDORS.map(corridor => <Link className="home-action" key={corridor.slug} to={`/${corridor.slug}`}>
+        <span>{corridor.label}<small>{corridor.direction}</small></span>
+      </Link>)}
     </div>
   </div>;
 }
@@ -67,7 +48,7 @@ export function BusBeninPage() {
 }
 
 export function RoutePage({ slug }) {
-  const route = ROUTES[slug];
+  const route = CORRIDOR_BY_SLUG[slug];
   if (!route) return null;
   return <InfoLayout>
     <Card className="stack">

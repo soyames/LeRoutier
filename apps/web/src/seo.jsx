@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router';
+import { CORRIDORS } from './corridors.js';
 
 const ORIGIN = 'https://leroutier.app';
 const DEFAULT_IMAGE = `${ORIGIN}/icon-512.png`;
@@ -17,22 +18,9 @@ const PAGES = {
     title: 'Bus et transport interurbain au Bénin | LeRoutier',
     description: 'Recherchez les départs interurbains disponibles au Bénin, comparez les services publiés et trouvez vos points d’embarquement avec LeRoutier.',
   },
-  '/cotonou-parakou': {
-    title: 'Cotonou – Parakou : bus et transport | LeRoutier',
-    description: 'Préparez un trajet Cotonou–Parakou : recherchez les départs disponibles, les points d’embarquement, les places et le suivi proposés sur LeRoutier.',
-  },
-  '/cotonou-porto-novo': {
-    title: 'Cotonou – Porto-Novo : transport et bus | LeRoutier',
-    description: 'Recherchez les options de transport disponibles entre Cotonou et Porto-Novo, avec points d’embarquement et informations de trajet sur LeRoutier.',
-  },
-  '/cotonou-bohicon': {
-    title: 'Cotonou – Bohicon : bus et transport | LeRoutier',
-    description: 'Recherchez les trajets disponibles entre Cotonou et Bohicon et consultez les informations d’embarquement et de voyage avec LeRoutier.',
-  },
-  '/cotonou-natitingou': {
-    title: 'Cotonou – Natitingou : bus et transport | LeRoutier',
-    description: 'Préparez votre trajet Cotonou–Natitingou en recherchant les services disponibles, les horaires publiés et les points d’embarquement sur LeRoutier.',
-  },
+  // Corridor pages carry their own title and description in the catalogue, so
+  // a new corridor is indexable without a second edit here.
+  ...Object.fromEntries(CORRIDORS.map(c => [`/${c.slug}`, { title: c.title, description: c.description }])),
   '/colis-benin': {
     title: 'Envoi et suivi de colis entre villes au Bénin | LeRoutier',
     description: 'Envoyez et suivez un colis entre villes du Bénin avec une référence LeRoutier, un QR code, des étapes de garde et un retrait vérifié.',

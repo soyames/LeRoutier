@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
 import { Card, SectionTitle } from '@leroutier/ui';
+import { CORRIDORS, CORRIDOR_NOTE } from './corridors.js';
 
 const UPDATED = '17 septembre 2026';
 const SUPPORT_EMAIL = 'leroutierbj@gmail.com';
@@ -45,13 +46,10 @@ const FOOTER_GROUPS = [
   ] },
   // The corridor pages. They belong in a footer, where somebody looking for a
   // specific route can find them, rather than as a block of link text on the
-  // home page competing with the search box.
-  { title: 'Destinations', links: [
-    { to: '/cotonou-parakou', label: 'Cotonou – Parakou' },
-    { to: '/cotonou-porto-novo', label: 'Cotonou – Porto-Novo' },
-    { to: '/cotonou-bohicon', label: 'Cotonou – Bohicon' },
-    { to: '/cotonou-natitingou', label: 'Cotonou – Natitingou' },
-  ] },
+  // home page competing with the search box. "Populaires" and the note are
+  // load-bearing: an unqualified "Destinations" over a short list reads as the
+  // full extent of the service, which is the opposite of true.
+  { title: 'Destinations populaires', note: CORRIDOR_NOTE, links: CORRIDORS.map(c => ({ to: `/${c.slug}`, label: c.label })) },
   { title: 'Colis', links: [
     { to: '/parcels', label: 'Envoyer un colis' },
     { to: '/parcels/track', label: 'Suivre un colis' },
@@ -78,6 +76,7 @@ export function LegalFooter() {
       {FOOTER_GROUPS.map(group => <div key={group.title} className="site-footer-group">
         <h2>{group.title}</h2>
         <ul>{group.links.map(link => <li key={link.to + link.label}><Link to={link.to}>{link.label}</Link></li>)}</ul>
+        {group.note && <p className="site-footer-note muted">{group.note}</p>}
       </div>)}
     </nav>
     <div className="site-footer-legal muted">
