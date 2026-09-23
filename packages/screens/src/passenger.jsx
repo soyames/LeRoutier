@@ -81,7 +81,7 @@ export function PlaceCombobox({ label, placeholder, value, onSelect, onClear, in
 
 /**
  * The journey search fields, shared by the public home and the results
- * screen. Origin defaults to "Ma position actuelle"; both origin and
+ * screen. Origin defaults to "Ma position"; both origin and
  * destination are canonical Benin geography — never the route inventory.
  */
 export function JourneySearchFields({ originMode, setOriginMode, originPlace, setOriginPlace, destinationPlace, setDestinationPlace, day, setDay, onSearch, onSwap, submitLabel = 'Rechercher un trajet' }) {
@@ -93,16 +93,25 @@ export function JourneySearchFields({ originMode, setOriginMode, originPlace, se
       <div className="endpoint-cell">
         <label className="field" htmlFor="trip-origin">Départ
           <select id="trip-origin" className="control" aria-label="Départ" value={originMode} onChange={e => setOriginMode(e.target.value)}>
-            <option value="current">Ma position actuelle</option>
+            {/* "Ma position", not "Ma position actuelle": this cell is 120px on
+                a phone and a <select> truncates its own option, so the longer
+                label rendered as "Ma position" with the tail cut off anyway.
+                Same meaning, no visible amputation. */}
+            <option value="current">Ma position</option>
             <option value="place">Choisir une ville…</option>
           </select>
         </label>
-        {originMode === 'place' && <PlaceCombobox label="Ville de départ" placeholder="Rechercher une ville…" inputId="trip-origin-place"
+        {/* An example, not a restatement of the label above it. These cells are
+            120px wide on a phone, where "Rechercher une ville ou une localité"
+            rendered as "Rechercher une" and stopped mid-sentence. A city name
+            fits, and it also answers the question the label does not: what
+            kind of thing do I type here. */}
+        {originMode === 'place' && <PlaceCombobox label="Ville de départ" placeholder="Ex. Cotonou" inputId="trip-origin-place"
           value={originPlace} onSelect={setOriginPlace} onClear={() => setOriginPlace(null)}/>}
       </div>
       <button type="button" className="swap-btn" aria-label="Inverser départ et arrivée" disabled={!swappable} onClick={onSwap}><ArrowLeftRight size={17}/></button>
       <div className="endpoint-cell">
-        <PlaceCombobox label="Destination" placeholder="Rechercher une ville ou une localité" inputId="trip-destination"
+        <PlaceCombobox label="Destination" placeholder="Ex. Parakou" inputId="trip-destination"
           value={destinationPlace} onSelect={setDestinationPlace} onClear={() => setDestinationPlace(null)}/>
       </div>
     </div>
@@ -120,20 +129,24 @@ export function JourneySearchFields({ originMode, setOriginMode, originPlace, se
 // a corridor whose endpoints do not both exist simply is not shown, so this
 // can never advertise a route LeRoutier has no places for. Tapping one runs
 // the ordinary search, which still answers honestly when nothing is published.
-const CORRIDORS = [['Cotonou', 'Parakou'], ['Cotonou', 'Porto-Novo'], ['Cotonou', 'Bohicon'],
-  ['Cotonou', 'Abomey-Calavi'], ['Cotonou', 'Natitingou'], ['Cotonou', 'Ouidah']];
+//
+// The LIST itself arrives as a prop and is not defined here. It used to be a
+// second hardcoded array beside the footer's catalogue, and the two drifted:
+// the home page offered Abomey-Calavi and Ouidah, the footer offered
+// Sèmè-Kpodji, Lokossa, Malanville and Parakou–Natitingou, and only four pairs
+// appeared in both. One product, one answer to "where do people go".
 const foldName = value => String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
-function CorridorPills({ onPick }) {
+function CorridorPills({ corridors = [], onPick }) {
   const places = useApi('/places?type=commune');
   const byName = useMemo(() => {
     const index = new Map();
     for (const place of places.data || []) index.set(foldName(place.name), place);
     return index;
   }, [places.data]);
-  const available = useMemo(() => CORRIDORS
-    .map(([from, to]) => ({ from: byName.get(foldName(from)), to: byName.get(foldName(to)) }))
-    .filter(pair => pair.from && pair.to), [byName]);
+  const available = useMemo(() => corridors
+    .map(({ from, to }) => ({ from: byName.get(foldName(from)), to: byName.get(foldName(to)) }))
+    .filter(pair => pair.from && pair.to), [byName, corridors]);
   if (!available.length) return null;
   return <div className="corridor-pills">
     <span className="small muted" id="corridor-pills-label">Trajets fréquents</span>
@@ -145,7 +158,7 @@ function CorridorPills({ onPick }) {
   </div>;
 }
 
-export function TripSearchHero() {
+export function TripSearchHero({ corridors = [] }) {
   const navigate = useNavigate();
   const [originMode, setOriginMode] = useState('current');
   const [originPlace, setOriginPlace] = useState(null);
@@ -173,7 +186,7 @@ export function TripSearchHero() {
       originPlace={originPlace} setOriginPlace={setOriginPlace}
       destinationPlace={destinationPlace} setDestinationPlace={setDestinationPlace}
       day={day} setDay={setDay} onSearch={search} onSwap={swap}/>
-    <CorridorPills onPick={(from, to) => {
+    <CorridorPills corridors={corridors} onPick={(from, to) => {
       const params = new URLSearchParams({ date: day, from: `place:${from}`, to: `place:${to}` });
       if (new URLSearchParams(window.location.search).get('testMode') === '1') params.set('testMode', '1');
       navigate(`/trips?${params}`);

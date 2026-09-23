@@ -4,6 +4,7 @@ import { Card, SectionTitle } from '@leroutier/ui';
 import { TripSearchHero } from '@leroutier/screens/passenger';
 import { Package, Navigation, MessagesSquare } from 'lucide-react';
 import { LegalFooter } from './legal.jsx';
+import { CORRIDORS } from './corridors.js';
 
 // One public entry point, led by the single most important task: find a trip.
 // Passenger intent dominates; operator entry is present but clearly secondary,
@@ -16,7 +17,10 @@ export function Home() {
     { icon: Navigation, label: 'Suivre un colis', hint: 'Avec un numéro de suivi', to: '/parcels/track' },
   ];
   return <div className="stack">
-    <TripSearchHero/>
+    {/* The same catalogue the footer lists under "Destinations populaires".
+        The search chips and the footer are two views of one answer to "where
+        do people go", so they cannot disagree. */}
+    <TripSearchHero corridors={CORRIDORS}/>
 
     <SectionTitle title="Envoyer et suivre"/>
     <div className="home-actions">

@@ -18,6 +18,8 @@ export const CORRIDORS = [
   {
     slug: 'cotonou-porto-novo',
     label: 'Cotonou – Porto-Novo',
+    from: 'Cotonou',
+    to: 'Porto-Novo',
     direction: 'Sud',
     title: 'Cotonou – Porto-Novo : transport et bus | LeRoutier',
     description: 'Recherchez les options de transport disponibles entre Cotonou et Porto-Novo, avec points d’embarquement et informations de trajet sur LeRoutier.',
@@ -28,6 +30,8 @@ export const CORRIDORS = [
   {
     slug: 'cotonou-seme-kpodji',
     label: 'Cotonou – Sèmè-Kpodji',
+    from: 'Cotonou',
+    to: 'Sèmè-Kpodji',
     direction: 'Est',
     title: 'Cotonou – Sèmè-Kpodji : bus et transport | LeRoutier',
     description: 'Recherchez les services disponibles entre Cotonou et Sèmè-Kpodji, sur l’axe est du Bénin, avec points d’embarquement et informations de trajet sur LeRoutier.',
@@ -38,6 +42,8 @@ export const CORRIDORS = [
   {
     slug: 'cotonou-lokossa',
     label: 'Cotonou – Lokossa',
+    from: 'Cotonou',
+    to: 'Lokossa',
     direction: 'Ouest',
     title: 'Cotonou – Lokossa : bus et transport | LeRoutier',
     description: 'Recherchez les trajets disponibles entre Cotonou et Lokossa, sur l’axe ouest par Ouidah et Comè, et consultez les informations d’embarquement sur LeRoutier.',
@@ -48,6 +54,8 @@ export const CORRIDORS = [
   {
     slug: 'cotonou-bohicon',
     label: 'Cotonou – Bohicon',
+    from: 'Cotonou',
+    to: 'Bohicon',
     direction: 'Centre',
     title: 'Cotonou – Bohicon : bus et transport | LeRoutier',
     description: 'Recherchez les trajets disponibles entre Cotonou et Bohicon et consultez les informations d’embarquement et de voyage avec LeRoutier.',
@@ -58,6 +66,8 @@ export const CORRIDORS = [
   {
     slug: 'cotonou-parakou',
     label: 'Cotonou – Parakou',
+    from: 'Cotonou',
+    to: 'Parakou',
     direction: 'Centre',
     title: 'Cotonou – Parakou : bus et transport | LeRoutier',
     description: 'Préparez un trajet Cotonou–Parakou : recherchez les départs disponibles, les points d’embarquement, les places et le suivi proposés sur LeRoutier.',
@@ -68,6 +78,8 @@ export const CORRIDORS = [
   {
     slug: 'cotonou-natitingou',
     label: 'Cotonou – Natitingou',
+    from: 'Cotonou',
+    to: 'Natitingou',
     direction: 'Nord-Ouest',
     title: 'Cotonou – Natitingou : bus et transport | LeRoutier',
     description: 'Préparez votre trajet Cotonou–Natitingou en recherchant les services disponibles, les horaires publiés et les points d’embarquement sur LeRoutier.',
@@ -78,6 +90,8 @@ export const CORRIDORS = [
   {
     slug: 'cotonou-malanville',
     label: 'Cotonou – Malanville',
+    from: 'Cotonou',
+    to: 'Malanville',
     direction: 'Nord',
     title: 'Cotonou – Malanville : bus et transport | LeRoutier',
     description: 'Préparez un trajet Cotonou–Malanville sur l’axe nord du Bénin : services publiés, points d’embarquement, segments et informations de voyage sur LeRoutier.',
@@ -90,6 +104,8 @@ export const CORRIDORS = [
     // and a list that never leaves the capital says the opposite.
     slug: 'parakou-natitingou',
     label: 'Parakou – Natitingou',
+    from: 'Parakou',
+    to: 'Natitingou',
     direction: 'Nord',
     title: 'Parakou – Natitingou : bus et transport | LeRoutier',
     description: 'Recherchez les services disponibles entre Parakou et Natitingou par Djougou, avec points d’embarquement et informations de trajet sur LeRoutier.',
