@@ -28,7 +28,13 @@ const BUFFER_MAX_AGE_MS = 30 * 60_000;
  * @param {{ serviceId: string|null, enabled: boolean, request: Function,
  *   options?: { minMetres?: number, maxSeconds?: number, maxAccuracyM?: number } }} params
  */
-export function useVehicleTracking({ serviceId, enabled, request, options = {} }) {
+// A stable default keeps the capture effect from re-running on unrelated
+// renders. A fresh {} per render re-registered watchPosition and re-subscribed
+// the online listeners every time — and the listener swap during the
+// reconnect's synchronous re-render dropped the very event that was supposed
+// to flush the buffered fixes.
+const DEFAULT_OPTIONS = Object.freeze({});
+export function useVehicleTracking({ serviceId, enabled, request, options = DEFAULT_OPTIONS }) {
   // Only the browser's own callbacks move this; the states that follow
   // directly from the inputs are derived below rather than stored.
   const [watchState, setWatchState] = useState(null);
@@ -100,7 +106,13 @@ export function useVehicleTracking({ serviceId, enabled, request, options = {} }
       { enableHighAccuracy: true, maximumAge: 10_000, timeout: 20_000 },
     );
 
-    const onOnline = () => { setWatchState(TRACKING_STATE.active); flush(); };
+    const onOnline = () => { setWatchState(TRACKING_STATE.active); flush();
+      // Some browsers deliver the online event before navigator.onLine has
+      // settled, which makes flush() bail on its own guard and leaves the
+      // buffer waiting for the next movement fix. One retry on the next tick
+      // drains it either way; the sending/onLine guards make it a no-op when
+      // the first attempt already landed.
+      setTimeout(flush, 250); };
     const onOffline = () => setWatchState(TRACKING_STATE.offline);
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
