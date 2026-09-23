@@ -17,13 +17,32 @@ export function SessionPanel({onWorkspace=undefined}) {
   const [regName,setRegName]=useState(''),[regPhone,setRegPhone]=useState('');
   async function run(action){setBusy(true);setError('');setNotice('');
     try{await action();}catch(e){setError(e.message);}finally{setBusy(false);}}
-  async function submitSignin(e){e.preventDefault();setBusy(true);setError('');
-    try{await loginEmail({email,password});}catch(e){setError(e.message);}finally{setBusy(false);}}
+
+  // Mobile password managers and browser autofill can paint values into inputs
+  // without dispatching React's onChange in time. The visible form is the
+  // authoritative value at submit time; reading FormData prevents a phone from
+  // showing credentials while Firebase receives stale empty state.
+  function submitted(form,name,fallback=''){
+    const value=new FormData(form).get(name);
+    return typeof value==='string'?value:fallback;
+  }
+  async function submitSignin(e){e.preventDefault();setBusy(true);setError('');setNotice('');
+    const submittedEmail=submitted(e.currentTarget,'email',email).trim();
+    const submittedPassword=submitted(e.currentTarget,'password',password);
+    setEmail(submittedEmail);setPassword(submittedPassword);
+    try{await loginEmail({email:submittedEmail,password:submittedPassword});}catch(e){setError(e.message);}finally{setBusy(false);}}
   async function submitRegister(e){e.preventDefault();setBusy(true);setError('');setNotice('');
-    try{await createAccount({email,password,displayName:regName,phone:regPhone});}
+    const form=e.currentTarget;
+    const submittedEmail=submitted(form,'email',email).trim();
+    const submittedPassword=submitted(form,'password',password);
+    const submittedName=submitted(form,'displayName',regName).trim();
+    const submittedPhone=submitted(form,'phone',regPhone).trim();
+    setEmail(submittedEmail);setPassword(submittedPassword);setRegName(submittedName);setRegPhone(submittedPhone);
+    try{await createAccount({email:submittedEmail,password:submittedPassword,displayName:submittedName,phone:submittedPhone});}
     catch(e){setError(e.message);}finally{setBusy(false);}}
   async function submitReset(e){e.preventDefault();setBusy(true);setError('');setNotice('');
-    try{setNotice(await resetPassword(email));}catch(e){setError(e.message);}finally{setBusy(false);}}
+    const submittedEmail=submitted(e.currentTarget,'email',email).trim();setEmail(submittedEmail);
+    try{setNotice(await resetPassword(submittedEmail));}catch(e){setError(e.message);}finally{setBusy(false);}}
   // Compiled out of any Vercel build; see developmentSignIn in vite.config.js.
   // The API refuses /auth/demo there anyway, so this removes a description of
   // the bypass from the bundle rather than a control from the product.
@@ -31,7 +50,7 @@ export function SessionPanel({onWorkspace=undefined}) {
   if(!configured) return <Card><p role="status">Connexion au service indisponible. Réessayez ultérieurement.</p></Card>;
   return <Card className="stack">
     {!online && <p role="status">Hors ligne : les actions nécessitent une connexion.</p>}
-    {identity ? <><div className="between"><span>{identity.display_name || 'Compte connecté'}</span><button className="btn btn-soft" disabled={busy} onClick={()=>run(logout)}>Déconnexion</button></div>
+    {identity ? <><div className="between"><span>{identity.display_name || 'Compte connecté'}</span><button type="button" className="btn btn-soft" disabled={busy} onClick={()=>run(logout)}>Déconnexion</button></div>
       {!user && <p role="status">
         {isDriverApp(role) && identity.role==='convoyeur' && 'Votre compte convoyeur est actif : utilisez la console Conducteur en mode convoyeur.'}
         {isDriverApp(role) && identity.role==='ops' && 'Votre compte administrateur s’utilise dans le centre opérationnel (app Ops), pas dans la console conducteur.'}
@@ -42,12 +61,12 @@ export function SessionPanel({onWorkspace=undefined}) {
       {user?.needs_profile && <ProfileForm/>}</> : <>
       <h3>Bienvenue sur LeRoutier</h3>
       {authLoading ? <p role="status">Connexion en cours…</p> : <>
-        <button className="btn btn-primary" disabled={busy || !online || !canSignin} onClick={()=>run(login)}>
-          {canSignin?'Continuer avec Google':'Connexion indisponible'}</button>
+        <button type="button" className="btn btn-primary" disabled={busy || !online || !canSignin} onClick={()=>run(login)}>
+          {busy?'Connexion en cours…':canSignin?'Continuer avec Google':'Connexion indisponible'}</button>
         {!canSignin && !demoLogin && <p role="status">La connexion sécurisée n’est pas encore configurée.</p>}
-        {devSignIn && <button className="btn btn-soft" disabled={busy || !online} onClick={()=>run(loginDemo)}>Connexion de développement</button>}
+        {devSignIn && <button type="button" className="btn btn-soft" disabled={busy || !online} onClick={()=>run(loginDemo)}>Connexion de développement</button>}
         {devSignIn && Array.isArray(role) && role.length>1 && <div className="controls">
-          {role.map(r=><button key={r} className="control" disabled={busy || !online}
+          {role.map(r=><button type="button" key={r} className="control" disabled={busy || !online}
             onClick={()=>run(()=>loginDemo(r))}>Développement : {r}</button>)}
         </div>}
         {devSignIn && <details className="stack"><summary>Profils TEST : tous les espaces</summary>
@@ -56,14 +75,14 @@ export function SessionPanel({onWorkspace=undefined}) {
             ['passenger','Voyageur','/tickets'],['owner-driver','Chauffeur indépendant','/work/today'],
             ['company-driver','Conducteur de compagnie','/work/today'],['convoyeur','Convoyeur','/work/today'],
             ['company-ops','Exploitation compagnie','/ops/today'],['platform-ops','Exploitation plateforme','/ops/today'],
-          ].map(([profile,label,path])=><button key={profile} className="btn btn-soft" disabled={busy || !online}
+          ].map(([profile,label,path])=><button type="button" key={profile} className="btn btn-soft" disabled={busy || !online}
             onClick={()=>run(async()=>{await loginDemo({profile});onWorkspace?.(path);})}>TEST : {label}</button>)}</div>
         </details>}
         {canSignin && mode==='signin' && <form className="stack" onSubmit={submitSignin}>
           <p className="small muted">ou</p>
-          <label>Adresse e-mail<input className="control" type="email" autoComplete="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>
-          <label>Mot de passe<input className="control" type="password" autoComplete="current-password" required minLength={6} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)}/></label>
-          <button className="btn btn-soft" disabled={busy || !online}>Se connecter avec mon adresse e-mail</button>
+          <label>Adresse e-mail<input name="email" className="control" type="email" autoComplete="email" inputMode="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>
+          <label>Mot de passe<input name="password" className="control" type="password" autoComplete="current-password" required minLength={6} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)}/></label>
+          <button type="submit" className="btn btn-soft" disabled={busy || !online}>{busy?'Connexion en cours…':'Se connecter avec mon adresse e-mail'}</button>
           <div className="between wrap">
             <button type="button" className="footer-link" onClick={()=>{setMode('reset');setNotice('');setError('');}}>Mot de passe oublié ?</button>
             <button type="button" className="footer-link" onClick={()=>{setMode('register');setNotice('');setError('');}}>Pas encore de compte ? Créer un compte</button>
@@ -71,19 +90,19 @@ export function SessionPanel({onWorkspace=undefined}) {
         </form>}
         {canSignin && mode==='register' && <form className="stack" onSubmit={submitRegister}>
           <h3>Créer un compte</h3>
-          <label>Nom complet<input className="control" autoComplete="name" required minLength={2} maxLength={100} value={regName} onChange={e=>setRegName(e.target.value)}/></label>
-          <label>Téléphone<input className="control" type="tel" autoComplete="tel" maxLength={30} value={regPhone} onChange={e=>setRegPhone(e.target.value)}/></label>
-          <label>Adresse e-mail<input className="control" type="email" autoComplete="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>
-          <label>Mot de passe<input className="control" type="password" autoComplete="new-password" required minLength={6} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)}/></label>
-          <button className="btn btn-primary" disabled={busy || !online}>Créer mon compte</button>
+          <label>Nom complet<input name="displayName" className="control" autoComplete="name" required minLength={2} maxLength={100} value={regName} onChange={e=>setRegName(e.target.value)}/></label>
+          <label>Téléphone<input name="phone" className="control" type="tel" autoComplete="tel" maxLength={30} value={regPhone} onChange={e=>setRegPhone(e.target.value)}/></label>
+          <label>Adresse e-mail<input name="email" className="control" type="email" autoComplete="email" inputMode="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>
+          <label>Mot de passe<input name="password" className="control" type="password" autoComplete="new-password" required minLength={6} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)}/></label>
+          <button type="submit" className="btn btn-primary" disabled={busy || !online}>{busy?'Création en cours…':'Créer mon compte'}</button>
           <button type="button" className="footer-link" onClick={()=>{setMode('signin');setNotice('');setError('');}}>J’ai déjà un compte</button>
           <p className="small muted">En créant un compte, vous acceptez nos <a href="/terms">conditions d’utilisation</a> et notre <a href="/privacy">politique de confidentialité</a>.</p>
         </form>}
         {canSignin && mode==='reset' && <form className="stack" onSubmit={submitReset}>
           <h3>Mot de passe oublié ?</h3>
           <p className="small muted">Nous vous enverrons un lien de réinitialisation à cette adresse.</p>
-          <label>Adresse e-mail<input className="control" type="email" autoComplete="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>
-          <button className="btn btn-soft" disabled={busy || !online}>Envoyer le lien</button>
+          <label>Adresse e-mail<input name="email" className="control" type="email" autoComplete="email" inputMode="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>
+          <button type="submit" className="btn btn-soft" disabled={busy || !online}>{busy?'Envoi en cours…':'Envoyer le lien'}</button>
           <button type="button" className="footer-link" onClick={()=>{setMode('signin');setNotice('');setError('');}}>Retour à la connexion</button>
         </form>}
       </>}
@@ -101,7 +120,7 @@ export function ProfileForm(){
   return <form className="stack" onSubmit={save}><h3>{user?.needs_profile?'Complétez votre profil':'Votre profil'}</h3>
     <label>Nom complet<input className="control" autoComplete="name" required minLength={2} maxLength={100} value={name} onChange={e=>setName(e.target.value)}/></label>
     <label>Téléphone<input className="control" type="tel" autoComplete="tel" maxLength={30} value={phone} onChange={e=>setPhone(e.target.value)}/></label>
-    <button className="btn btn-primary" disabled={busy || !online || !name.trim()}>Enregistrer mon profil</button>
+    <button type="submit" className="btn btn-primary" disabled={busy || !online || !name.trim()}>Enregistrer mon profil</button>
     {error && <p role="alert">{error}</p>}{saved && <p role="status">Profil enregistré.</p>}
   </form>;
 }
