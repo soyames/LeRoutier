@@ -4,57 +4,97 @@ import QrScanner from 'qr-scanner';
 /**
  * The one camera reader in the product.
  *
- * There were three: this one, and two copies inside the crew console for
- * tickets and for parcels. They drifted, as copies do — only this one stopped
- * the camera when the app went to the background, so a driver who switched to
- * their maps app left the camera running on the crew screens. Whatever is
- * learned about reading a code in the field now gets learned once.
- *
- * `accept` decides what counts as a hit, so the caller states which codes it
- * wants instead of every scanner having its own inline regular expression and
- * its own idea of what a wrong code means.
- *
- * @param {{
- *   onRead: (value: string) => void,
- *   accept?: (value: string) => string | null,
- *   label?: string,
- *   rejectText?: string,
- *   deniedText?: string,
- * }} props
+ * `accept` decides what counts as a hit, so each caller states which LeRoutier
+ * codes it accepts while camera lifecycle and mobile behaviour stay shared.
  */
 export function QrCapture({ onRead, accept = value => value, label = 'Scanner le QR',
   rejectText = 'Ce QR ne correspond pas à un code LeRoutier.',
   deniedText = 'Caméra indisponible. Autorisez la caméra dans votre navigateur, ou saisissez le code ci-dessous.' }) {
-  const video = useRef(null), scanner = useRef(null), generation = useRef(0);
-  const [active, setActive] = useState(false), [error, setError] = useState('');
+  const video = useRef(null), scanner = useRef(null), generation = useRef(0), reading = useRef(false);
+  const acceptRef = useRef(accept), onReadRef = useRef(onRead), rejectTextRef = useRef(rejectText), deniedTextRef = useRef(deniedText);
+  const [active, setActive] = useState(false), [error, setError] = useState(''), [processing, setProcessing] = useState(false);
   const [torch, setTorch] = useState(null); // null = unknown/unsupported, boolean = available
+
+  useEffect(() => {
+    acceptRef.current = accept;
+    onReadRef.current = onRead;
+    rejectTextRef.current = rejectText;
+    deniedTextRef.current = deniedText;
+  }, [accept, onRead, rejectText, deniedText]);
 
   function stop() {
     generation.current++;
+    reading.current = false;
     scanner.current?.destroy();
     scanner.current = null;
     setActive(false);
     setTorch(null);
   }
 
-  // Starting the scanner in the click handler used to race React: the video
-  // still had the `hidden` attribute when QrScanner asked the browser to attach
-  // the camera stream. Real phones would grant permission while leaving no
-  // visible scanning surface. The click now only reveals the surface; this
-  // effect starts the camera after that render has committed.
+  function revealResult() {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const explicit = document.querySelector('main .card-success, main .summary');
+      const cards = [...document.querySelectorAll('main .card')].filter(node => node.getBoundingClientRect().height > 0);
+      const target = explicit || cards.at(-1);
+      target?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+      target?.querySelector?.('button, [href], input, [tabindex]:not([tabindex="-1"])')?.focus?.({ preventScroll: true });
+    }));
+  }
+
+  // The video is made visible first. The camera starts only after React has
+  // committed that render, avoiding the permission-granted-but-no-preview race
+  // seen on real phones.
   useEffect(() => {
     if (!active || !video.current) return undefined;
     const current = generation.current;
-    const instance = new QrScanner(video.current, result => {
-      if (current !== generation.current) return;
-      const value = accept(String(result.data ?? '').trim());
-      // A code that is not ours is reported and the camera stays on: the crew
-      // are holding a phone up to a parcel, and being dropped back to a dead
-      // screen for every stray barcode in the station is not usable.
-      if (!value) { setError(rejectText); return; }
-      stop();
-      onRead(value);
-    }, { highlightScanRegion: true, preferredCamera: 'environment', returnDetailedScanResult: true });
+
+    async function decoded(result) {
+      if (current !== generation.current || reading.current) return;
+      const raw = String(result?.data ?? result ?? '').trim();
+      const value = acceptRef.current(raw);
+      if (!value) {
+        setError(rejectTextRef.current);
+        return;
+      }
+
+      // A valid LeRoutier QR is a one-shot action. Stop the camera immediately
+      // so the same code cannot be decoded twice while its details are loading.
+      reading.current = true;
+      generation.current++;
+      scanner.current?.destroy();
+      scanner.current = null;
+      setActive(false);
+      setTorch(null);
+      setError('');
+      setProcessing(true);
+      try {
+        await onReadRef.current(value);
+        revealResult();
+      } finally {
+        reading.current = false;
+        setProcessing(false);
+      }
+    }
+
+    const instance = new QrScanner(video.current, decoded, {
+      preferredCamera: 'environment',
+      returnDetailedScanResult: true,
+      highlightScanRegion: true,
+      highlightCodeOutline: true,
+      maxScansPerSecond: 12,
+      // The default qr-scanner crop only looks at a central square. On a phone
+      // held close to another screen or parcel label the QR often sits partly
+      // outside that square even though it is plainly visible to the user.
+      // Decode the whole visible camera frame instead.
+      calculateScanRegion: element => ({
+        x: 0,
+        y: 0,
+        width: element.videoWidth || element.clientWidth || 640,
+        height: element.videoHeight || element.clientHeight || 480,
+        downScaledWidth: 480,
+        downScaledHeight: 480,
+      }),
+    });
     scanner.current = instance;
 
     (async () => {
@@ -67,32 +107,35 @@ export function QrCapture({ onRead, accept = value => value, label = 'Scanner le
         ]).catch(() => false);
         if (current === generation.current) setTorch(hasTorch ? false : null);
       } catch {
-        if (current === generation.current) { stop(); setError(deniedText); }
+        if (current === generation.current) { stop(); setError(deniedTextRef.current); }
       }
     })();
 
     return () => {
-      // Destroy only the instance created by this render. `stop()` may already
-      // have destroyed it after a successful scan; destroy is safe to repeat.
       instance.destroy();
       if (scanner.current === instance) scanner.current = null;
     };
-  }, [active, accept, deniedText, onRead, rejectText]);
+  }, [active]);
 
   useEffect(() => {
-    // A camera left running behind another app is a battery drain and a light
-    // the holder did not ask for. Stop on background, always.
     const hide = () => { if (document.hidden) stop(); };
     document.addEventListener('visibilitychange', hide);
-    return () => { generation.current++; scanner.current?.destroy(); scanner.current = null; document.removeEventListener('visibilitychange', hide); };
+    return () => {
+      generation.current++;
+      scanner.current?.destroy();
+      scanner.current = null;
+      document.removeEventListener('visibilitychange', hide);
+    };
   }, []);
 
   function start() {
     generation.current++;
+    reading.current = false;
     scanner.current?.destroy();
     scanner.current = null;
     setTorch(null);
     setError('');
+    setProcessing(false);
     setActive(true);
   }
 
@@ -103,14 +146,15 @@ export function QrCapture({ onRead, accept = value => value, label = 'Scanner le
 
   return <div className="stack">
     <div className="controls">
-      <button type="button" className="btn btn-soft" onClick={active ? stop : start}>
-        {active ? 'Arrêter la caméra' : label}</button>
+      <button type="button" className="btn btn-soft" disabled={processing} onClick={active ? stop : start}>
+        {processing ? 'QR détecté…' : active ? 'Arrêter la caméra' : label}</button>
       {active && torch !== null && <button type="button" className="btn btn-soft" onClick={toggleTorch}
         aria-pressed={torch}>{torch ? 'Éteindre la lampe' : 'Allumer la lampe'}</button>}
     </div>
     <video ref={video} className="qr-video" hidden={!active} muted playsInline autoPlay aria-label="Lecture caméra QR"
       style={{ width: '100%', maxWidth: 640, aspectRatio: '4 / 3', objectFit: 'cover', borderRadius: 16, background: '#0f172a' }}/>
-    {active && <p role="status" className="small">Placez le QR code dans le cadre de la caméra.</p>}
+    {active && <p role="status" className="small">Placez le QR code LeRoutier entièrement dans le cadre.</p>}
+    {processing && <p role="status" className="small">QR détecté. Vérification des informations…</p>}
     {error && <p role="alert" className="small">{error}</p>}
   </div>;
 }
