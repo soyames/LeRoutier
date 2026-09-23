@@ -5,6 +5,11 @@ import { DomainError } from '@leroutier/domain';
 export function createDatabase(config = serverConfig()) {
   if(!/^[a-z][a-z0-9_]{0,62}$/.test(config.schema)) throw new Error('Invalid database schema configuration.');
   let connectionString, loopback;
+  // The try covers PARSING ONLY, and deliberately so. It used to wrap the
+  // disposable-schema guard below as well, which meant that guard's message
+  // was caught by this very catch and reported as "Invalid database
+  // configuration" — sending whoever hit it to look at a connection string
+  // that was perfectly fine. A refusal has to say which rule it is enforcing.
   try {
     const url = new URL(config.databaseUrl);
     for (const key of ['sslmode', 'sslcert', 'sslkey', 'sslrootcert']) url.searchParams.delete(key);
@@ -15,10 +20,18 @@ export function createDatabase(config = serverConfig()) {
     // without weakening anything remote. The test is the host, not a flag, so
     // no environment variable can turn verification off for Neon.
     loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname);
-    if (/^(lr_test_)|_dev$/.test(config.schema) && !loopback) {
-      throw new Error('Disposable databases must use loopback PostgreSQL.');
-    }
-  } catch { throw new Error('Invalid database configuration.'); }
+  } catch {
+    throw new Error(config.databaseUrl
+      ? 'Invalid database configuration: DATABASE_URL is not a valid connection URL.'
+      : 'Invalid database configuration: DATABASE_URL is not set.');
+  }
+  // Names the schema it refused and what to do, because the fix is almost
+  // always "you meant the other schema" rather than anything about the URL.
+  if (/^(lr_test_)|_dev$/.test(config.schema) && !loopback) {
+    throw new Error(`Refusing to use the disposable schema "${config.schema}" on a remote database. `
+      + 'Schemas named lr_test_* or *_dev are for the local container only. '
+      + 'Set DATABASE_SCHEMA to the real schema, or point DATABASE_URL at loopback PostgreSQL.');
+  }
   const pool = new pg.Pool({ connectionString, ssl: loopback ? false : { rejectUnauthorized: true }, max: 5,
     connectionTimeoutMillis: 15_000, idleTimeoutMillis: 10_000 });
   // Never log raw driver errors: they can contain connection information.
