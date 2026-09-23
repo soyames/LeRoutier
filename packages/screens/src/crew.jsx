@@ -33,7 +33,12 @@ function useDriverQueue(userId, request) {
     if(!userId) return;
     queue.current=createSyncQueue(window.localStorage,userId);
     refresh();
-    const kick=()=>{sync();refresh();};
+    const kick=()=>{sync();refresh();
+      // The online event can arrive before the network has actually settled;
+      // a failed first attempt must not strand queued actions until the next
+      // tap. sync() is concurrency-guarded, so the retry is a no-op when the
+      // first attempt is still running or already succeeded.
+      setTimeout(()=>{sync();refresh();},250);};
     window.addEventListener('online',kick);
     // Reopening the app with a connection is a reconnect. Waiting for a
     // network flap or for the crew to notice the badge and tap "Synchroniser
