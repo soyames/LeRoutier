@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { publicAuthConfig, serverConfig, authConfig, FIREBASE_JWKS_URL } from '../src/index.js';
 import { safeReturnPath, signInFailure } from '../src/firebase.js';
-import { createSyncQueue, clearQueuedActions } from '../src/offline.js';
+import { createSyncQueue, clearQueuedActions, OFFLINE_TTL } from '../src/offline.js';
 
 // The gate that decides whether sign-in is offered at all.
 //
@@ -256,4 +256,85 @@ test('a queued action is scoped to its own crew member and replays exactly once'
   // And the ticket code does not linger on the device once it has landed.
   assert.ok(!JSON.stringify([...store.values()]).includes('b1') ||
     !JSON.stringify(mine.read()[0].payload).includes('bookingId'));
+});
+
+// Regression: an expired row used to hide behind the TTL filter while its
+// payload (ticket code included) stayed in localStorage until some later
+// write happened to clean it up. Found by /qa on 2026-09-23.
+test('an action past its TTL is dropped from storage, not kept with its ticket code', async () => {
+  const store = new Map();
+  /** @type {any} */
+  const storage = {
+    get length() { return store.size; },
+    key: i => [...store.keys()][i] ?? null,
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: k => { store.delete(k); },
+  };
+  let now = Date.parse('2026-09-23T05:00:00Z');
+  const queue = createSyncQueue(storage, 'crew-ttl', () => now);
+  queue.enqueue('board', { serviceId: 'svc-1', bookingId: 'bk-1', stopSequence: 0, code: 'LR-TTL0-TTL0-TTL0-0001' });
+  assert.ok(JSON.stringify([...store.values()]).includes('LR-TTL0-TTL0-TTL0-0001'), 'the code is really there first');
+
+  now += OFFLINE_TTL + 1;
+  assert.equal(queue.read().length, 0, 'the expired action is no longer visible');
+  assert.ok(!JSON.stringify([...store.values()]).includes('LR-TTL0-TTL0-TTL0-0001'),
+    'the expired ticket code leaves the device at read time, without waiting for a later write');
+
+  // A fresh action still queues and syncs normally; the purge must not eat it.
+  const fresh = queue.enqueue('alight', { serviceId: 'svc-1', bookingId: 'bk-2', stopSequence: 1 });
+  const sent = [];
+  await queue.sync(async row => { sent.push(row.id); });
+  assert.deepEqual(sent, [fresh.id], 'only the unexpired action is ever sent');
+});
+
+test('a 401 during replay returns the action to pending and names reconnection', async () => {
+  const store = new Map();
+  /** @type {any} */
+  const storage = {
+    get length() { return store.size; },
+    key: i => [...store.keys()][i] ?? null,
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: k => { store.delete(k); },
+  };
+  const queue = createSyncQueue(storage, 'crew-relogin');
+  const row = queue.enqueue('board', { serviceId: 'svc-1', bookingId: 'bk-1', stopSequence: 0 });
+  const unauthorized = Object.assign(new Error('unauthorized'), { status: 401 });
+  await queue.sync(async () => { throw unauthorized; });
+  const after = queue.read()[0];
+  assert.equal(after.state, 'pending', 'the action stays replaysable, not parked or discarded');
+  assert.match(after.error, /Reconnectez-vous/, 'the crew are told what to do');
+
+  // Once the session is back, the same row replays and lands.
+  await queue.sync(async () => {});
+  assert.equal(queue.read()[0].state, 'succeeded');
+  assert.ok(queue.read()[0].id === row.id, 'the same row id keeps its idempotency key across the relogin');
+});
+
+test('three failed attempts park the action visibly, and retry resets it', async () => {
+  const store = new Map();
+  /** @type {any} */
+  const storage = {
+    get length() { return store.size; },
+    key: i => [...store.keys()][i] ?? null,
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: k => { store.delete(k); },
+  };
+  const queue = createSyncQueue(storage, 'crew-fail');
+  const row = queue.enqueue('board', { serviceId: 'svc-1', bookingId: 'bk-1', stopSequence: 0 });
+  const network = Object.assign(new Error('network down'), { status: 0 });
+  for (let i = 0; i < 3; i++) await queue.sync(async () => { throw network; });
+  assert.equal(queue.read()[0].state, 'failed');
+  assert.equal(queue.read()[0].attempts, 3);
+  assert.match(queue.read()[0].error, /Échec réseau/, 'an honest network failure, never a raw system error');
+
+  const sent = [];
+  await queue.sync(r => { sent.push(r.id); });
+  assert.deepEqual(sent, [], 'sync does not keep hammering an exhausted action by itself');
+  queue.retry(row.id);
+  await queue.sync(r => { sent.push(r.id); });
+  assert.deepEqual(sent, [row.id], 'retry resets the attempts and replays');
+  assert.equal(queue.read()[0].state, 'succeeded');
 });
