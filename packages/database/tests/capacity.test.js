@@ -89,3 +89,33 @@ test('database constraints reject out-of-capacity seats and incomplete occupatio
   const b=await hold();await assert.rejects(db.transaction(tx=>tx.query('DELETE FROM booking_segments WHERE booking_id=$1',[b.id])),{code:'23514'});
 });
 test('migration replay preserves checksums and data',async()=>{await migrate(db);assert.equal((await api.availability(demo.service,0,3)).capacity,2);});
+test('boarding changes no occupancy, and alighting frees exactly the downstream segments',async()=>{
+  const a=await confirmed(0,2);
+  const before=(await api.availability(demo.service,0,3)).segments.map(s=>s.occupied);
+  await api.transition(driver,a.id,'board',0);
+  assert.deepEqual((await api.availability(demo.service,0,3)).segments.map(s=>s.occupied),before,
+    'a boarded passenger still occupies their segments');
+  const b=await hold(0,2);assert.ok(b,'the second seat on the overlapping span is sellable');
+  await api.transition(passenger,b.id,'cancel');
+  await api.advance(driver,demo.service,1);await api.advance(driver,demo.service,2);
+  await api.transition(driver,a.id,'alight',2);
+  assert.deepEqual((await api.availability(demo.service,0,3)).segments.map(s=>s.occupied),[0,0,0],
+    'after alighting at C nothing holds the C→D segments');
+});
+test('a B→D booking respects an earlier A→C occupancy only where the spans overlap',async()=>{
+  await hold(0,2);
+  assert.deepEqual((await api.availability(demo.service,1,3)).segments.map(s=>s.occupied),[1,1,0],
+    'segment B→C carries the A→C passenger, C→D does not');
+  assert.equal((await api.availability(demo.service,2,3)).available,2,'C→D is untouched by A→C');
+  const later=await hold(2,3);assert.ok(later,'the non-overlapping later segment is accepted');
+});
+test('an idempotent hold replay never writes a second set of segment rows',async()=>{
+  const key=randomUUID();
+  const a=await hold(0,3,key);
+  const replay=await hold(0,3,key);
+  assert.equal(replay.id,a.id,'the replay returns the same booking, not a second one');
+  const rows=await db.transaction(tx=>tx.query('SELECT count(*)::int AS n FROM booking_segments WHERE booking_id=$1',[a.id]));
+  assert.equal(rows.rows[0].n,3,'exactly one segment row per occupied segment');
+  assert.deepEqual((await api.availability(demo.service,0,3)).segments.map(s=>s.occupied),[1,1,1],
+    'the replay reserved one seat, not two');
+});

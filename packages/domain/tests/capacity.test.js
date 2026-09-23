@@ -15,6 +15,15 @@ test('cancelled, completed and expired holds do not occupy capacity',()=>assert.
 test('reverse, same-stop, fractional and out-of-range journeys fail',()=>{
   for(const [i,j] of [[2,1],[1,1],[-1,2],[0,4],[0.5,2]]) assert.throws(()=>journeySegments(i,j,4));
 });
+test('an A→C booking occupies A→B and B→C and leaves C→D fully available',()=>{
+  const occupied=[1,1,0,0]; // one seat, A→C, on a four-stop route
+  assert.equal(availableCapacity(2,occupied,0,2),1,'the overlapping span has one seat left');
+  assert.equal(availableCapacity(2,occupied,2,4),2,'the downstream span is untouched');
+  assert.equal(availableCapacity(2,occupied,1,3),1,'a B→D journey sees the overlap on B→C only');
+});
+test('boarding keeps the seat occupied until alighting',()=>{
+  assert.deepEqual(occupiedBySegment(4,[{origin:0,destination:2,status:'boarded'}]),[1,1,0]);
+});
 test('status transitions enforce booking lifecycle',()=>{
   assert.equal(validateTransition('held','confirm'),'confirmed');
   assert.equal(validateTransition('confirmed','board'),'boarded');
