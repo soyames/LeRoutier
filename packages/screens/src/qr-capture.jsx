@@ -36,16 +36,14 @@ export function QrCapture({ onRead, accept = value => value, label = 'Scanner le
     setActive(false);
     setTorch(null);
   }
-  useEffect(() => {
-    // A camera left running behind another app is a battery drain and a light
-    // the holder did not ask for. Stop on background, always.
-    const hide = () => { if (document.hidden) stop(); };
-    document.addEventListener('visibilitychange', hide);
-    return () => { stop(); document.removeEventListener('visibilitychange', hide); };
-  }, []);
 
-  async function start() {
-    stop(); setError(''); setActive(true);
+  // Starting the scanner in the click handler used to race React: the video
+  // still had the `hidden` attribute when QrScanner asked the browser to attach
+  // the camera stream. Real phones would grant permission while leaving no
+  // visible scanning surface. The click now only reveals the surface; this
+  // effect starts the camera after that render has committed.
+  useEffect(() => {
+    if (!active || !video.current) return undefined;
     const current = generation.current;
     const instance = new QrScanner(video.current, result => {
       if (current !== generation.current) return;
@@ -58,26 +56,44 @@ export function QrCapture({ onRead, accept = value => value, label = 'Scanner le
       onRead(value);
     }, { highlightScanRegion: true, preferredCamera: 'environment', returnDetailedScanResult: true });
     scanner.current = instance;
-    try {
-      await instance.start();
-      if (current !== generation.current) { instance.destroy(); return; }
-      // Boarding happens at dusk and before dawn, and a ticket on a dim phone
-      // screen in a dark station is the normal case, not the edge one. Offered
-      // only where the device really has a torch.
-      //
-      // Raced against a timeout, and deliberately not awaited by anything that
-      // matters: asking a camera what it can do goes through the platform's
-      // media stack, and on some devices — and on a synthetic camera — that
-      // question is slow or never answers. A torch button is a convenience;
-      // reading the code is the job, and the job must not wait on it.
-      const hasTorch = await Promise.race([
-        instance.hasFlash().catch(() => false),
-        new Promise(resolve => setTimeout(() => resolve(false), 1500)),
-      ]).catch(() => false);
-      if (current === generation.current) setTorch(hasTorch ? false : null);
-    } catch {
-      if (current === generation.current) { stop(); setError(deniedText); }
-    }
+
+    (async () => {
+      try {
+        await instance.start();
+        if (current !== generation.current) { instance.destroy(); return; }
+        const hasTorch = await Promise.race([
+          instance.hasFlash().catch(() => false),
+          new Promise(resolve => setTimeout(() => resolve(false), 1500)),
+        ]).catch(() => false);
+        if (current === generation.current) setTorch(hasTorch ? false : null);
+      } catch {
+        if (current === generation.current) { stop(); setError(deniedText); }
+      }
+    })();
+
+    return () => {
+      // Destroy only the instance created by this render. `stop()` may already
+      // have destroyed it after a successful scan; destroy is safe to repeat.
+      instance.destroy();
+      if (scanner.current === instance) scanner.current = null;
+    };
+  }, [active, accept, deniedText, onRead, rejectText]);
+
+  useEffect(() => {
+    // A camera left running behind another app is a battery drain and a light
+    // the holder did not ask for. Stop on background, always.
+    const hide = () => { if (document.hidden) stop(); };
+    document.addEventListener('visibilitychange', hide);
+    return () => { generation.current++; scanner.current?.destroy(); scanner.current = null; document.removeEventListener('visibilitychange', hide); };
+  }, []);
+
+  function start() {
+    generation.current++;
+    scanner.current?.destroy();
+    scanner.current = null;
+    setTorch(null);
+    setError('');
+    setActive(true);
   }
 
   async function toggleTorch() {
@@ -92,7 +108,9 @@ export function QrCapture({ onRead, accept = value => value, label = 'Scanner le
       {active && torch !== null && <button type="button" className="btn btn-soft" onClick={toggleTorch}
         aria-pressed={torch}>{torch ? 'Éteindre la lampe' : 'Allumer la lampe'}</button>}
     </div>
-    <video ref={video} className="qr-video" hidden={!active} muted playsInline aria-label="Lecture caméra QR"/>
+    <video ref={video} className="qr-video" hidden={!active} muted playsInline autoPlay aria-label="Lecture caméra QR"
+      style={{ width: '100%', maxWidth: 640, aspectRatio: '4 / 3', objectFit: 'cover', borderRadius: 16, background: '#0f172a' }}/>
+    {active && <p role="status" className="small">Placez le QR code dans le cadre de la caméra.</p>}
     {error && <p role="alert" className="small">{error}</p>}
   </div>;
 }
