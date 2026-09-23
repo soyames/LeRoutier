@@ -118,7 +118,13 @@ export async function firebaseAuth(config) {
   }, FIREBASE_APP_NAME);
 
   const instance = auth.getAuth(app);
-  await auth.setPersistence(instance, auth.browserSessionPersistence)
+  // A phone app is expected to stay signed in when it is closed and reopened.
+  // Firebase local persistence stores the provider session on this browser/PWA
+  // only; explicit sign-out still removes it and also clears queued crew codes.
+  // Fall back only when the browser refuses durable storage (for example some
+  // private modes), rather than deliberately logging everyone out on app close.
+  await auth.setPersistence(instance, auth.browserLocalPersistence)
+    .catch(() => auth.setPersistence(instance, auth.browserSessionPersistence))
     .catch(() => auth.setPersistence(instance, auth.inMemoryPersistence));
   cached = { key, auth: instance, sdk: auth };
   return cached;
