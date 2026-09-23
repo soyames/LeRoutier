@@ -25,7 +25,7 @@
  * the few fields they need to issue a policy, the person consented to that
  * specific transfer, and `shared_fields` records which fields — names only,
  * never values, because an audit trail must not become a second copy of
- * somebody's personal data. See docs/INSURANCE.md and the APDP filing.
+ * somebody's personal data. The declared processing matches the APDP filing.
  */
 import { invariant, uuid } from '@leroutier/domain';
 import { audit } from './identities.js';

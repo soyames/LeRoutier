@@ -11,7 +11,8 @@ import { mockApi, DEPARTURE_AT } from './api-fixture.js';
 //
 // What it CANNOT prove, and does not claim: that a phone reads another phone's
 // screen at dusk, in a station, through a cracked protector, held by somebody
-// in a hurry. Those live in docs/PILOT-ACCEPTANCE.md and are unperformed.
+// in a hurry. Those live in the operator's field acceptance checklist and are
+// unperformed.
 const APP = 'http://127.0.0.1:4173';
 
 /**

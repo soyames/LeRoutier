@@ -63,15 +63,7 @@ pnpm-debug.log*
 # duplicate every file in the tree.
 .claude/
 
-# Project documentation IS version controlled and travels with the repository.
-# Only genuinely local material is excluded, and it is excluded by name rather
-# than by directory: a blanket `docs/` rule lived in .git/info/exclude, where
-# it was invisible to everyone else and quietly kept legitimate documentation
-# out of the repository on one machine only.
-#
-# Put machine-specific notes, scratch investigations and anything carrying
-# production internals under docs/local/ or name it *.local.md.
-docs
-docs/
-docs/local/
-docs/**/*.local.md
+# Repository policy: project documentation is kept outside GitHub.
+# A tracked file under docs/ is a violation; scripts/check-repo-policy.mjs
+# fails the build on it (CI included), so no clone can silently reintroduce it.
+/docs/

@@ -264,8 +264,9 @@ export const EVIDENCE_READ_TTL_SECONDS = 120;
  */
 export function evidenceStore(config = {}, http = fetch) {
   const settings = config.evidenceStorage ?? {};
-  // Constructed here and nowhere else; see docs/KYC-EVIDENCE-STORAGE.md for
-  // what each provider needs and which of the four members it has to satisfy.
+  // The only store factory: B2 is the only implemented provider, an unknown
+  // provider fails closed, and an absent configuration means no evidence
+  // storage at all — never a weaker fallback.
   if (!settings.provider) return null;
   if (settings.provider === 'b2') return backblazeEvidenceStore(settings.b2 ?? {}, http);
   invariant(false, 'EVIDENCE_STORAGE_UNAVAILABLE',
