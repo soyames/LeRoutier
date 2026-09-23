@@ -5,19 +5,31 @@
  * balances, ratings, station claims, safety claims or payment capabilities.
  */
 
+/* ONE brand, not two.
+   These used to be independent hex values, and the app ended up with four
+   ambers for two roles: #d97706 and #b45309 from the base stylesheet, #b15f00
+   and #8d4b00 from here. They sat next to each other on the same screens — a
+   primary button in one amber, the parcel accents in another — which is
+   exactly the kind of difference nobody can name but everybody feels.
+
+   The --lr-* values won the merge because they measure better: #8d4b00 is
+   6.71:1 on white against #b45309's 4.77:1, and #b15f00 is 4.63:1 against
+   #d97706's 3.18:1, which did not pass AA for text at all. So the canonical
+   tokens in styles.css now HOLD those values and everything here aliases
+   them. Change a brand colour in one place, and the whole product follows. */
 :root{
-  --lr-ink:#111c2d;
-  --lr-ink-soft:#475569;
+  --lr-ink:var(--navy);
+  --lr-ink-soft:var(--muted);
   --lr-surface:#f9f9ff;
   --lr-surface-low:#f0f3ff;
   --lr-surface-mid:#e7eeff;
   --lr-surface-high:#dee8ff;
-  --lr-primary:#b15f00;
-  --lr-primary-strong:#8d4b00;
-  --lr-primary-soft:#ffdcc3;
-  --lr-green:#006948;
-  --lr-green-soft:#e5f6ee;
-  --lr-danger:#ba1a1a;
+  --lr-primary:var(--primary);
+  --lr-primary-strong:var(--primary-strong);
+  --lr-primary-soft:var(--primary-soft);
+  --lr-green:var(--green);
+  --lr-green-soft:var(--green-soft);
+  --lr-danger:var(--red);
   --lr-radius-sm:14px;
   --lr-radius:18px;
   --lr-radius-lg:24px;
@@ -73,7 +85,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .card{border-radius:var(--lr-radius)!important;border:1px solid rgba(216,227,251,.72)!important;box-shadow:var(--lr-shadow-sm)!important;padding:17px!important}
 .card:hover{border-color:rgba(190,198,224,.75)}
 .card-dark{background:linear-gradient(145deg,#1f2b3e,#111c2d)!important;box-shadow:0 14px 34px rgba(17,28,45,.18)!important}
-.card-primary{background:linear-gradient(145deg,#8d4b00,#b15f00)!important}
+.card-primary{background:linear-gradient(145deg,var(--primary-strong),var(--primary))!important}
 .section-title{margin-top:2px}
 .section-title h2{font-size:19px!important;letter-spacing:-.01em;font-weight:800!important}
 .eyebrow{letter-spacing:.09em!important;font-size:10.5px!important}
@@ -144,7 +156,7 @@ overflow:hidden}
 
 /* Tickets and live journey ------------------------------------------ */
 .ticket{border-radius:22px!important;box-shadow:0 15px 35px rgba(15,23,42,.09)!important}
-.ticket-head{background:linear-gradient(120deg,#8d4b00,#b15f00)!important;padding:18px!important}
+.ticket-head{background:linear-gradient(120deg,var(--primary-strong),var(--primary))!important;padding:18px!important}
 .ticket-body{padding:18px!important}
 .qr-box,.payment-box{border-radius:16px!important;background:var(--lr-surface-low)!important}
 .qr-canvas{border:1px solid #e7eeff;box-shadow:inset 0 0 0 6px #fff}
@@ -171,7 +183,7 @@ overflow:hidden}
 .duty-metric span{font-size:10.5px!important;color:rgba(255,255,255,.76)}
 .big-actions{display:grid!important;grid-template-columns:2fr 1fr 1fr!important;gap:9px!important}
 .big-actions .btn{min-height:58px!important;border-radius:17px!important}
-.scanner{border-radius:24px!important;background:linear-gradient(145deg,#8d4b00,#6e3900)!important;padding:20px!important}
+.scanner{border-radius:24px!important;background:linear-gradient(145deg,var(--primary-strong),#6e3900)!important;padding:20px!important}
 .viewfinder{width:min(48vw,178px)!important;height:min(48vw,178px)!important;border-radius:22px!important;border-width:3px!important;box-shadow:0 0 0 999px rgba(17,28,45,.13)}
 .manifest-row{border-radius:16px!important;min-height:72px!important}
 .seat{border-radius:14px!important}

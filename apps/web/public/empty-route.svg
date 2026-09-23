@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 190" role="img" aria-labelledby="er-title er-desc">
+  <title id="er-title">Aucun départ publié</title>
+  <desc id="er-desc">Une route reliant deux villes du Bénin, sans véhicule en service pour le moment.</desc>
+  <defs>
+    <!-- A glow that fades to nothing on every side. The first version was a
+         full-bleed rect, which gave the drawing hard left and right edges and
+         made it read as a photograph pasted onto the card instead of part of
+         it. Radial, transparent at the rim, so it belongs to whatever surface
+         it lands on. -->
+    <radialGradient id="er-sky" cx="0.5" cy="0.62" r="0.62">
+      <stop offset="0" stop-color="#fff3e2"/>
+      <stop offset="1" stop-color="#fff3e2" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="er-sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fdba74" stop-opacity="0.65"/>
+      <stop offset="1" stop-color="#fdba74" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="er-road" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#334155"/>
+      <stop offset="1" stop-color="#1e293b"/>
+    </linearGradient>
+    <!-- The road runs past both edges, as a road does. Without this it ended
+         in two hard vertical cuts against the card. Masked so it dissolves
+         instead of stopping. -->
+    <linearGradient id="er-fade-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000"/>
+      <stop offset="0.12" stop-color="#fff"/>
+      <stop offset="0.88" stop-color="#fff"/>
+      <stop offset="1" stop-color="#000"/>
+    </linearGradient>
+    <mask id="er-fade"><rect width="480" height="190" fill="url(#er-fade-grad)"/></mask>
+  </defs>
+
+  <!-- Warm wash, fading out so the card's own surface carries the edges. -->
+  <ellipse cx="240" cy="118" rx="238" ry="94" fill="url(#er-sky)"/>
+  <circle cx="86" cy="42" r="46" fill="url(#er-sun)"/>
+  <circle cx="86" cy="42" r="21" fill="#fdba74" opacity="0.5"/>
+
+  <!-- The intended journey: still only an intention, so it is dotted. -->
+  <path d="M96 96 Q 240 44 384 96" stroke="#b15f00" stroke-width="2.5" stroke-dasharray="2 9"
+        stroke-linecap="round" fill="none" opacity="0.6"/>
+
+  <!-- The road itself exists. That is the honest point of this picture: the
+       route is real, nothing is running on it yet. -->
+  <g mask="url(#er-fade)">
+    <path d="M0 140 Q 240 108 480 136" stroke="#64748b" stroke-width="2" fill="none" opacity="0.4"/>
+    <path d="M0 150 Q 240 118 480 146" stroke="url(#er-road)" stroke-width="19" fill="none"/>
+    <path d="M0 155 Q 240 123 480 151" stroke="#fbbf24" stroke-width="3" stroke-dasharray="24 20"
+          stroke-linecap="round" fill="none"/>
+  </g>
+
+  <!-- Origin and destination, in the product's own amber. -->
+  <g transform="translate(96 96)">
+    <ellipse cx="0" cy="4" rx="13" ry="4" fill="#0f172a" opacity="0.14"/>
+    <path d="M0 0c-8-11-13-17-13-24a13 13 0 1 1 26 0c0 7-5 13-13 24z" fill="#8d4b00"/>
+    <circle cx="0" cy="-24" r="5" fill="#ffdcc3"/>
+  </g>
+  <g transform="translate(384 96)">
+    <ellipse cx="0" cy="4" rx="13" ry="4" fill="#0f172a" opacity="0.14"/>
+    <path d="M0 0c-8-11-13-17-13-24a13 13 0 1 1 26 0c0 7-5 13-13 24z" fill="#b15f00"/>
+    <circle cx="0" cy="-24" r="5" fill="#ffdcc3"/>
+  </g>
+</svg>
