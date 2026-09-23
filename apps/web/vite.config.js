@@ -50,7 +50,14 @@ export default defineConfig({
     },
     workbox: {
       navigateFallback: '/index.html',
-      navigateFallbackDenylist: [/^\/api\//],
+      // Navigation fallback must never answer Firebase's auth helper routes.
+      // The Google OAuth callback (https://leroutier.app/__/auth/handler?…) is
+      // a same-origin navigation, and the auth iframe (__/auth/iframe) is a
+      // frame navigation: without this denylist the installed PWA's service
+      // worker answered BOTH with the cached app shell, the Firebase handler
+      // never ran, and Google sign-in died on the device while browsers
+      // without an active service worker kept working.
+      navigateFallbackDenylist: [/^\/api\//, /^\/__\/auth\//],
       runtimeCaching: [],
     },
   })],

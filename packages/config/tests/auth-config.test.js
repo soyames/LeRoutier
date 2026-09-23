@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { publicAuthConfig, serverConfig, authConfig, FIREBASE_JWKS_URL } from '../src/index.js';
-import { safeReturnPath, signInFailure } from '../src/firebase.js';
+import { safeReturnPath, signInFailure, browserAuthDomain, readRedirectMarker, writeRedirectMarker, clearRedirectMarker, preferGoogleRedirect } from '../src/firebase.js';
 import { createSyncQueue, clearQueuedActions, OFFLINE_TTL } from '../src/offline.js';
 
 // The gate that decides whether sign-in is offered at all.
@@ -166,6 +166,82 @@ test('an unrecognised failure is still answered in the product’s language', ()
   assert.match(signInFailure(new Error('boom')).message, /Impossible de démarrer la connexion/);
   assert.match(signInFailure(new Error('boom'), 'password').message, /Impossible de vous connecter/);
   assert.equal(signInFailure(undefined).reason, 'unknown');
+});
+
+// ----------------------------------------------------------- auth domain ----
+test('every branded host resolves to ONE authoritative production auth origin', () => {
+  // The Vercel platform may serve the app on the apex or on www, but the OAuth
+  // callback is registered with Google for exactly one redirect URI. Both hosts
+  // must converge on the apex — mirroring www would produce a second,
+  // unregistered handler and Google rejects it with redirect_uri_mismatch.
+  const config = { authDomain: 'leroutier-df848.firebaseapp.com' };
+  assert.equal(browserAuthDomain(config, { hostname: 'leroutier.app' }), 'leroutier.app');
+  assert.equal(browserAuthDomain(config, { hostname: 'www.leroutier.app' }), 'leroutier.app');
+  assert.equal(browserAuthDomain(config, { hostname: 'LEROUTIER.APP' }), 'leroutier.app', 'host casing is normalised');
+});
+
+test('non-production hosts keep the configured Firebase helper domain', () => {
+  const config = { authDomain: 'leroutier-df848.firebaseapp.com' };
+  assert.equal(browserAuthDomain(config, { hostname: 'localhost' }), 'leroutier-df848.firebaseapp.com');
+  assert.equal(browserAuthDomain(config, { hostname: '127.0.0.1' }), 'leroutier-df848.firebaseapp.com');
+  assert.equal(browserAuthDomain(config, { hostname: 'le-routier.vercel.app' }), 'leroutier-df848.firebaseapp.com');
+});
+
+// ------------------------------------------------------- redirect marker ----
+function memoryStorage() {
+  const store = new Map();
+  return {
+    get length() { return store.size; },
+    key: i => [...store.keys()][i] ?? null,
+    clear: () => { store.clear(); },
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: k => { store.delete(k); },
+    keys: () => [...store.keys()],
+  };
+}
+
+test('the redirect marker is durable storage, not per-tab session state', () => {
+  const storage = memoryStorage();
+  writeRedirectMarker('/tickets/abc', storage);
+  assert.deepEqual(readRedirectMarker(storage), { returnTo: '/tickets/abc' });
+  // A hostile or accidental value can never become a return destination.
+  storage.setItem('leroutier:auth-redirect', JSON.stringify({ returnTo: 'https://evil.example/x' }));
+  assert.deepEqual(readRedirectMarker(storage), { returnTo: '/' });
+  clearRedirectMarker(storage);
+  assert.equal(readRedirectMarker(storage), null);
+});
+
+test('a corrupted redirect marker is treated as absent, never thrown', () => {
+  const storage = memoryStorage();
+  storage.setItem('leroutier:auth-redirect', '{not json');
+  assert.equal(readRedirectMarker(storage), null);
+  storage.setItem('leroutier:auth-redirect', '"just a string"');
+  assert.equal(readRedirectMarker(storage), null);
+});
+
+test('storage that refuses to be touched never breaks the marker helpers', () => {
+  const denied = { length: 0, key: () => null, clear: () => {},
+    getItem: () => { throw new Error('private mode'); }, setItem: () => { throw new Error('private mode'); }, removeItem: () => { throw new Error('private mode'); } };
+  assert.equal(readRedirectMarker(denied), null);
+  writeRedirectMarker('/x', denied);
+  clearRedirectMarker(denied);
+});
+
+test('the redirect strategy prefers the redirect flow on installed PWAs and mobile', () => {
+  const previousWindow = globalThis.window, previousNavigator = globalThis.navigator;
+  const mediaQueryList = matches => ({ matches, media: '', onchange: null, addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false });
+  try {
+    /** @type {any} */ (globalThis).window = { matchMedia: q => mediaQueryList(q === '(display-mode: standalone)') };
+    assert.equal(preferGoogleRedirect(), true, 'display-mode: standalone is an installed PWA');
+    /** @type {any} */ (globalThis).window = { matchMedia: () => mediaQueryList(false) };
+    assert.equal(preferGoogleRedirect(), false, 'a non-mobile UA without standalone keeps the popup flow');
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { userAgent: 'Mozilla/5.0 (Linux; Android 14) Chrome/140 Mobile' } });
+    assert.equal(preferGoogleRedirect(), true, 'a mobile UA keeps the redirect flow');
+  } finally {
+    globalThis.window = previousWindow;
+    if (previousNavigator) Object.defineProperty(globalThis, 'navigator', { configurable: true, value: previousNavigator });
+  }
 });
 
 // ---------------------------------------------------- crew queue on sign-out --

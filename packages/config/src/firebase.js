@@ -10,9 +10,22 @@
 import { clearQueuedActions } from './offline.js';
 
 const RETURN_TO = 'leroutier:return-to';
+// The pending-redirect marker lives in localStorage, not sessionStorage. An
+// installed PWA can be killed while Google's account chooser is open, and the
+// callback can land in another browsing context; a per-tab marker would make
+// completion depend on storage the platform is free to clear. The marker only
+// says "an attempt exists" — the sign-in itself is Firebase's trusted state.
 const PENDING_REDIRECT = 'leroutier:auth-redirect';
 const FIREBASE_APP_NAME = 'leroutier-auth';
+
+// ONE authoritative production auth origin. The Vercel domain setup may serve
+// the app on the apex or on www (a platform redirect can bounce between the
+// two), but OAuth must always return to the single handler registered with
+// Google Cloud: https://leroutier.app/__/auth/handler. Pinning the apex makes
+// every branded host converge on it — and the apex→www hop, while it exists,
+// is a 308 that preserves the callback query exactly.
 const BRANDED_AUTH_HOSTS = new Set(['leroutier.app', 'www.leroutier.app']);
+const BRANDED_AUTH_ORIGIN = 'leroutier.app';
 
 // Only a same-origin, absolute path may be returned to after sign-in. Anything
 // else — an absolute URL, a protocol-relative "//evil.example", the callback
@@ -32,8 +45,31 @@ export function takeReturnPath() {
   try {
     const value = window.sessionStorage.getItem(RETURN_TO);
     window.sessionStorage.removeItem(RETURN_TO);
-    return safeReturnPath(value);
-  } catch { return '/'; }
+    if (value) return safeReturnPath(value);
+  } catch { /* private mode */ }
+  return '/';
+}
+
+// ------------------------------------------------------- redirect marker ----
+
+/**
+ * The redirect marker: durable across PWA relaunches, and read/cleared through
+ * these helpers so every consumer agrees on its shape. Its return path is a
+ * convenience for landing back where the user was — never a security gate.
+ */
+export function readRedirectMarker(/** @type {Storage|undefined} */ storage = globalThis.window?.localStorage) {
+  try {
+    const raw = storage?.getItem(PENDING_REDIRECT);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? { returnTo: safeReturnPath(parsed.returnTo) } : null;
+  } catch { return null; }
+}
+export function writeRedirectMarker(returnTo, /** @type {Storage|undefined} */ storage = globalThis.window?.localStorage) {
+  try { storage?.setItem(PENDING_REDIRECT, JSON.stringify({ returnTo: safeReturnPath(returnTo) })); } catch { /* private mode */ }
+}
+export function clearRedirectMarker(/** @type {Storage|undefined} */ storage = globalThis.window?.localStorage) {
+  try { storage?.removeItem(PENDING_REDIRECT); } catch { /* private mode */ }
 }
 
 /**
@@ -43,12 +79,16 @@ export function takeReturnPath() {
  * and avoids third-party-storage failures. It also means the account chooser
  * is branded with LeRoutier's domain instead of *.firebaseapp.com.
  *
+ * Every branded host returns the SAME apex origin (see BRANDED_AUTH_ORIGIN):
+ * the OAuth callback is registered with Google for exactly one redirect URI,
+ * and mirroring the serving hostname would produce a second, unregistered one.
+ *
  * Local development keeps the configured Firebase domain because localhost
  * does not proxy /__/auth to the Firebase project.
  */
 export function browserAuthDomain(config, /** @type {{hostname?: string}|undefined} */ location = globalThis.window?.location) {
   const hostname = String(location?.hostname || '').toLowerCase();
-  return BRANDED_AUTH_HOSTS.has(hostname) ? hostname : config?.authDomain;
+  return BRANDED_AUTH_HOSTS.has(hostname) ? BRANDED_AUTH_ORIGIN : config?.authDomain;
 }
 
 /** What a provider failure means in product language. */
@@ -71,6 +111,15 @@ export function signInFailure(error, during = 'popup') {
     return fail('Ce compte est désactivé. Contactez LeRoutier.', false);
   case 'auth/network-request-failed':
     return fail('Connexion au service d’identité impossible. Vérifiez votre réseau puis réessayez.', true);
+  case 'auth/redirect-cancelled-by-user':
+    return fail('Connexion annulée.', true);
+  case 'auth/popup-blocked':
+    return fail('La fenêtre de connexion a été bloquée par le navigateur. Autorisez les fenêtres pour ce site, puis réessayez.', true);
+  case 'auth/redirect-incomplete':
+    // The app returned from the provider without a usable result — the person
+    // cancelled in the chooser, or the installed app was suspended mid-flow and
+    // the credential could not be recovered. One honest message, one retry.
+    return fail('La connexion Google n’a pas abouti. Réessayez.', true);
   case 'auth/too-many-requests':
     return fail('Trop de tentatives. Patientez un instant.', true);
   case 'auth/invalid-credential':
@@ -91,6 +140,7 @@ export function signInFailure(error, during = 'popup') {
 }
 
 let cached = null;
+let initializing = null;
 let googleSignInInFlight = null;
 
 export async function firebaseAuth(config) {
@@ -99,38 +149,46 @@ export async function firebaseAuth(config) {
   if (!authDomain) return null;
   const key = `${config.projectId}:${config.appId}:${authDomain}`;
   if (cached?.key === key) return cached;
+  // One initialization at a time: config fetch, redirect completion and the
+  // auth-state subscription all call this on mount, and each of them must see
+  // the same instance, with persistence set exactly once.
+  if (initializing) return initializing;
 
-  const [{ initializeApp, getApps, deleteApp }, auth] = await Promise.all([
-    import('firebase/app'),
-    import('firebase/auth'),
-  ]);
+  initializing = (async () => {
+    const [{ initializeApp, getApps, deleteApp }, auth] = await Promise.all([
+      import('firebase/app'),
+      import('firebase/auth'),
+    ]);
 
-  let app = getApps().find(candidate => candidate.name === FIREBASE_APP_NAME) ?? null;
-  if (app && app.options.authDomain !== authDomain) {
-    await deleteApp(app);
-    app = null;
-  }
-  if (!app) app = initializeApp({
-    apiKey: config.apiKey,
-    authDomain,
-    projectId: config.projectId,
-    appId: config.appId,
-  }, FIREBASE_APP_NAME);
+    let app = getApps().find(candidate => candidate.name === FIREBASE_APP_NAME) ?? null;
+    if (app && app.options.authDomain !== authDomain) {
+      await deleteApp(app);
+      app = null;
+    }
+    if (!app) app = initializeApp({
+      apiKey: config.apiKey,
+      authDomain,
+      projectId: config.projectId,
+      appId: config.appId,
+    }, FIREBASE_APP_NAME);
 
-  const instance = auth.getAuth(app);
-  // A phone app is expected to stay signed in when it is closed and reopened.
-  // Firebase local persistence stores the provider session on this browser/PWA
-  // only; explicit sign-out still removes it and also clears queued crew codes.
-  // Fall back only when the browser refuses durable storage (for example some
-  // private modes), rather than deliberately logging everyone out on app close.
-  await auth.setPersistence(instance, auth.browserLocalPersistence)
-    .catch(() => auth.setPersistence(instance, auth.browserSessionPersistence))
-    .catch(() => auth.setPersistence(instance, auth.inMemoryPersistence));
-  cached = { key, auth: instance, sdk: auth };
-  return cached;
+    const instance = auth.getAuth(app);
+    // A phone app is expected to stay signed in when it is closed and reopened.
+    // Firebase local persistence stores the provider session on this browser/PWA
+    // only; explicit sign-out still removes it and also clears queued crew codes.
+    // Fall back only when the browser refuses durable storage (for example some
+    // private modes), rather than deliberately logging everyone out on app close.
+    await auth.setPersistence(instance, auth.browserLocalPersistence)
+      .catch(() => auth.setPersistence(instance, auth.browserSessionPersistence))
+      .catch(() => auth.setPersistence(instance, auth.inMemoryPersistence));
+    cached = { key, auth: instance, sdk: auth };
+    return cached;
+  })();
+  try { return await initializing; }
+  finally { initializing = null; }
 }
 
-function preferGoogleRedirect() {
+export function preferGoogleRedirect() {
   try {
     if (window.matchMedia?.('(display-mode: standalone)').matches) return true;
     // The UA-data shape varies by browser and by TS lib version; read the
@@ -141,13 +199,16 @@ function preferGoogleRedirect() {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(String(globalThis.navigator?.userAgent || ''));
 }
 
-async function beginGoogleRedirect(sdk, auth, provider) {
-  try { window.sessionStorage.setItem(PENDING_REDIRECT, '1'); } catch { /* private mode */ }
+async function beginGoogleRedirect(sdk, auth, provider, returnTo) {
+  // Written before the attempt and cleared only once the result is consumed
+  // (or the attempt has provably ended). Durable so a PWA relaunch can still
+  // complete the flow it started.
+  writeRedirectMarker(returnTo);
   try {
     await sdk.signInWithRedirect(auth, provider);
     return null;
   } catch (error) {
-    try { window.sessionStorage.removeItem(PENDING_REDIRECT); } catch { /* private mode */ }
+    clearRedirectMarker();
     throw signInFailure(error, 'redirect');
   }
 }
@@ -166,9 +227,9 @@ async function performGoogleSignIn(config, returnTo) {
 
   // Mobile browsers and installed PWAs are where popup auth is least reliable:
   // popup blockers, browser-to-PWA handoff and process suspension can all leave
-  // the person back on the login screen. Use the same-origin redirect directly
-  // there. Desktop keeps the faster popup flow.
-  if (preferGoogleRedirect()) return beginGoogleRedirect(sdk, auth, provider);
+  // the person back on the login screen. Use the redirect directly there.
+  // Desktop keeps the faster popup flow.
+  if (preferGoogleRedirect()) return beginGoogleRedirect(sdk, auth, provider, returnTo);
 
   try {
     const result = await sdk.signInWithPopup(auth, provider);
@@ -178,7 +239,7 @@ async function performGoogleSignIn(config, returnTo) {
     if (code === 'auth/cancelled-popup-request') return null;
     if (code === 'auth/popup-closed-by-user') throw signInFailure(error);
     if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(code)) {
-      return beginGoogleRedirect(sdk, auth, provider);
+      return beginGoogleRedirect(sdk, auth, provider, returnTo);
     }
     throw signInFailure(error);
   }
@@ -197,18 +258,46 @@ export async function signInWithGoogle(config, returnTo = '/') {
   finally { googleSignInInFlight = null; }
 }
 
+/**
+ * Consumes a redirect sign-in the app started earlier — possibly in a previous
+ * life of this PWA process. Returns null when no attempt is pending; otherwise
+ * {user, returnTo} on success (the user may be a restored session when the
+ * credential was already consumed on an earlier load), or {user:null, error}
+ * with a product-language explanation.
+ */
 export async function completeRedirectSignIn(config) {
-  let pending = false;
-  try { pending = window.sessionStorage.getItem(PENDING_REDIRECT) === '1'; } catch { /* private mode */ }
-  if (!pending) return null;
-  try { window.sessionStorage.removeItem(PENDING_REDIRECT); } catch { /* private mode */ }
+  const marker = readRedirectMarker();
+  if (!marker) return null;
   const ready = await firebaseAuth(config);
-  if (!ready) return { user: null, error: signInFailure(new Error('auth-unavailable'), 'redirect') };
+  if (!ready) {
+    // Firebase cannot start right now, but the credential may still be waiting
+    // for a later load. Keep the marker and say so.
+    return { user: null, error: signInFailure(new Error('auth-unavailable'), 'redirect'), returnTo: marker.returnTo };
+  }
+  const { sdk, auth } = ready;
   try {
-    const result = await ready.sdk.getRedirectResult(ready.auth);
-    return result?.user ? { user: result.user, error: null } : null;
+    const result = await sdk.getRedirectResult(auth);
+    if (result?.user) {
+      clearRedirectMarker();
+      return { user: result.user, error: null, returnTo: marker.returnTo };
+    }
+    // A null result can still mean success: the credential was consumed on an
+    // earlier load and the user simply restored from local persistence. Trust
+    // Firebase's auth state, not our marker.
+    if (auth.currentUser) {
+      clearRedirectMarker();
+      return { user: auth.currentUser, error: null, returnTo: marker.returnTo, restored: true };
+    }
+    // No result and no user: the attempt ended without a sign-in (cancelled in
+    // the chooser, or the PWA process lost the redirect state). The attempt is
+    // over — clear it and let one tap start a clean one.
+    clearRedirectMarker();
+    return { user: null, error: signInFailure(Object.assign(new Error('redirect incomplete'), { code: 'auth/redirect-incomplete' }), 'redirect'), returnTo: marker.returnTo };
   } catch (error) {
-    return { user: null, error: signInFailure(error, 'redirect') };
+    // A transport failure leaves Firebase's own pending-redirect state in
+    // place; keep the marker so the next app load retries consuming it
+    // instead of discarding a recoverable sign-in.
+    return { user: null, error: signInFailure(error, 'redirect'), returnTo: marker.returnTo };
   }
 }
 
@@ -247,9 +336,7 @@ export async function sendPasswordReset(config, email) {
 export async function signOutFirebase(config) {
   const ready = await firebaseAuth(config);
   if (ready) await ready.sdk.signOut(ready.auth).catch(() => {});
-  try {
-    window.sessionStorage.removeItem(RETURN_TO);
-    window.sessionStorage.removeItem(PENDING_REDIRECT);
-  } catch { /* private mode */ }
+  try { window.sessionStorage.removeItem(RETURN_TO); } catch { /* private mode */ }
+  clearRedirectMarker();
   try { clearQueuedActions(window.localStorage); } catch { /* private mode */ }
 }
