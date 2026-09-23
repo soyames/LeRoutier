@@ -53,6 +53,8 @@ export function QrCapture({ onRead, accept = value => value, label = 'Scanner le
       const raw = String(result?.data ?? result ?? '').trim();
       const value = acceptRef.current(raw);
       if (!value) {
+        // Do not tear down/restart the camera for a foreign QR. Showing the
+        // rejection is enough; the same live scanner can continue looking.
         setError(rejectTextRef.current);
         return;
       }
@@ -76,24 +78,19 @@ export function QrCapture({ onRead, accept = value => value, label = 'Scanner le
       }
     }
 
+    // Keep the scanner deliberately light on mobile. The previous version
+    // decoded the full camera frame 12 times/second while also drawing the
+    // library's animated scan overlays. That caused unnecessary CPU/GPU load
+    // and the injected overlay could escape the video box on responsive pages.
+    // qr-scanner's own default crop is tuned for QR recognition; five scans per
+    // second is responsive to a person holding a code while being much kinder
+    // to low-end Android devices and battery.
     const instance = new QrScanner(video.current, decoded, {
       preferredCamera: 'environment',
       returnDetailedScanResult: true,
-      highlightScanRegion: true,
-      highlightCodeOutline: true,
-      maxScansPerSecond: 12,
-      // The default qr-scanner crop only looks at a central square. On a phone
-      // held close to another screen or parcel label the QR often sits partly
-      // outside that square even though it is plainly visible to the user.
-      // Decode the whole visible camera frame instead.
-      calculateScanRegion: element => ({
-        x: 0,
-        y: 0,
-        width: element.videoWidth || element.clientWidth || 640,
-        height: element.videoHeight || element.clientHeight || 480,
-        downScaledWidth: 480,
-        downScaledHeight: 480,
-      }),
+      highlightScanRegion: false,
+      highlightCodeOutline: false,
+      maxScansPerSecond: 5,
     });
     scanner.current = instance;
 
@@ -103,7 +100,7 @@ export function QrCapture({ onRead, accept = value => value, label = 'Scanner le
         if (current !== generation.current) { instance.destroy(); return; }
         const hasTorch = await Promise.race([
           instance.hasFlash().catch(() => false),
-          new Promise(resolve => setTimeout(() => resolve(false), 1500)),
+          new Promise(resolve => setTimeout(() => resolve(false), 1200)),
         ]).catch(() => false);
         if (current === generation.current) setTorch(hasTorch ? false : null);
       } catch {
@@ -151,9 +148,16 @@ export function QrCapture({ onRead, accept = value => value, label = 'Scanner le
       {active && torch !== null && <button type="button" className="btn btn-soft" onClick={toggleTorch}
         aria-pressed={torch}>{torch ? 'Éteindre la lampe' : 'Allumer la lampe'}</button>}
     </div>
-    <video ref={video} className="qr-video" hidden={!active} muted playsInline autoPlay aria-label="Lecture caméra QR"
-      style={{ width: '100%', maxWidth: 640, aspectRatio: '4 / 3', objectFit: 'cover', borderRadius: 16, background: '#0f172a' }}/>
-    {active && <p role="status" className="small">Placez le QR code LeRoutier entièrement dans le cadre.</p>}
+    {active && <div style={{ position: 'relative', width: '100%', maxWidth: 640, marginInline: 'auto', overflow: 'hidden', borderRadius: 16, background: '#0f172a' }}>
+      <video ref={video} className="qr-video" muted playsInline autoPlay aria-label="Lecture caméra QR"
+        style={{ display: 'block', width: '100%', aspectRatio: '4 / 3', objectFit: 'cover', background: '#0f172a' }}/>
+      <div aria-hidden="true" style={{
+        position: 'absolute', left: '12%', right: '12%', top: '12%', bottom: '12%',
+        border: '3px solid rgba(245, 158, 11, .92)', borderRadius: 18,
+        boxShadow: '0 0 0 999px rgba(15, 23, 42, .18)', pointerEvents: 'none',
+      }}/>
+    </div>}
+    {active && <p role="status" className="small">Placez le QR code LeRoutier au centre du cadre.</p>}
     {processing && <p role="status" className="small">QR détecté. Vérification des informations…</p>}
     {error && <p role="alert" className="small">{error}</p>}
   </div>;
