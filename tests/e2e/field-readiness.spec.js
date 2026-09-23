@@ -211,6 +211,25 @@ test('the offline queue shows what is waiting without showing a ticket code', as
   await page.context().setOffline(false);
 });
 
+test('a screen whose chunk fails mid-load keeps the shell alive and recovers', async ({ page }) => {
+  // The map chunk loads on demand when the Today screen mounts; aborting it
+  // once reproduces a network drop mid-fetch on a moving vehicle. The screen
+  // must not take the whole app down with it.
+  let aborted = 0;
+  await page.route('**/assets/map-*.js', route => {
+    if (aborted++ === 0) return route.abort('internetdisconnected');
+    return route.fallback();
+  });
+  await crew(page, '/work/today');
+  await expect(page.getByText('Écran indisponible')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('navigation').getByRole('button', { name: 'Scanner', exact: true })).toBeVisible();
+  // Sessions are in-memory: after the reload the crew sign in again and the
+  // screen, this time with its chunk reachable, comes back in full.
+  await page.getByRole('button', { name: 'Recharger' }).click();
+  await page.getByRole('button', { name: 'Connexion de développement' }).click();
+  await expect(page.getByText('Suivi du véhicule', { exact: true })).toBeVisible({ timeout: 15_000 });
+});
+
 test('a denied camera names the manual fallback, and granting it later revives the scanner', async ({ page }) => {
   await crew(page, '/work/scanner', { instrument: p => p.addInitScript(() => {
     const state = { opened: 0, stopped: 0, live: 0 };
@@ -271,6 +290,30 @@ test('a torch control appears where the camera reports one, and toggles', async 
   await expect(torch).toBeVisible();
   await torch.click();
   await expect(page.getByRole('button', { name: 'Éteindre la lampe' })).toBeVisible();
+});
+
+test('queued offline actions replay by themselves when the signal returns', async ({ page }) => {
+  let posted = null;
+  await page.route('**/api/v1/driver/actions', r => {
+    posted = { key: r.request().headers()['idempotency-key'], body: r.request().postDataJSON() };
+    return r.fulfill({ json: { data: { id: 'applied', status: 'boarded', serviceId: id(30) } } });
+  });
+  await crew(page, '/work/scanner');
+  // The assignment must be loaded while there is signal — the field state a
+  // crew phone is in when it goes silent. Going offline before the first
+  // fetch lands has no data to keep, which is the "never loaded" case, not
+  // the reconnect case under test here.
+  await expect(page.getByLabel('Code du billet')).toBeVisible();
+  await page.context().setOffline(true);
+  const code = 'LR-RECO-NNEC-T000-0001';
+  await page.getByLabel('Code du billet').fill(code);
+  await page.getByRole('button', { name: 'Valider le billet' }).click();
+  await expect(page.getByText(/en attente/i).first()).toBeVisible();
+  await page.context().setOffline(false);
+  await expect.poll(() => posted, 'reconnect must drain the queue without a tap').not.toBeNull();
+  expect(posted.body.type).toBe('board');
+  expect(posted.body.payload.code).toBe(code);
+  await expect(page.getByText(/en attente/i)).toHaveCount(0);
 });
 
 test('queued offline actions replay by themselves when the app reopens with a connection', async ({ page }) => {

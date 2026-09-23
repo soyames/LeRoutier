@@ -174,6 +174,56 @@ test.describe('with location granted', () => {
     expect(fix.longitude).toBeCloseTo(2.1004, 3);
     expect(typeof fix.observedAt).toBe('string');
   });
+
+  test('fixes captured without signal are buffered and flushed when the network returns', async ({ page, context }) => {
+    const published = [];
+    await mockApi(page);
+    await signInAs(COMPANY_DRIVER)(page);
+    await page.route('**/api/v1/services/*/positions', r => {
+      published.push(r.request().postDataJSON());
+      return r.fulfill({ json: { data: { accepted: true } } });
+    });
+    await page.goto(APP + '/work/today');
+    await page.getByRole('button', { name: 'Connexion de développement' }).click();
+    // The assignment is loaded while there is signal, as in the field: a crew
+    // phone that goes silent mid-trip already has its service on screen.
+    await expect(page.getByRole('button', { name: 'Activer le suivi du véhicule' })).toBeVisible();
+    // Let the lazy map chunk finish loading before the signal drops: a chunk
+    // still in flight when the network dies fails over to the honest
+    // "Écran indisponible" boundary, which is its own (separately tested)
+    // behaviour, not the buffer path under test here.
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await context.setOffline(true);
+    await page.getByRole('button', { name: 'Activer le suivi du véhicule' }).click();
+
+    // The crew are told the fix is on the device, not that it arrived.
+    await expect(page.getByText('Hors ligne : positions en attente')).toBeVisible();
+    await expect(page.getByText('1 position en attente d’envoi.')).toBeVisible();
+    expect(published.length).toBe(0);
+
+    await context.setOffline(false);
+    await expect.poll(() => published.length, { timeout: 15_000 }).toBeGreaterThan(0);
+    await expect(page.getByText('Suivi actif')).toBeVisible();
+    await expect(page.getByText(/position en attente/)).toHaveCount(0);
+    expect(published[0].latitude).toBeCloseTo(7.3925, 3);
+  });
+});
+
+test('a device with no usable position says so instead of pretending to track', async ({ page }) => {
+  await mockApi(page);
+  await signInAs(COMPANY_DRIVER)(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
+      watchPosition: (_ok, error) => { error({ code: 2, message: 'unavailable' }); return 0; },
+      clearWatch: () => {},
+    } });
+  });
+  await page.goto(APP + '/work/today');
+  await page.getByRole('button', { name: 'Connexion de développement' }).click();
+  await page.getByRole('button', { name: 'Activer le suivi du véhicule' }).click();
+
+  await expect(page.getByText('GPS indisponible')).toBeVisible();
+  await expect(page.getByText('Suivi actif')).toHaveCount(0);
 });
 
 test('a refused permission is reported as refused, not as tracking', async ({ page, context }) => {

@@ -50,7 +50,7 @@ test('the parcel city picker lists Benin communes even with no routes', async ({
   for (const city of communes) await expect(origin.locator('option', { hasText: city })).toHaveCount(1);
   // Selecting a city without a stop states the service availability honestly.
   await origin.selectOption({ label: 'Natitingou' });
-  await expect(page.getByText('Aucun service colis pour cette ville pour le moment.')).toBeVisible();
+  await expect(page.getByText('LeRoutier n’a pas encore de point colis publié dans cette ville.')).toBeVisible();
 });
 
 test('in-app notification centre and unread badge work end to end', async ({ page }) => {
