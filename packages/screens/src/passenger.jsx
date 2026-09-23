@@ -757,23 +757,28 @@ function CityPicker({ label, selected, onPick, stops }) {
   const departments = useApi('/places?type=department');
   const [query, setQuery] = useState('');
   const communes = (places.data || []).filter(p => !query.trim() ||
-    (p.name + ' ' + (p.normalized_name || '')).toLowerCase().includes(query.trim().toLowerCase()));
+    foldText(`${p.name} ${p.normalized_name || ''}`).includes(foldText(query.trim())));
   const deptName = id => (departments.data || []).find(d => d.id === id)?.name || '';
+  const byCity = new Map(stops.map(s => [foldText(s.city), s]));
   return <div className="stack">
     <label>{label}
       <input className="control" type="search" placeholder="Rechercher une ville…" value={query}
         onChange={e => setQuery(e.target.value)} aria-label={`Rechercher une ville pour ${label}`}/>
     </label>
-    <select className="control" aria-label={label} value={selected?.id || ''} onChange={e => {
+    <select className="control" aria-label={label} value={selected?.place?.id || ''} onChange={e => {
       const place = (places.data || []).find(p => p.id === e.target.value);
-      onPick(place ? { place, stopId: stops.find(s => s.city?.toLowerCase() === place.name.toLowerCase())?.stopId ?? null } : null);
+      const stop = place ? byCity.get(foldText(place.name)) : null;
+      onPick(place ? { place, stopId: stop?.stopId ?? null } : null);
     }}>
       <option value="">Choisir…</option>
-      {communes.map(p => <option key={p.id} value={p.id}>{p.name}{deptName(p.parent_id) ? ` (${deptName(p.parent_id)})` : ''}</option>)}
+      {communes.map(p => {
+        const available = byCity.has(foldText(p.name));
+        return <option key={p.id} value={p.id}>{p.name}{deptName(p.parent_id) ? ` (${deptName(p.parent_id)})` : ''}{available ? ' · service colis' : ''}</option>;
+      })}
     </select>
     {places.loading && <p className="small muted" role="status">Chargement des villes…</p>}
-    {selected && !selected.stopId && <p className="small muted" role="status">Aucun service colis pour cette ville pour le moment.</p>}
-    {selected?.stopId && <p className="small muted" role="status">Service disponible depuis {selected.place.name}.</p>}
+    {selected && !selected.stopId && <p className="small muted" role="status">LeRoutier n’a pas encore de point colis publié dans cette ville.</p>}
+    {selected?.stopId && <p className="small muted" role="status">Service colis disponible depuis {selected.place.name}.</p>}
     {!places.loading && !places.data?.length && <p className="small muted" role="status">Aucune ville disponible pour le moment.</p>}
   </div>;
 }
