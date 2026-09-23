@@ -28,7 +28,17 @@ export function clearQueuedActions(storage){
 export function createSyncQueue(storage,owner,now=()=>Date.now()){
   const name=QUEUE_PREFIX+owner;
   let running=null;
-  function read(){try{const rows=JSON.parse(storage.getItem(name)||'[]');return Array.isArray(rows)?rows.filter(r=>r.owner===owner && now()-r.createdAt<OFFLINE_TTL):[];}catch{return [];}}
+  function read(){try{
+    const rows=JSON.parse(storage.getItem(name)||'[]');
+    if(!Array.isArray(rows))return [];
+    const valid=rows.filter(r=>r.owner===owner && now()-r.createdAt<OFFLINE_TTL);
+    // An expired action is beyond the TTL and must go, not just hide: leaving
+    // it in storage meant a board/alight row could keep the passenger's
+    // ticket code on the device forever if no further action ever triggered a
+    // write. The TTL is the safety rule; dropping the row enforces it.
+    if(valid.length!==rows.length){try{write(valid);}catch{/* storage refuses; the read still answers the truth */}}
+    return valid;
+  }catch{return [];}}
   const write=rows=>storage.setItem(name,JSON.stringify(rows));
   function update(id,patch){write(read().map(r=>r.id===id?{...r,...patch}:r));}
   return {
