@@ -12,6 +12,7 @@ import { schemaStatus } from '@leroutier/database/migrations';
 import { payments } from '@leroutier/database/payments';
 import { tickets } from '@leroutier/database/tickets';
 import { ratings } from '@leroutier/database/ratings';
+import { insurance, insuranceAdmin } from '@leroutier/database/insurance';
 import { driverAction, recordIncident } from '@leroutier/database/driver-actions';
 import { earnings, payouts } from '@leroutier/database/payouts';
 import { recovery } from '@leroutier/database/recovery';
@@ -64,6 +65,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const commerce=commercial(db);
   const domain=transport(db), auth=authentication(db,config,keyResolver),provision=provisioning(db,config);
   const pay=payments(db,adapter),ticket=tickets(db),rating=ratings(db);
+  const cover=insurance(db),coverAdmin=insuranceAdmin(db);
   const earn=earnings(db),payout=payouts(db,adapter,config),recover=recovery(db),parcel=parcels(db);
   const onboard=onboarding(db,evidence),loc=locations(db),settle=operatorSettlements(db,adapter),walkUp=walkUpBookings(db);
   const notify=notificationPolicies(db,config),rides=mobility(db),journey=journeys(db,config);
@@ -129,6 +131,8 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       '/onboarding/operator': ['PATCH'], '/onboarding/evidence': ['GET'], '/ops/corridors': ['GET'],
       '/ops/evidence-storage': ['GET'],
       '/ops/platform-team': ['GET', 'POST'], '/ops/platform-capabilities': ['GET'],
+      '/insurance/offers': ['GET'], '/ops/insurance/partners': ['GET', 'POST'],
+      '/ops/insurance/products': ['POST'], '/ops/insurance/policies': ['GET'],
       '/health/ready': ['GET'],
       '/operators': ['GET'], '/incidents': ['GET', 'POST'],
       '/boarding-points': ['GET'], '/boarding-points/proposals': ['POST'], '/mobility/providers': ['GET'],
@@ -313,6 +317,17 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
         ORDER BY (kind='city') DESC, name LIMIT 100`,[`%${q}%`,`%${q.toLowerCase()}%`]);
       return list(`SELECT id,name,kind,parent_id,latitude,longitude,normalized_name,aliases FROM places
         WHERE ${kindFilter} ORDER BY name LIMIT 200`);
+    }
+    // The insurance catalogue. Public, like the fare and the seat map: the
+    // add-on has to be visible while somebody is still deciding, not revealed
+    // after they have paid. It carries no personal data — product names,
+    // cover amounts and a partner's trading name — so there is nothing here to
+    // protect, only a rate limit to stop it being scraped in a loop.
+    if(method==='GET' && path==='/insurance/offers') {
+      await meterAnonymous();
+      const declared=url.searchParams.get('declaredValueMinor');
+      return cover.offers({scope:url.searchParams.get('scope'),
+        ...(declared?{declaredValueMinor:Number(declared)}:{})});
     }
     if(method==='GET' && path==='/routes') return list(`SELECT r.*,coalesce((SELECT json_agg(json_build_object('sequence',rs.sequence,'stopId',s.id,'name',s.name,'city',p.name) ORDER BY rs.sequence)
       FROM route_stops rs JOIN stops s ON s.id=rs.stop_id JOIN places p ON p.id=s.place_id
@@ -586,6 +601,38 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='GET' && ratingPath) return rating.forBooking(actor,uuid(ratingPath[1]));
     if(method==='POST' && ratingPath) { await limited('rating:'+actor.id); return rating.rate(actor,uuid(ratingPath[1]),await body()); }
     if(method==='GET' && path==='/ops/ratings') return rating.forOperator(actor,url.searchParams.get('operatorId'));
+
+    // Cover on one trip or one parcel. The scope is in the path rather than
+    // the body so a booking route can never be handed a parcel id by a caller
+    // who mixed the two up: the handler decides which it is, not the client.
+    const coverPath=path.match(/^\/(bookings|parcels)\/([^/]+)\/insurance$/);
+    if(coverPath){
+      const scope=coverPath[1]==='bookings'?'trip':'parcel', id=uuid(coverPath[2]);
+      if(method==='GET') return cover.forSubject(actor,scope,id);
+      if(method==='POST'){
+        await limited('insurance:'+actor.id);
+        return cover.attach(actor,{...await body(),scope,subjectId:id},req.headers.get('idempotency-key'));
+      }
+    }
+    const coverCancel=path.match(/^\/insurance\/policies\/([^/]+)\/cancel$/);
+    if(method==='POST' && coverCancel) return cover.cancel(actor,uuid(coverCancel[1]));
+
+    // Platform side. Every one of these asks for the `insurance` capability
+    // inside the domain module, not here, so a new caller cannot reach them by
+    // adding a route and forgetting the check.
+    if(method==='GET' && path==='/ops/insurance/partners') return coverAdmin.partners(actor);
+    if(method==='POST' && path==='/ops/insurance/partners')
+      return coverAdmin.savePartner(actor,await body(),req.headers.get('idempotency-key'));
+    if(method==='POST' && path==='/ops/insurance/products')
+      return coverAdmin.saveProduct(actor,await body(),req.headers.get('idempotency-key'));
+    if(method==='GET' && path==='/ops/insurance/policies')
+      return coverAdmin.queue(actor,{status:url.searchParams.get('status')??'requested',
+        partnerId:url.searchParams.get('partnerId')??null});
+    const coverDecision=path.match(/^\/ops\/insurance\/policies\/([^/]+)\/(decision|shared)$/);
+    if(method==='POST' && coverDecision){
+      const id=uuid(coverDecision[1]);
+      return coverDecision[2]==='shared'?coverAdmin.markShared(actor,id):coverAdmin.record(actor,id,await body());
+    }
     const ticketPath=path.match(/^\/bookings\/([^/]+)\/ticket$/);
     if(method==='POST' && ticketPath)return ticket.issue(actor,uuid(ticketPath[1]));
     const paymentPath=path.match(/^\/bookings\/([^/]+)\/(payment-intents|payment-status|reconcile-manual)$/);

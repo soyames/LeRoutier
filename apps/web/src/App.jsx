@@ -34,6 +34,7 @@ const PlatformFinance = lazy(() => platform().then(m => ({ default: m.PlatformFi
 const PlatformIncidents = lazy(() => platform().then(m => ({ default: m.PlatformIncidents })));
 const PlatformSystem = lazy(() => platform().then(m => ({ default: m.PlatformSystem })));
 const PlatformTeam = lazy(() => import('@leroutier/screens/platform-team').then(m => ({ default: m.PlatformTeam })));
+const PlatformInsurance = lazy(() => import('@leroutier/screens/platform-insurance').then(m => ({ default: m.PlatformInsurance })));
 import { JourneyTimeline } from '@leroutier/screens/journey';
 import { JourneyTracking } from '@leroutier/screens/tracking';
 import { NotificationCentre, useUnreadCount } from '@leroutier/screens/notifications';
@@ -42,7 +43,7 @@ import { ProfessionalEntry } from './professional.jsx';
 import { PASSENGER, WORK, OPS, workspacesFor, capabilities, workspaceOf, isAuthorized } from './workspaces.js';
 import {
   Search, Ticket, UserRound, Package, Bell, Home as HomeIcon, Route, Users, QrCode,
-  Wallet, BusFront, MapPin, Radio, WalletCards, ShieldAlert, Settings as SettingsIcon, Layers, Lock, LogOut, ShieldCheck, Building2, Database,
+  Wallet, BusFront, MapPin, Radio, WalletCards, ShieldAlert, Settings as SettingsIcon, Layers, Lock, LogOut, ShieldCheck, Building2, Database, Umbrella,
 } from 'lucide-react';
 
 function trimTrailingSlashes(value) {
@@ -202,6 +203,7 @@ export default function App() {
     { id: 'parcels', label: 'Colis', icon: Package, grant: 'operations' },
     { id: 'platform-incidents', label: 'Incidents', icon: ShieldAlert, grant: 'incidents' },
     { id: 'finance', label: 'Finances', icon: WalletCards, grant: 'finance' },
+    { id: 'insurance', label: 'Assurances', icon: Umbrella, grant: 'insurance' },
     { id: 'system', label: 'Système', icon: Database, grant: 'system' },
     { id: 'settings', label: 'Administration', icon: SettingsIcon, grant: 'provisioning' },
     { id: 'team', label: 'Équipe', icon: Users, grant: 'provisioning' },
@@ -209,12 +211,13 @@ export default function App() {
   const platformOpsScreens = {
     platform: <PlatformOverview/>, operators: <PlatformOperators/>, verification: <PlatformVerification/>, users: <PlatformUsers/>,
     services: <Services/>, parcels: <OpsParcels/>, 'platform-incidents': <PlatformIncidents/>, finance: <PlatformFinance/>, system: <PlatformSystem/>,
-    settings: <Settings/>, team: <PlatformTeam/>,
+    insurance: <PlatformInsurance/>, settings: <Settings/>, team: <PlatformTeam/>,
     notifications: <NotificationCentre onOpen={to => navigate(to)}/>,
   };
   const platformOpsTitles = {
     platform: 'Vue plateforme', operators: 'Opérateurs', verification: 'Vérifications & KYC', users: 'Utilisateurs & authentifications',
-    services: 'Services', parcels: 'Colis', 'platform-incidents': 'Incidents plateforme', finance: 'Finances & anomalies', system: 'Système & capacité',
+    services: 'Services', parcels: 'Colis', 'platform-incidents': 'Incidents plateforme', finance: 'Finances & anomalies',
+    insurance: 'Assurances & partenaires', system: 'Système & capacité',
     settings: 'Administration du réseau', team: 'Équipe plateforme', notifications: 'Notifications',
   };
 

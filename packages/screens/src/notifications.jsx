@@ -20,6 +20,8 @@ const TEMPLATES = {
   payment_succeeded: 'Paiement confirmé',
   payment_failed: 'Paiement refusé',
   ticket_ready: 'Billet prêt',
+  insurance_confirmed: 'Garantie émise par l’assureur',
+  insurance_declined: 'Garantie refusée par l’assureur',
   parcel_created: 'Envoi enregistré',
   parcel_accepted: 'Colis accepté',
   parcel_loaded: 'Colis chargé',

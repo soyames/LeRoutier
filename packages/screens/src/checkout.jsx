@@ -5,6 +5,7 @@ import { Card, Badge, SectionTitle, ProfileForm, ErrorState, SessionPanel } from
 import { fcfa, time, dayLong } from '@leroutier/ui';
 import { ArrowLeft, CreditCard, Lock } from 'lucide-react';
 import { TestBadge, ModeTestBanner } from './journey-results.jsx';
+import { InsuranceOffer } from './insurance.jsx';
 
 // The checkout: anonymous review first, authentication ONLY on
 // "Continuer vers le paiement".
@@ -36,7 +37,7 @@ function JourneySummary({ intent, fare }) {
     <div className="between wrap">
       <div><h2>Votre trajet</h2>
         <span className="small muted">{dayLong(option.departureAt)} · {time(option.departureAt)}</span></div>
-      {option.isTest ? <TestBadge/> : <Badge tone="neutral"><Lock size={12}/>Prix s?lectionn?</Badge>}
+      {option.isTest ? <TestBadge/> : <Badge tone="neutral"><Lock size={12}/>Prix sélectionné</Badge>}
     </div>
     <div className="offer-journey">
       <div className="offer-line"><span className="offer-dot start"/>
@@ -58,8 +59,8 @@ function JourneySummary({ intent, fare }) {
           <div><strong>{intent.destinationLabel ?? option.dropoffStop.city}</strong>
             <span className="small muted"> · Dernier kilomètre : {mins(option.lastMile.durationS)} · {km(option.lastMile.distanceM)}</span></div></div></>}
     </div>
-    <p className="small muted">{option.available} place{option.available > 1 ? 's' : ''} disponible{option.available > 1 ? 's' : ''} ? Arriv?e estim?e : {option.etaAt ? time(option.etaAt) : 'Indisponible'}</p>
-    {option.waitingS > 0 && <p className="small muted">Attente ? la prise en charge : {mins(option.waitingS)}</p>}
+    <p className="small muted">{option.available} place{option.available > 1 ? 's' : ''} disponible{option.available > 1 ? 's' : ''} · Arrivée estimée : {option.etaAt ? time(option.etaAt) : 'Indisponible'}</p>
+    {option.waitingS > 0 && <p className="small muted">Attente à la prise en charge : {mins(option.waitingS)}</p>}
     <div className="between wrap checkout-total">
       <span>Prix total</span>
       <span className="trip-price">{fcfa(fare ?? option.fare.amountMinor)}</span>
@@ -110,6 +111,10 @@ function CheckoutFlow({ intent }) {
   const { user, request, online } = useSession();
   const [step, setStep] = useState(intent.paymentRequested ? 'auth' : 'review');
   const [seat, setSeat] = useState(null);
+  // The optional cover, chosen before the booking exists and attached once it
+  // does. Null is the default and staying null costs nothing.
+  const [cover, setCover] = useState(null);
+  const [coverNotice, setCoverNotice] = useState('');
   const [error, setError] = useState('');
   const [fare, setFare] = useState(null);
   const [booking, setBooking] = useState(null);
@@ -134,6 +139,19 @@ function CheckoutFlow({ intent }) {
         origin: option.originSequence, destination: option.destinationSequence,
         ...(seat ? { seatNumber: seat } : {}) } });
       setBooking(b);
+      // The add-on attaches to the booking that now exists. Deliberately
+      // outside the try that governs the booking: an insurance request that
+      // fails must never cost somebody their seat. It is reported as itself
+      // and the journey continues to payment either way.
+      if (cover) {
+        try {
+          await request(`/bookings/${b.id}/insurance`, { method: 'POST', key: 'cover-' + b.id,
+            body: { productId: cover.productId, consentVersion: cover.consentVersion } });
+        } catch {
+          setCoverNotice('Votre réservation est confirmée. La demande d’assurance n’a pas pu être envoyée : '
+            + 'vous pourrez la refaire depuis votre billet.');
+        }
+      }
       // Fare stability: the hold's amount is authoritative. A changed amount
       // is stated, never silently applied.
       if (b.amount_minor !== option.fare.amountMinor) {
@@ -209,6 +227,12 @@ function CheckoutFlow({ intent }) {
       <p className="small muted">Aucun compte n’est nécessaire pour consulter ce récapitulatif. La connexion n’est demandée qu’au paiement.</p>
 
       {step === 'review' && !soldOut && <SeatPicker option={option} value={seat} onChange={setSeat}/>}
+      {/* Offered while the fare is still on screen, so it is a decision rather
+          than a surprise after payment. Renders nothing at all when no partner
+          is active, which is the state until one signs. */}
+      {step === 'review' && !soldOut && !option.isTest
+        && <InsuranceOffer scope="trip" chosen={cover} onChoose={setCover}/>}
+      {coverNotice && <p className="notice" role="status">{coverNotice}</p>}
       {step === 'review' && <div className="controls">
         <button className="btn btn-soft" onClick={backToResults}><ArrowLeft size={15}/>Retour aux résultats</button>
         <button className="btn btn-primary" disabled={soldOut || !online} onClick={continueToPayment}>
@@ -228,7 +252,7 @@ function CheckoutFlow({ intent }) {
         <ProfileForm/>
       </Card>}
       {step === 'quote' && <div className="controls">
-        <button className="btn btn-soft" onClick={backToResults}>Retour aux r?sultats</button>
+        <button className="btn btn-soft" onClick={backToResults}>Retour aux résultats</button>
         <button className="btn btn-primary" disabled={!online} onClick={async () => {
           setStep('paying'); await pay(booking);
         }}>Accepter {fcfa(fare)} et payer</button>

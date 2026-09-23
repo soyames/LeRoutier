@@ -166,7 +166,9 @@ function EmailChannelCard(){
   </Card>;
 }
 
-function PlatformOnly({children,grant=null}){
+// Exported so every platform screen asks the same question the same way. The
+// server refuses independently; this only decides what is worth rendering.
+export function PlatformOnly({children,grant=null}){
   const {user}=useSession();
   if(!user||user.role!=='ops'||user.operator_id)
     return <EmptyState icon={ShieldCheck} title="Accès plateforme requis" text="Cette page est réservée à l’exploitation de la plateforme LeRoutier."/>;

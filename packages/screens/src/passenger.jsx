@@ -11,6 +11,7 @@ import { JourneyTimeline } from './journey.jsx';
 import { JourneyTracking } from './tracking.jsx';
 import { TicketDocuments, ParcelDocuments } from './documents.jsx';
 import { QrCapture } from './qr-capture.jsx';
+import { InsuranceOffer, InsurancePolicy } from './insurance.jsx';
 
 const isoDay = value => new Date(value).toISOString().slice(0, 10);
 const sameDay = (value, day) => isoDay(value) === day;
@@ -498,6 +499,11 @@ export function Tickets({ focusId = null }) {
                   {['confirmed', 'boarded', 'completed', 'cancelled', 'expired'].includes(b.status) &&
                     <button className="btn btn-primary" disabled={busy === b.id} onClick={e => issue(b.id, e.currentTarget)}><QrCode size={16}/>{busy === b.id ? 'Ouverture du billet…' : 'Afficher mon billet'}</button>}
 
+                  {/* The cover, if there is one. Renders nothing when there is
+                      not, so a booking without insurance looks exactly as it
+                      did before this feature existed. */}
+                  <InsurancePolicy scope="trip" subjectId={b.id}/>
+
                   <div className="controls">
                     {['confirmed', 'boarded'].includes(b.status) &&
                       <button className="btn btn-soft" onClick={() => navigate(`/tickets/${b.id}`)}><Navigation size={15}/>Mon trajet de bout en bout</button>}
@@ -770,8 +776,15 @@ export function Parcels() {
   const [receiverName, setReceiverName] = useState(''), [receiverPhone, setReceiverPhone] = useState('');
   const [origin, setOrigin] = useState(''), [destination, setDestination] = useState(''), [category, setCategory] = useState('documents');
   const [weight, setWeight] = useState(''), [notes, setNotes] = useState('');
+  // What the sender says the contents are worth. It already shaped the carrier
+  // tariff server-side (parcel_rate_rules.declared_value_bp) but had no field
+  // to arrive through, so it was always zero. It is also what a parcel cover is
+  // priced and capped on, which is why it appears now.
+  const [declaredValue, setDeclaredValue] = useState('');
+  const declaredValueMinor = declaredValue ? Number(declaredValue) : 0;
+  const [cover, setCover] = useState(null), [coverNotice, setCoverNotice] = useState('');
   const [label, setLabel] = useState(null), [showDocuments, setShowDocuments] = useState(false);
-  const quoteUrl = origin && destination ? `/parcels/quote?originStopId=${origin}&destinationStopId=${destination}&category=${category}${weight ? `&weightG=${weight}` : ''}` : null;
+  const quoteUrl = origin && destination ? `/parcels/quote?originStopId=${origin}&destinationStopId=${destination}&category=${category}${weight ? `&weightG=${weight}` : ''}${declaredValueMinor ? `&declaredValueMinor=${declaredValueMinor}` : ''}` : null;
   const quoteApi = useApi(quoteUrl);
   const quote = quoteApi.data;
 
@@ -780,7 +793,19 @@ export function Parcels() {
     try {
       const parcel = await request('/parcels', { method: 'POST', key: 'parcel-' + crypto.randomUUID(), body: {
         senderName, senderPhone: senderPhone.trim(), receiverName, receiverPhone: receiverPhone.trim(),
-        originStopId: origin, destinationStopId: destination, category, weightG: weight ? Number(weight) : undefined, notes: notes.trim() || undefined } });
+        originStopId: origin, destinationStopId: destination, category, weightG: weight ? Number(weight) : undefined,
+        ...(declaredValueMinor ? { declaredValueMinor } : {}), notes: notes.trim() || undefined } });
+      // Same contract as the trip: the cover attaches to a parcel that now
+      // exists, and failing to attach never costs the sender their shipment.
+      if (cover) {
+        try {
+          await request(`/parcels/${parcel.id}/insurance`, { method: 'POST', key: 'cover-' + parcel.id,
+            body: { productId: cover.productId, consentVersion: cover.consentVersion } });
+        } catch {
+          setCoverNotice('Votre envoi est enregistré. La demande d’assurance n’a pas pu être transmise : '
+            + 'vous pourrez la refaire depuis le détail du colis.');
+        }
+      }
       mine.reload(); setStep(3);
       setLabel(await request(`/parcels/${parcel.id}/label`));
     } catch (e) { setError(e.message); } finally { setBusy(false); }
@@ -839,12 +864,16 @@ export function Parcels() {
           <label>Contenu<select className="control" value={category} onChange={e => setCategory(e.target.value)}>
             {categories.map(c => <option key={c} value={c}>{categoryLabels[c]}</option>)}</select></label>
           <label>Poids approximatif (grammes)<input className="control" type="number" min={1} step={1} placeholder="Facultatif" value={weight} onChange={e => setWeight(e.target.value)}/></label>
+          <label>Valeur déclarée du contenu (FCFA)<input className="control" type="number" min={0} step={100} placeholder="Facultatif" value={declaredValue} onChange={e => setDeclaredValue(e.target.value)}/></label>
+          <p className="small muted">La valeur déclarée peut modifier le tarif du transporteur et détermine le montant assurable.</p>
           <label>Précisions pour l’équipage (facultatif)<input className="control" maxLength={2000} value={notes} onChange={e => setNotes(e.target.value)}/></label>
           {quote && <div className="summary">
             <div className="row"><span>Prix</span><span>{fcfa(quote.amountMinor)}</span></div>
             <div className="row"><span>Transporteur</span><span>{quote.operatorName}</span></div>
           </div>}
           {quoteUrl && quoteApi.error && <p className="small muted" role="alert">Le tarif n’a pas pu être calculé pour cet envoi.</p>}
+          <InsuranceOffer scope="parcel" declaredValueMinor={declaredValueMinor} chosen={cover} onChoose={setCover} disabled={busy}/>
+          {coverNotice && <p className="notice" role="status">{coverNotice}</p>}
           <div className="controls">
             <button className="btn btn-primary" disabled={busy || !online || !quote}>{busy ? 'Enregistrement…' : 'Confirmer l’envoi'}</button>
             <button type="button" className="btn btn-soft" onClick={() => setStep(1)}>Retour</button>
@@ -858,15 +887,18 @@ export function Parcels() {
     {!user ? null : mine.loading ? <SkeletonCards count={2} lines={2}/>
       : mine.error ? <ErrorState text="Impossible de charger vos envois." onRetry={mine.reload}/>
         : !mine.data?.length ? <ApiState resource={mine} emptyTitle="Aucun envoi" empty="Vos colis apparaîtront ici."/>
-          : mine.data.map(p => <Card key={p.id} className="between wrap">
-            <div><h3>{p.trackingNumber}</h3>
-              <span className="small muted">{categoryLabels[p.category]} · {fcfa(p.priceMinor)} · {dayShort(p.createdAt)}</span></div>
-            <Badge tone={status('parcel', p.status).tone}>{status('parcel', p.status).label}</Badge>
-            <button className="btn btn-soft" disabled={busy || !online} onClick={async()=>{
-              setBusy(true);setError('');
-              try{setLabel(await request(`/parcels/${p.id}/label`));window.scrollTo({top:0,behavior:'smooth'});}
-              catch(e){setError(e.message);}finally{setBusy(false);}
-            }}>Afficher le reçu et le QR</button>
+          : mine.data.map(p => <Card key={p.id} className="stack">
+            <div className="between wrap">
+              <div><h3>{p.trackingNumber}</h3>
+                <span className="small muted">{categoryLabels[p.category]} · {fcfa(p.priceMinor)} · {dayShort(p.createdAt)}</span></div>
+              <Badge tone={status('parcel', p.status).tone}>{status('parcel', p.status).label}</Badge>
+              <button className="btn btn-soft" disabled={busy || !online} onClick={async()=>{
+                setBusy(true);setError('');
+                try{setLabel(await request(`/parcels/${p.id}/label`));window.scrollTo({top:0,behavior:'smooth'});}
+                catch(e){setError(e.message);}finally{setBusy(false);}
+              }}>Afficher le reçu et le QR</button>
+            </div>
+            <InsurancePolicy scope="parcel" subjectId={p.id}/>
           </Card>)}
 
     {/* Tracking sits with sending: it is the same errand for the same person. */}

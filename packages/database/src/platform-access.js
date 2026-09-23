@@ -31,7 +31,7 @@ import { invariant } from '@leroutier/domain';
 
 /** Everything a platform identity can be granted, superadmin aside. */
 export const PLATFORM_CAPABILITIES = Object.freeze([
-  'verification', 'users', 'finance', 'incidents', 'operations', 'system', 'provisioning',
+  'verification', 'users', 'finance', 'incidents', 'operations', 'system', 'provisioning', 'insurance',
 ]);
 
 /** Implies every capability, and manages the grants themselves. Exactly one exists. */
@@ -49,6 +49,7 @@ export const CAPABILITY_LABELS = Object.freeze({
   operations: 'Services & colis',
   system: 'Système & capacité',
   provisioning: 'Opérateurs & personnel',
+  insurance: 'Assurances & partenaires',
   superadmin: 'Super-administration',
 });
 

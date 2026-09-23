@@ -9,6 +9,8 @@
     "./ops": "./src/ops.jsx",
     "./platform-ops": "./src/platform-ops.jsx",
     "./platform-team": "./src/platform-team.jsx",
+    "./platform-insurance": "./src/platform-insurance.jsx",
+    "./insurance": "./src/insurance.jsx",
     "./journey": "./src/journey.jsx",
     "./notifications": "./src/notifications.jsx",
     "./map": "./src/map.jsx",
