@@ -45,35 +45,13 @@ export function takeReturnPath() {
  *
  * Local development keeps the configured Firebase domain because localhost
  * does not proxy /__/auth to the Firebase project.
- *
- * @param {{authDomain?: string}|null|undefined} config
- * @param {{hostname?: string}|null|undefined} [location] only `hostname` is
- *   read, so a caller (and a test) may pass that alone rather than a whole
- *   `Location`.
- * @returns {string|undefined}
  */
 export function browserAuthDomain(config, location = globalThis.window?.location) {
   const hostname = String(location?.hostname || '').toLowerCase();
   return BRANDED_AUTH_HOSTS.has(hostname) ? hostname : config?.authDomain;
 }
 
-/**
- * What a provider failure means, in the product's language.
- *
- * One place interprets Firebase error codes, because the alternative is what
- * this replaced: a little mapping at each call site, each knowing about a
- * different two or three codes, and everything else collapsing into "réessayez"
- * — including the failures where retrying can never work.
- *
- * `retryable` is the honest part. An unauthorized domain, a disabled provider
- * and an account collision are configuration or account facts: telling somebody
- * to try again sends them round a loop that has no exit. The provider's own
- * message is never shown — it is developer-facing and names internals — but it
- * is kept as the `cause` for diagnosis.
- *
- * @param {any} error
- * @param {'popup'|'redirect'|'password'} [during]
- */
+/** What a provider failure means in product language. */
 export function signInFailure(error, during = 'popup') {
   const code = String(error?.code ?? '');
   const fail = (message, retryable) =>
@@ -82,9 +60,6 @@ export function signInFailure(error, during = 'popup') {
   case 'auth/popup-closed-by-user':
   case 'auth/user-cancelled':
     return fail('Connexion annulée.', true);
-  // Configuration, not bad luck. This is the failure a branded auth domain
-  // introduces: the host must be an authorized domain on the Firebase project,
-  // and until somebody adds it no amount of retrying helps.
   case 'auth/unauthorized-domain':
   case 'auth/operation-not-allowed':
   case 'auth/invalid-api-key':
@@ -116,12 +91,8 @@ export function signInFailure(error, during = 'popup') {
 }
 
 let cached = null;
+let googleSignInInFlight = null;
 
-/**
- * Initialises Firebase once, from configuration the API served at runtime.
- * Returns null when sign-in is not configured, so every caller can simply ask
- * and get an honest answer.
- */
 export async function firebaseAuth(config) {
   if (!config?.apiKey || !config?.authDomain || !config?.projectId || !config?.appId) return null;
   const authDomain = browserAuthDomain(config);
@@ -134,8 +105,6 @@ export async function firebaseAuth(config) {
     import('firebase/auth'),
   ]);
 
-  // Use one dedicated Firebase app. Older flows in the bundle must not be able
-  // to leave an app initialised with firebaseapp.com and silently win forever.
   let app = getApps().find(candidate => candidate.name === FIREBASE_APP_NAME) ?? null;
   if (app && app.options.authDomain !== authDomain) {
     await deleteApp(app);
@@ -149,87 +118,76 @@ export async function firebaseAuth(config) {
   }, FIREBASE_APP_NAME);
 
   const instance = auth.getAuth(app);
-  // Tokens live for the tab and no longer. A shared handset at a station
-  // should not sign the next person in as the last one.
   await auth.setPersistence(instance, auth.browserSessionPersistence)
     .catch(() => auth.setPersistence(instance, auth.inMemoryPersistence));
   cached = { key, auth: instance, sdk: auth };
   return cached;
 }
 
-/**
- * Starts a Google sign-in.
- *
- * Popup first, redirect as a fallback. Both use the same branded authDomain in
- * production, so the helper stays on the LeRoutier origin. Mobile browsers that
- * block the popup can therefore fall back to redirect without crossing to the
- * Firebase Hosting domain.
- */
-export async function signInWithGoogle(config, returnTo = '/') {
+function preferGoogleRedirect() {
+  try {
+    if (window.matchMedia?.('(display-mode: standalone)').matches) return true;
+    if (navigator.userAgentData?.mobile === true) return true;
+  } catch { /* older browsers */ }
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(String(globalThis.navigator?.userAgent || ''));
+}
+
+async function beginGoogleRedirect(sdk, auth, provider) {
+  try { window.sessionStorage.setItem(PENDING_REDIRECT, '1'); } catch { /* private mode */ }
+  try {
+    await sdk.signInWithRedirect(auth, provider);
+    return null;
+  } catch (error) {
+    try { window.sessionStorage.removeItem(PENDING_REDIRECT); } catch { /* private mode */ }
+    throw signInFailure(error, 'redirect');
+  }
+}
+
+async function performGoogleSignIn(config, returnTo) {
   const ready = await firebaseAuth(config);
   if (!ready) throw new Error('auth-unavailable');
   const { sdk, auth } = ready;
 
   const provider = new sdk.GoogleAuthProvider();
-  // Identity and basic profile only. No Gmail, Drive, Calendar or Contacts —
-  // the public privacy policy says so, and this is where that is kept true.
   provider.addScope('openid');
   provider.addScope('profile');
   provider.addScope('email');
 
   rememberReturnPath(returnTo);
+
+  // Mobile browsers and installed PWAs are where popup auth is least reliable:
+  // popup blockers, browser-to-PWA handoff and process suspension can all leave
+  // the person back on the login screen. Use the same-origin redirect directly
+  // there. Desktop keeps the faster popup flow.
+  if (preferGoogleRedirect()) return beginGoogleRedirect(sdk, auth, provider);
+
   try {
     const result = await sdk.signInWithPopup(auth, provider);
     return result.user;
   } catch (error) {
     const code = error?.code ?? '';
-    if (code === 'auth/popup-blocked') {
-      // Mobile browsers sometimes block a first popup spuriously; one retry
-      // avoids a full redirect round-trip before falling back to it.
-      try {
-        const retried = await sdk.signInWithPopup(auth, provider);
-        return retried.user;
-      } catch { /* the redirect fallback below still applies */ }
-    }
-    // A superseded popup request. The user clicked twice and the SECOND popup
-    // is still open and still working: this rejection belongs to the first
-    // call. Falling back to a redirect here navigated the page away and killed
-    // the live popup, turning a double click into a failed sign-in.
     if (code === 'auth/cancelled-popup-request') return null;
-    // Closing the window is a decision, not an obstacle to route around.
     if (code === 'auth/popup-closed-by-user') throw signInFailure(error);
     if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(code)) {
-      try { window.sessionStorage.setItem(PENDING_REDIRECT, '1'); } catch { /* private mode */ }
-      try {
-        await sdk.signInWithRedirect(auth, provider);
-      } catch (redirectError) {
-        // The redirect never started, so nothing will come back to finish it.
-        try { window.sessionStorage.removeItem(PENDING_REDIRECT); } catch { /* private mode */ }
-        throw signInFailure(redirectError, 'redirect');
-      }
-      // The page navigates away; nothing after this runs.
-      return null;
+      return beginGoogleRedirect(sdk, auth, provider);
     }
     throw signInFailure(error);
   }
 }
 
 /**
- * Completes a redirect sign-in, if one is in flight.
- *
- * Called once on load. It asks Firebase only when a redirect was actually
- * started, so a normal visit costs nothing.
- *
- * A failure here is REPORTED rather than swallowed. This used to return null on
- * any error, which meant a person who clicked "Continuer avec Google", was sent
- * to Google, and came back to a page that looked exactly as they had left it —
- * signed out, with no explanation and nothing to act on. The redirect path is
- * the mobile path, so that silence fell on the users least able to work around
- * it.
- *
- * @returns {Promise<{user: any, error: null} | {user: null, error: Error} | null>}
- *   null when no redirect was in flight.
+ * Starts one Google sign-in at a time. Fast taps used to create overlapping
+ * Firebase popup requests; the first was cancelled while the UI became usable
+ * again, which made people press the button repeatedly. Every caller now joins
+ * the same in-flight attempt.
  */
+export async function signInWithGoogle(config, returnTo = '/') {
+  if (googleSignInInFlight) return googleSignInInFlight;
+  googleSignInInFlight = performGoogleSignIn(config, returnTo);
+  try { return await googleSignInInFlight; }
+  finally { googleSignInInFlight = null; }
+}
+
 export async function completeRedirectSignIn(config) {
   let pending = false;
   try { pending = window.sessionStorage.getItem(PENDING_REDIRECT) === '1'; } catch { /* private mode */ }
@@ -239,39 +197,24 @@ export async function completeRedirectSignIn(config) {
   if (!ready) return { user: null, error: signInFailure(new Error('auth-unavailable'), 'redirect') };
   try {
     const result = await ready.sdk.getRedirectResult(ready.auth);
-    // No result means the redirect completed without a credential — the user
-    // backed out at Google. That is a cancellation, not a failure to report.
     return result?.user ? { user: result.user, error: null } : null;
   } catch (error) {
     return { user: null, error: signInFailure(error, 'redirect') };
   }
 }
 
-/**
- * A current ID token for the API.
- *
- * Firebase refreshes it when it is close to expiry, which is why the token is
- * asked for per request rather than held: a long booking should not fail on a
- * token that went stale while the user was reading.
- */
 export async function idToken(config, { force = false } = {}) {
   const ready = await firebaseAuth(config);
   const user = ready?.auth?.currentUser;
   return user ? user.getIdToken(force) : null;
 }
 
-/** Notifies on sign-in and sign-out, including a restored session. */
 export async function onAuthChange(config, callback) {
   const ready = await firebaseAuth(config);
   if (!ready) return () => {};
   return ready.sdk.onAuthStateChanged(ready.auth, callback);
 }
 
-/**
- * Standard registration: one Firebase Email/Password account, which becomes
- * the SAME LeRoutier identity as any Google account — the API only ever sees
- * the Firebase ID token. Passwords never touch LeRoutier's API or database.
- */
 export async function createAccountWithEmail(config, { email, password }) {
   const ready = await firebaseAuth(config);
   if (!ready) throw new Error('auth-unavailable');
@@ -279,7 +222,6 @@ export async function createAccountWithEmail(config, { email, password }) {
   catch (error) { throw signInFailure(error, 'password'); }
 }
 
-/** Email/password sign-in; the same single-identity model as Google. */
 export async function signInWithEmail(config, { email, password }) {
   const ready = await firebaseAuth(config);
   if (!ready) throw new Error('auth-unavailable');
@@ -287,7 +229,6 @@ export async function signInWithEmail(config, { email, password }) {
   catch (error) { throw signInFailure(error, 'password'); }
 }
 
-/** Firebase sends the reset email; nothing is stored or emailed by LeRoutier. */
 export async function sendPasswordReset(config, email) {
   const ready = await firebaseAuth(config);
   if (!ready) throw new Error('auth-unavailable');
@@ -301,8 +242,5 @@ export async function signOutFirebase(config) {
     window.sessionStorage.removeItem(RETURN_TO);
     window.sessionStorage.removeItem(PENDING_REDIRECT);
   } catch { /* private mode */ }
-  // Crew work is queued in localStorage while offline, and a pending
-  // board/alight row carries the passenger's ticket code. Signing out on a
-  // shared station handset must leave nothing of the previous person behind.
   try { clearQueuedActions(window.localStorage); } catch { /* private mode */ }
 }
