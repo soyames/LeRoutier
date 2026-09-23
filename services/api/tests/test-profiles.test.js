@@ -9,6 +9,7 @@ import { seedTestProfiles } from '@leroutier/database/test-profiles';
 import { TEST } from '@leroutier/database/test-transport';
 import { tickets } from '@leroutier/database/tickets';
 import { parcels } from '@leroutier/database/parcels';
+import { transport } from '@leroutier/database/transport';
 import { notificationPolicies } from '@leroutier/database/notifications';
 import { createApi } from '../src/app.js';
 
@@ -62,6 +63,50 @@ test('ticket QR and manual code enforce service, stop, assignment, duplicate and
   assert.equal((await call('company-driver','/driver/actions',action,key)).data.status,'boarded');
   assert.equal((await call('company-driver','/tickets/verify',input)).error.code,'ALREADY_BOARDED');
   assert.equal((await call('company-driver','/driver/actions',action,randomUUID())).status,409);
+});
+
+// A paid, confirmed booking on the company service, ready to be boarded.
+// Self-contained so each regression owns its booking and cleans it up.
+async function paidBooking(origin, destination, tag) {
+  const domain = transport(db);
+  const booking = await domain.hold(sessions.passenger.user, { serviceId: TEST.service2, origin, destination }, `qa-${tag}-${randomUUID()}`);
+  await domain.simulatedTestPayment(sessions.passenger.user, booking.id, `qa-${tag}-pay-${randomUUID()}`);
+  return domain.transition(sessions.passenger.user, booking.id, 'confirm');
+}
+
+// Regression: a ticket past its 24 h window was never asserted anywhere.
+// Found by /qa on 2026-09-23.
+test('an expired ticket is refused at the door with the invalidation message', async () => {
+  const booking = await paidBooking(0, 1, 'expiry');
+  const credential = await tickets(db).issue(sessions.passenger.user, booking.id);
+  const input = { code: credential.token, serviceId: TEST.service2, stopSequence: 0 };
+  assert.equal((await call('company-driver', '/tickets/verify', input)).data.valid, true);
+
+  await db.transaction(tx => tx.query(`UPDATE ticket_credentials SET expires_at = now() - interval '1 minute' WHERE booking_id = $1`, [booking.id]));
+  const refused = await call('company-driver', '/tickets/verify', input);
+  assert.equal(refused.status, 409);
+  assert.equal(refused.error.code, 'TICKET_INVALID');
+  assert.match(refused.error.message, /expired|expiré/i);
+  // The manual code answers the same rule: expiry is on the credential, not
+  // on whichever code happened to be typed.
+  assert.equal((await call('company-driver', '/tickets/verify', { ...input, code: credential.manualCode })).error.code, 'TICKET_INVALID');
+  await transport(db).transition(sessions.passenger.user, booking.id, 'cancel');
+});
+
+// Regression: the IDEMPOTENCY_CONFLICT branch of /driver/actions (reused key,
+// different payload) was only exercised indirectly for holds and payouts.
+// Found by /qa on 2026-09-23.
+test('a reused idempotency key with a different payload is refused, not double-applied', async () => {
+  const booking = await paidBooking(0, 1, 'replay-conflict');
+  await tickets(db).issue(sessions.passenger.user, booking.id);
+  const key = randomUUID();
+  const first = { type: 'board', payload: { serviceId: TEST.service2, bookingId: booking.id, stopSequence: 0 } };
+  assert.equal((await call('company-driver', '/driver/actions', first, key)).data.status, 'boarded');
+
+  const different = { type: 'board', payload: { serviceId: TEST.service2, bookingId: booking.id, stopSequence: 1 } };
+  const conflict = await call('company-driver', '/driver/actions', different, key);
+  assert.equal(conflict.status, 409);
+  assert.equal(conflict.error.code, 'IDEMPOTENCY_CONFLICT');
 });
 
 test('assigned convoyeur handles phone QR and manual parcels; pickup needs a separate code',async()=>{
