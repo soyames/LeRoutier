@@ -10,6 +10,7 @@ import {Assistant} from './assistant.jsx';
 import { About } from './about.jsx';
 import { LegalNotice, PrivacyPolicy, TermsOfUse, CancellationPolicy, CookiePolicy } from './legal.jsx';
 import { Seo } from './seo.jsx';
+import { VerifyEmail } from './verify-email.jsx';
 import { BusBeninPage, RoutePage, ColisBeninPage, StationsBeninPage, TransporteursBeninPage } from './seo-pages.jsx';
 import { CORRIDORS } from './corridors.js';
 // Imported for its side effect and imported EARLY: it listens for
@@ -46,6 +47,9 @@ createRoot(document.getElementById('root')).render(
         <Route path="/terms" element={<TermsOfUse/>}/>
         <Route path="/cancellations" element={<CancellationPolicy/>}/>
         <Route path="/cookies" element={<CookiePolicy/>}/>
+        {/* The destination of the account-verification email. A fixed route, so
+            it can never be shadowed by the workspace sections below. */}
+        <Route path="/verify-email" element={<VerifyEmail/>}/>
         <Route path="/:section/:id" element={<App/>}/>
         <Route path="/:section" element={<App/>}/>
         <Route path="/work/:section/:id" element={<App/>}/>

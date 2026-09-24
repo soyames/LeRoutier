@@ -23,7 +23,9 @@ import { operatorSettlements } from '@leroutier/database/operator-settlements';
 import { walkUpBookings } from '@leroutier/database/walkup';
 import { notificationPolicies } from '@leroutier/database/notifications';
 import { notificationDelivery } from '@leroutier/database/notification-delivery';
-import { notificationProviders } from '@leroutier/database/notification-providers';
+import { notificationProviders, brevoTransactionalSender } from '@leroutier/database/notification-providers';
+import { verificationEmail } from '@leroutier/notifications/content';
+import { createFirebaseAdmin } from '@leroutier/firebase-admin';
 import { operationalHealth } from '@leroutier/database/operational-health';
 import { fareIntelligence } from '@leroutier/database/fare-intelligence';
 import { commercial } from '@leroutier/database/commercial';
@@ -51,9 +53,22 @@ class RawResponse {
   constructor(body, contentType, status = 200) { this.body = body; this.contentType = contentType; this.status = status; }
 }
 
-export function createApi(db, config, keyResolver=undefined, adapter=paymentAdapter(config)) {
-  const providers=notificationProviders(db,config);
+export function createApi(db, config, keyResolver=undefined, adapter=paymentAdapter(config), fetcher=fetch) {
+  // The raw server configuration, captured BEFORE notificationProviders are
+  // replaced by live adapters below: the Brevo SETTINGS (key, sender) live
+  // there, and the standalone verification sender needs them.
+  const settings=config;
+  const providers=notificationProviders(db,config,fetcher);
   config={...config,notificationProviders:providers};
+  // Server-only Firebase identity administration. Tests inject their own
+  // through config.firebaseAdmin; production resolves the service-account
+  // credential (or stays unavailable, which callers fail closed on).
+  const firebaseAdmin=config.firebaseAdmin ?? createFirebaseAdmin(config);
+  // Standalone Brevo sender for the account-verification email. Its recipient
+  // is an unverified Firebase identity — no users.id, no notification row —
+  // so it cannot travel the notification pipeline; it uses the SAME provider,
+  // settings and failure vocabulary instead of inventing a second system.
+  const verificationMail=brevoTransactionalSender(settings.notificationProviders?.brevo ?? {}, fetcher);
   // Private storage for KYC/KYB documents. Null when no provider is
   // configured, which is a supported state: the product keeps accepting
   // operator-hosted links and keeps saying plainly that it does not hold the
@@ -96,11 +111,11 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const planner=journeyPlanning(db,{boardingBufferS:config.journey?.boardingBufferS ?? 600});
   const assistant=assistantService({db,domain,parcels:parcel,fares,health,track,privacy});
   const list=(query,params=[])=>db.transaction(async tx=>(await tx.query(query,params)).rows);
-  async function limited(subject) {
+  async function limited(subject, ceiling=120) {
     await db.transaction(async tx=>{
       const {rows}=await tx.query(`INSERT INTO request_limits(subject,window_at,requests) VALUES($1,date_trunc('minute',now()),1)
         ON CONFLICT(subject,window_at) DO UPDATE SET requests=request_limits.requests+1 RETURNING requests`,[subject]);
-      invariant(rows[0].requests<=120,'RATE_LIMITED','Too many requests. Try again shortly.',429);
+      invariant(rows[0].requests<=ceiling,'RATE_LIMITED','Too many requests. Try again shortly.',429);
     });
   }
   function body(req){
@@ -120,7 +135,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     const METHOD_ALLOW = {
       '/health': ['GET'], '/auth/config': ['GET'], '/payments/config': ['GET'],
       '/stops': ['GET'], '/places': ['GET'], '/routes': ['GET'], '/services': ['GET'],
-      '/webhooks/fedapay': ['POST'], '/auth/demo': ['POST'], '/me': ['GET', 'PATCH'],
+      '/webhooks/fedapay': ['POST'], '/auth/demo': ['POST'], '/auth/email-verification': ['POST'], '/me': ['GET', 'PATCH'],
       '/me/bookings': ['GET'], '/me/parcels': ['GET'], '/notifications': ['GET'],
       '/notifications/preferences': ['GET', 'PUT'], '/parcels/quote': ['GET'], '/parcels': ['POST'],
       '/bookings': ['POST'], '/operator/settlements': ['GET'], '/operator/payouts': ['GET', 'POST'],
@@ -251,6 +266,31 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       return new RawResponse(rendered.body,rendered.contentType);
     }
     if(method==='POST' && path==='/auth/demo') {invariant(config.demoLogin,'NOT_FOUND','Endpoint not found.',404);await limited('demo-login');const input=await body();return auth.demoSession(input.role,input.profile);}
+    // Account verification email. A newly created Firebase identity is NOT a
+    // LeRoutier user yet — /me refuses it — so this path deliberately bypasses
+    // the /me mapper and the notification tables (which need users.id). The
+    // address always comes from the VERIFIED TOKEN's claims, never from a body
+    // field, and the generated action link never reaches the response.
+    if(method==='POST' && path==='/auth/email-verification') {
+      const token=req.headers.get('authorization')?.match(/^Bearer ([^\s]+)$/)?.[1];
+      invariant(token && token.length<8192,'UNAUTHORIZED','Sign in to continue.',401);
+      const claims=await auth.verifyToken(token);
+      const ip=(req.headers.get('x-forwarded-for')||'').split(',')[0].trim()||'local';
+      await limited('verify-email-ip:'+ip);
+      await limited('verify-email:'+claims.subject,5);
+      // Only password identities use this flow; Google verifies its own.
+      invariant(claims.signInProvider==='password','FORBIDDEN','Cette action est réservée aux comptes créés avec une adresse e-mail et un mot de passe.',403);
+      if(claims.emailVerified===true) return {status:'already_verified'};
+      invariant(claims.email,'UNAUTHORIZED','Session is invalid or expired.',401);
+      let link;
+      try { link=await firebaseAdmin.generateEmailVerificationLink(claims.email,config.appUrl+'/verify-email'); }
+      catch { throw new DomainError('VERIFICATION_UNAVAILABLE','Impossible d’envoyer l’e-mail de confirmation pour le moment. Réessayez plus tard.',503); }
+      // The send result is a reason, never a provider message: the raw action
+      // link must not surface anywhere, response included.
+      const send=await verificationMail.send({to:claims.email,...verificationEmail(link)});
+      invariant(send.accepted===true,'VERIFICATION_UNAVAILABLE','Impossible d’envoyer l’e-mail de confirmation pour le moment. Réessayez plus tard.',503);
+      return {status:'sent'};
+    }
     // The public catalogue is the one authenticated-free read surface with real
     // breadth: every stop, every place, every route, every departure. Without a
     // limit it is a free scraping and enumeration endpoint, so anonymous reads

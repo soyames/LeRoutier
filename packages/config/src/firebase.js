@@ -333,6 +333,18 @@ export async function sendPasswordReset(config, email) {
   await ready.sdk.sendPasswordResetEmail(ready.auth, String(email).trim());
 }
 
+/**
+ * Applies a Firebase email-verification oobCode. This is Firebase's own
+ * supported mechanism — the code arrives on /verify-email in the URL, the SDK
+ * exchanges it, and Firebase marks the address verified. No credential, no
+ * secret: the same public web identifiers every sign-in uses.
+ */
+export async function applyVerificationCode(config, oobCode) {
+  const ready = await firebaseAuth(config);
+  if (!ready) throw new Error('auth-unavailable');
+  await ready.sdk.applyActionCode(ready.auth, String(oobCode));
+}
+
 export async function signOutFirebase(config) {
   const ready = await firebaseAuth(config);
   if (ready) await ready.sdk.signOut(ready.auth).catch(() => {});

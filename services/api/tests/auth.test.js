@@ -5,12 +5,21 @@ import { publicAuthConfig } from '@leroutier/config';
 import { jwtFixture } from './jwt-fixture.js';
 let fixture,verify;
 before(async()=>{fixture=await jwtFixture();verify=jwtVerifier(fixture.config,fixture.resolver);});
-test('valid signature returns only verified subject and issuer',async()=>{
-  assert.deepEqual(await verify(await fixture.sign('person',{role:'ops',operator_id:'untrusted'})),{subject:'person',issuer:fixture.config.issuer,notificationEmail:null});
+test('valid signature returns only the identity claims LeRoutier reads',async()=>{
+  assert.deepEqual(await verify(await fixture.sign('person',{role:'ops',operator_id:'untrusted'})),
+    {subject:'person',issuer:fixture.config.issuer,email:null,notificationEmail:null,emailVerified:false,signInProvider:null});
 });
 test('only a verified email claim can receive confirmation mail',async()=>{
   assert.equal((await verify(await fixture.sign('person',{email:'test@example.invalid',email_verified:false}))).notificationEmail,null);
   assert.equal((await verify(await fixture.sign('person',{email:'test@example.invalid',email_verified:true}))).notificationEmail,'test@example.invalid');
+});
+test('the verification gate reads the provider claim and the verified flag separately',async()=>{
+  const unverified=await verify(await fixture.sign('person',{email:'test@example.invalid',email_verified:false,firebase:{sign_in_provider:'password'}}));
+  assert.deepEqual({email:unverified.email,notificationEmail:unverified.notificationEmail,emailVerified:unverified.emailVerified,signInProvider:unverified.signInProvider},
+    {email:'test@example.invalid',notificationEmail:null,emailVerified:false,signInProvider:'password'});
+  const google=await verify(await fixture.sign('person',{email:'test@example.invalid',email_verified:false,firebase:{sign_in_provider:'google.com'}}));
+  assert.equal(google.signInProvider,'google.com');
+  assert.equal(google.emailVerified,false);
 });
 test('malformed JWT is rejected',async()=>assert.rejects(verify('invalid.jwt.input'),{code:'UNAUTHORIZED'}));
 test('JWT with another signing key is rejected',async()=>{const other=await jwtFixture();await assert.rejects(verify(await other.sign('person')),{code:'UNAUTHORIZED'});});

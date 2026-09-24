@@ -28,6 +28,8 @@ const HIDDEN = {
 async function mockFirebase(page, { published = HIDDEN, signUp = null, signIn = null } = {}) {
   await mockApi(page);
   await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: published } }));
+  // Registration asks for the confirmation email through the API.
+  await page.route('**/api/v1/auth/email-verification', r => r.fulfill({ json: { data: { status: 'sent' } } }));
   await page.route('**/*', async r => {
     let url;
     try { url = new URL(r.request().url()); } catch { return r.fallback(); }
@@ -97,7 +99,7 @@ test('an absent provider list fails hidden on the client too', async ({ page }) 
 });
 
 test('registration and profile completion work with Google hidden', async ({ page }) => {
-  await mockFirebase(page, { signUp: { email: 'nouveau@example.com' } });
+  await mockFirebase(page, { signUp: { email: 'nouveau@example.com' }, signIn: { email: 'nouveau@example.com' } });
   await mockIdentity(page);
   await page.goto(APP + '/account');
   await expect(page.getByRole('button', { name: 'Continuer avec Google' })).toHaveCount(0);
@@ -108,8 +110,16 @@ test('registration and profile completion work with Google hidden', async ({ pag
   await page.getByLabel('Adresse e-mail').fill('nouveau@example.com');
   await page.getByLabel('Mot de passe').fill('secret-mot-de-passe');
   await page.getByRole('button', { name: 'Créer mon compte' }).click();
-  // Registration carries name and phone into the profile; the account lands
-  // connected and complete without any Google step.
+  // Registration asks for the address confirmation first — never a session
+  // before the address is verified, with or without Google on the page.
+  await expect(page.getByRole('heading', { name: 'Confirmez votre adresse e-mail' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Déconnexion' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Retour à la connexion' }).click();
+  await page.getByLabel('Adresse e-mail').fill('nouveau@example.com');
+  await page.getByLabel('Mot de passe').fill('secret-mot-de-passe');
+  await page.getByRole('button', { name: 'Se connecter avec mon adresse e-mail' }).click();
+  // The name and phone typed at registration land in the profile, so the
+  // verified account arrives connected and complete without any Google step.
   await expect(page.getByRole('button', { name: 'Déconnexion' })).toBeVisible();
   await expect(page.getByText('Yao Sossou').first()).toBeVisible();
 });

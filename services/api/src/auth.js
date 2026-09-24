@@ -18,8 +18,22 @@ export function jwtVerifier(config, keyResolver = undefined) {
       invariant(Number.isFinite(payload.iat) && payload.iat<=Date.now()/1000+5,'UNAUTHORIZED','Invalid identity.',401);
       invariant(typeof payload.sub==='string' && payload.sub.length>0 && payload.sub.length<=255,'UNAUTHORIZED','Invalid identity.',401);
       // Custom role/operator/name claims are deliberately not used for authorization or provisioning.
-      return {subject:payload.sub,issuer:payload.iss,notificationEmail:payload.email_verified === true &&
-        typeof payload.email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email) && payload.email.length<=254 ? payload.email : null};
+      // The email claim travels in two shapes: `email` is the address itself
+      // (the verification endpoint sends to it for unverified accounts), and
+      // `notificationEmail` is the SAME address but only when the provider has
+      // verified it — the sole thing allowed to populate users.notification_email.
+      // `signInProvider` is how password identities are told apart from Google,
+      // custom-token and demo identities, and is the claim the verification
+      // gate reads.
+      const email=typeof payload.email==='string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email) && payload.email.length<=254 ? payload.email : null;
+      // Firebase's own provider claim. Read defensively: a token without it
+      // (custom-minted) is never treated as a password identity.
+      const firebase=/** @type {{sign_in_provider?:unknown}|undefined} */ (payload.firebase);
+      return {subject:payload.sub,issuer:payload.iss,
+        email,
+        notificationEmail:payload.email_verified === true ? email : null,
+        emailVerified:payload.email_verified === true,
+        signInProvider:typeof firebase?.sign_in_provider==='string' ? firebase.sign_in_provider : null};
     } catch {throw new DomainError('UNAUTHORIZED','Session is invalid or expired.',401);}
   };
 }
@@ -27,6 +41,11 @@ export function jwtVerifier(config, keyResolver = undefined) {
 export function authentication(db, config, keyResolver = undefined) {
   const verify=jwtVerifier(config,keyResolver);
   return {
+    // The raw token verifier, for the few paths that must check a Firebase
+    // identity WITHOUT establishing a LeRoutier session — the account
+    // verification email endpoint being the one: an unverified account is
+    // deliberately not a LeRoutier user yet, so /me refuses it.
+    verifyToken: verify,
     async authenticate(request) {
       const token = request.headers.get('authorization')?.match(/^Bearer ([^\s]+)$/)?.[1];
       invariant(token && token.length < 8192, 'UNAUTHORIZED', 'Sign in to continue.', 401);

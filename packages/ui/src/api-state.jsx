@@ -10,9 +10,15 @@ function isDriverApp(role){return Array.isArray(role)?role.includes('driver')||r
 // only — the LeRoutier API never sees them.
 export function SessionPanel({onWorkspace=undefined}) {
   const {user,identity,role,login,loginDemo,logout,demoLogin,configured,online,authLoading,authError,canSignin,
-    googleAuth,createAccount,loginEmail,resetPassword}=useSession();
+    googleAuth,createAccount,loginEmail,resetPassword,verifyEmail}=useSession();
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const [mode,setMode]=useState('signin'); // signin | register | reset
+  // Leaving the verification panel always returns to the sign-in entry, not
+  // to whichever form (register/reset) happened to be open before it. Reset
+  // during render — the documented "derived state" adjustment pattern — so
+  // no cascading effect render is needed.
+  const [prevVerify,setPrevVerify]=useState(verifyEmail);
+  if(verifyEmail===null && prevVerify!==null){ setPrevVerify(null); setMode('signin'); }
   const [email,setEmail]=useState(''),[password,setPassword]=useState('');
   const [regName,setRegName]=useState(''),[regPhone,setRegPhone]=useState('');
   async function run(action){setBusy(true);setError('');setNotice('');
@@ -47,6 +53,7 @@ export function SessionPanel({onWorkspace=undefined}) {
   // The API refuses /auth/demo there anyway, so this removes a description of
   // the bypass from the bundle rather than a control from the product.
   const devSignIn = import.meta.env.VITE_DEVELOPMENT_SIGN_IN && demoLogin;
+  if(verifyEmail) return <VerificationPanel/>;
   if(!configured) return <Card><p role="status">Connexion au service indisponible. Réessayez ultérieurement.</p></Card>;
   return <Card className="stack">
     {!online && <p role="status">Hors ligne : les actions nécessitent une connexion.</p>}
@@ -112,6 +119,49 @@ export function SessionPanel({onWorkspace=undefined}) {
       {!authLoading && !canSignin && !demoLogin && mode==='signin' && <p className="small muted">Connectez-vous pour réserver un trajet, suivre vos billets et envoyer des colis.</p>}
     </>}
     {(error || authError) && <p role="alert">{error || authError}</p>}
+  </Card>;
+}
+
+/**
+ * The "confirm your email" panel, shown for exactly two moments in an
+ * account's life: right after registration (kind 'created') and when a
+ * verified-email gate refuses /me at sign-in (kind 'login'). The provider
+ * session is already signed out in both cases, so a resend re-authenticates
+ * with the password — that proof of ownership is what makes the resend safe —
+ * and signs back out again.
+ */
+function VerificationPanel(){
+  const {verifyEmail,resendVerification,backToSignin,online}=useSession();
+  const [password,setPassword]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+  const created=verifyEmail?.kind==='created';
+  async function submit(e){
+    e.preventDefault();
+    const form=e.currentTarget;
+    const value=new FormData(form).get('password');
+    const submittedPassword=typeof value==='string'?value:password;
+    setBusy(true);setError('');setNotice('');
+    try{
+      const status=await resendVerification({email:verifyEmail.email,password:submittedPassword});
+      setNotice(status==='already_verified'
+        ? 'Votre adresse est déjà confirmée : connectez-vous.'
+        : 'Un nouveau lien de confirmation a été envoyé à votre adresse e-mail.');
+    }catch(e){setError(e.message);}finally{setBusy(false);}
+  }
+  return <Card className="stack">
+    <h3>Confirmez votre adresse e-mail</h3>
+    {created
+      ? <p>{verifyEmail.sendFailed
+        ? 'Compte créé, mais l’envoi du lien de confirmation a échoué. Vous pouvez le renvoyer ci-dessous.'
+        : 'Compte créé. Nous avons envoyé un lien de confirmation à votre adresse e-mail. Confirmez votre adresse avant de vous connecter.'}</p>
+      : <p>Confirmez votre adresse e-mail avant de vous connecter.</p>}
+    <form className="stack" onSubmit={submit}>
+      <label>Mot de passe (pour renvoyer le lien)<input name="password" className="control" type="password"
+        autoComplete="current-password" required minLength={6} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)}/></label>
+      <button type="submit" className="btn btn-primary" disabled={busy||!online}>{busy?'Envoi en cours…':'Renvoyer l’e-mail de confirmation'}</button>
+    </form>
+    <button type="button" className="footer-link" onClick={backToSignin}>Retour à la connexion</button>
+    {notice && <p role="status">{notice}</p>}
+    {error && <p role="alert">{error}</p>}
   </Card>;
 }
 

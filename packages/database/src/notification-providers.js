@@ -84,6 +84,67 @@ function rateLimit(headers, now = new Date()) {
 }
 
 /**
+ * One Brevo transactional HTTP request, shared by the notification adapter and
+ * the standalone transactional sender (account verification, whose recipients
+ * are NOT notification rows yet — an unverified account has no users.id and no
+ * verified address to compose from). The key rides a header, never the URL,
+ * and the failure body is read for its CODE only.
+ *
+ * @param {{apiKey?:string,fromAddress?:string,fromName?:string}} settings
+ * @param {{to:string,subject:string,text:string,html?:string}} message
+ * @param {typeof fetch} fetcher
+ */
+async function brevoSend(settings, message, fetcher) {
+  let response;
+  try {
+    response = await fetcher(BREVO_ENDPOINT, {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
+      headers: { 'content-type': 'application/json', accept: 'application/json', 'api-key': settings.apiKey },
+      body: JSON.stringify({
+        sender: { email: settings.fromAddress, ...(settings.fromName ? { name: settings.fromName } : {}) },
+        to: [{ email: message.to }],
+        subject: message.subject,
+        textContent: message.text,
+        ...(message.html ? { htmlContent: message.html } : {}),
+      }),
+    });
+  } catch {
+    // A timeout or a DNS failure is the provider being unreachable, and is
+    // the one case where we genuinely do not know whether it arrived.
+    return { accepted: false, reason: 'provider_unavailable', rateLimitRemaining: null, rateLimitResetsAt: null };
+  }
+  const budget = rateLimit(response.headers);
+  // Brevo answers 201 (or 202) with a messageId.
+  if (response.status === 201 || response.status === 202) {
+    return { accepted: true, rateLimitRemaining: budget.remaining, rateLimitResetsAt: budget.resetsAt };
+  }
+  // The body is read for its CODE and nothing else. Brevo's message echoes
+  // the recipient address back, and that must not reach the delivery audit
+  // or any console.
+  const code = await response.json().then(body => body?.code ?? null).catch(() => null);
+  return { accepted: false, reason: classifyBrevoFailure(response.status, code),
+    rateLimitRemaining: budget.remaining, rateLimitResetsAt: budget.resetsAt };
+}
+
+/**
+ * A standalone Brevo sender, for transactional messages whose recipients are
+ * not notification rows: the account-verification email is the one. Same
+ * endpoint, same key, same sender, same failure vocabulary as the notification
+ * adapter — this is a second entry point to one provider, not a second system.
+ *
+ * @param {{apiKey?:string,fromAddress?:string,fromName?:string}} [settings]
+ * @param {typeof fetch} [fetcher]
+ */
+export function brevoTransactionalSender(settings = {}, fetcher = fetch) {
+  if (!settings.apiKey || !settings.fromAddress) {
+    // Half-configured produces no sender rather than one that fails on the
+    // first send — the same rule the adapter follows.
+    return { available: false, async send() { return { accepted: false, reason: 'invalid_configuration' }; } };
+  }
+  return { available: true, send: message => brevoSend(settings, message, fetcher) };
+}
+
+/**
  * Turn a queued notification into the message a transport will carry.
  *
  * Shared by every adapter so the wording, the recipient rule and the refusals
@@ -158,7 +219,7 @@ function gatewayAdapter(db, channel, provider, fetcher) {
  * has not achieved.
  */
 function brevoAdapter(db, settings, fetcher) {
-  const { apiKey, fromAddress, fromName } = settings;
+  const { apiKey, fromAddress } = settings;
   // Half-configured produces NO adapter rather than one that fails on the
   // first send — the same rule storage and sign-in follow.
   if (!apiKey || !fromAddress) return null;
@@ -167,46 +228,18 @@ function brevoAdapter(db, settings, fetcher) {
     async send({ notification }) {
       const message = await composeMessage(db, 'email', notification);
       if (!message) return { accepted: false, unavailable: true };
-      let response;
-      try {
-        response = await fetcher(BREVO_ENDPOINT, {
-          method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
-          headers: { 'content-type': 'application/json', accept: 'application/json', 'api-key': apiKey },
-          body: JSON.stringify({
-            sender: { email: fromAddress, ...(fromName ? { name: fromName } : {}) },
-            to: [{ email: message.to }],
-            subject: message.subject,
-            textContent: message.text,
-            ...(message.html ? { htmlContent: message.html } : {}),
-          }),
-        });
-      } catch {
-        // A timeout or a DNS failure is the provider being unreachable, and is
-        // the one case where we genuinely do not know whether it arrived.
-        return { accepted: false, reason: 'provider_unavailable' };
-      }
-
-      const budget = rateLimit(response.headers);
-      // Brevo answers 201 (or 202) with a messageId.
-      if (response.status === 201 || response.status === 202) {
-        return { accepted: true, rateLimitRemaining: budget.remaining, rateLimitResetsAt: budget.resetsAt };
-      }
-
-      // The body is read for its CODE and nothing else. Brevo's message echoes
-      // the recipient address back, and that must not reach the delivery audit
-      // or any console.
-      const code = await response.json().then(body => body?.code ?? null).catch(() => null);
-      const reason = classifyBrevoFailure(response.status, code);
+      const result = await brevoSend(settings, message, fetcher);
+      if (result.accepted) return result;
       return {
         accepted: false,
-        reason,
-        rateLimitRemaining: budget.remaining,
-        rateLimitResetsAt: budget.resetsAt,
+        reason: result.reason,
+        rateLimitRemaining: result.rateLimitRemaining,
+        rateLimitResetsAt: result.rateLimitResetsAt,
         // A spent allowance lasts until the day rolls over; a rate limit lasts
         // as long as Brevo says, and a minute if it did not say.
-        suppressUntil: reason === 'quota_exhausted' ? nextDailyReset()
-          : reason === 'rate_limited' ? (budget.resetsAt ?? new Date(Date.now() + 60_000))
-            : reason === 'invalid_configuration' ? nextDailyReset()
+        suppressUntil: result.reason === 'quota_exhausted' ? nextDailyReset()
+          : result.reason === 'rate_limited' ? (result.rateLimitResetsAt ?? new Date(Date.now() + 60_000))
+            : result.reason === 'invalid_configuration' ? nextDailyReset()
               : null,
       };
     },

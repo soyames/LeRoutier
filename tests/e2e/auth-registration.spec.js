@@ -14,7 +14,7 @@ const FIREBASE = {
   projectId: 'example-project', appId: '1:1:web:test', providers: ['google'],
 };
 
-async function mockFirebase(page, { signUp = null, signIn = null, reset = null } = {}) {
+async function mockFirebase(page, { signUp = null, signIn = null, reset = null, verification = 'sent' } = {}) {
   await mockApi(page);
   await page.route('**/*', async r => {
     let url;
@@ -41,8 +41,18 @@ async function mockFirebase(page, { signUp = null, signIn = null, reset = null }
       if (!reset) return r.abort();
       return r.fulfill({ status: 200, json: { email: reset.email } });
     }
+    if (identityToolkit && url.pathname === '/v1/accounts:update') {
+      // applyActionCode, the exchange behind /verify-email.
+      if (verification === 'invalid') return r.fulfill({ status: 400, json: { error: { code: 400, message: 'INVALID_OOB_CODE', errors: [{ message: 'INVALID_OOB_CODE' }] } } });
+      return r.fulfill({ status: 200, json: { email: signUp?.email ?? signIn?.email ?? 'verifiee@example.com' } });
+    }
     return r.abort();
   });
+  // The verification email endpoint: the token's claims are the address, so
+  // the fixture answers the same generic shape the API does.
+  if (verification) {
+    await page.route('**/api/v1/auth/email-verification', r => r.fulfill({ json: { data: { status: verification === 'invalid' ? 'sent' : verification } } }));
+  }
   await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: { demoLogin: false, firebase: FIREBASE } } }));
 }
 
@@ -63,8 +73,8 @@ async function mockIdentity(page, { needsProfile = true } = {}) {
   await page.route('**/api/v1/me/consents', r => r.fulfill({ json: { data: [] } }));
 }
 
-test('a new user creates an account with email and completes their profile', async ({ page }) => {
-  await mockFirebase(page, { signUp: { email: 'nouveau@example.com' } });
+test('a new user creates an account, is asked to verify the address, then lands connected and complete', async ({ page }) => {
+  await mockFirebase(page, { signUp: { email: 'nouveau@example.com' }, signIn: { email: 'nouveau@example.com' } });
   await mockIdentity(page);
   await page.goto(APP + '/account');
   // The entry screen offers both providers.
@@ -79,12 +89,45 @@ test('a new user creates an account with email and completes their profile', asy
   await page.getByLabel('Adresse e-mail').fill('nouveau@example.com');
   await page.getByLabel('Mot de passe').fill('secret-mot-de-passe');
   await page.getByRole('button', { name: 'Créer mon compte' }).click();
-  // Registration carries the name and phone straight into the profile, so the
-  // account lands connected and complete — no extra profile step.
+  // A brand-new password account is NOT a signed-in LeRoutier account yet:
+  // the confirmation email goes out and the check-your-email panel appears.
+  await expect(page.getByRole('heading', { name: 'Confirmez votre adresse e-mail' })).toBeVisible();
+  await expect(page.getByText(/Compte créé\. Nous avons envoyé un lien de confirmation à votre adresse e-mail/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Déconnexion' })).toHaveCount(0);
+  // The resend path re-authenticates with the password, sends again and stays
+  // signed out — no half-authenticated state.
+  await page.getByLabel('Mot de passe (pour renvoyer le lien)').fill('secret-mot-de-passe');
+  await page.getByRole('button', { name: 'Renvoyer l’e-mail de confirmation' }).click();
+  await expect(page.getByText(/Un nouveau lien de confirmation a été envoyé à votre adresse e-mail/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Déconnexion' })).toHaveCount(0);
+  // Back to the entry, then a verified sign-in: the name and phone typed at
+  // registration land in the profile, so the account arrives complete.
+  await page.getByRole('button', { name: 'Retour à la connexion' }).click();
+  await expect(page.getByText('Bienvenue sur LeRoutier')).toBeVisible();
+  await page.getByLabel('Adresse e-mail').fill('nouveau@example.com');
+  await page.getByLabel('Mot de passe').fill('secret-mot-de-passe');
+  await page.getByRole('button', { name: 'Se connecter avec mon adresse e-mail' }).click();
   await expect(page.getByRole('button', { name: 'Déconnexion' })).toBeVisible();
   await expect(page.getByText('Yao Sossou').first()).toBeVisible();
   // The avatar now shows the user's initials, never "LR".
   await expect(page.getByText('YS')).toBeVisible();
+});
+
+test('signing in before confirming the address shows the confirm-email panel, never a session', async ({ page }) => {
+  await mockFirebase(page, { signIn: { email: 'nouveau@example.com' } });
+  // The server-side gate: /me refuses with EMAIL_NOT_VERIFIED. Registered
+  // after mockApi's /me fixture, so this refusal wins.
+  await page.route('**/api/v1/me', r => r.fulfill({ status: 403, json: { error: { code: 'EMAIL_NOT_VERIFIED', message: 'Confirm your email address before signing in.' } } }));
+  await page.goto(APP + '/account');
+  await page.getByLabel('Adresse e-mail').fill('nouveau@example.com');
+  await page.getByLabel('Mot de passe').fill('secret-mot-de-passe');
+  await page.getByRole('button', { name: 'Se connecter avec mon adresse e-mail' }).click();
+  await expect(page.getByRole('heading', { name: 'Confirmez votre adresse e-mail' })).toBeVisible();
+  await expect(page.getByText('Confirmez votre adresse e-mail avant de vous connecter.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Renvoyer l’e-mail de confirmation' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Déconnexion' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Retour à la connexion' }).click();
+  await expect(page.getByText('Bienvenue sur LeRoutier')).toBeVisible();
 });
 
 test('sign-in with email works; a wrong password is explained in product language', async ({ page }) => {

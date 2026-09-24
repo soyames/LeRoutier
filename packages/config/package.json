@@ -9,7 +9,8 @@
   "exports": {
     ".": "./src/index.js",
     "./client": "./src/client.jsx",
-    "./offline": "./src/offline.js"
+    "./offline": "./src/offline.js",
+    "./firebase": "./src/firebase.js"
   },
   "peerDependencies": {
     "react": "^19.1.1"

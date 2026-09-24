@@ -14,6 +14,10 @@ const ERROR_COPY={
   PROFILE_REQUIRED:'Complétez votre profil avant de réserver.',
   RATE_LIMITED:'Trop de tentatives. Patientez un instant avant de réessayer.',
   FORBIDDEN:'Vous n’avez pas accès à cette action avec ce compte.',
+  EMAIL_NOT_VERIFIED:'Confirmez votre adresse e-mail avant de vous connecter.',
+  VERIFICATION_UNAVAILABLE:'Impossible d’envoyer l’e-mail de confirmation pour le moment. Réessayez plus tard.',
+  DRIVER_ASSIGNED:'Réaffectez le service actif avant de désactiver ce compte.',
+  NOT_FOUND:'Introuvable : cet élément n’existe plus.',
   TICKET_INVALID:'Ce billet est invalide, expiré ou remplacé. Demandez au voyageur d’afficher son billet actuel.',
   WRONG_SERVICE:'Ce billet correspond à un autre service. Vérifiez le départ avec le voyageur.',
   WRONG_STOP:'L’embarquement doit se faire à l’arrêt réservé, sur un service démarré.',
@@ -24,7 +28,7 @@ const ERROR_COPY={
 };
 
 export function ApiProvider({baseUrl='',role,children}) {
-  const [session,setSession]=useState(null),[auth,setAuth]=useState({loading:true,demoLogin:false,firebase:null,googleAuth:false,error:'',hydrating:false});
+  const [session,setSession]=useState(null),[auth,setAuth]=useState({loading:true,demoLogin:false,firebase:null,googleAuth:false,error:'',hydrating:false,verifyEmail:null});
   const online=useSyncExternalStore(subscribe,()=>navigator.onLine,()=>true),base=baseUrl.replace(/\/$/,'');
   // Hoisted so the memoization dependency is exactly the value read: the
   // session object changes on every /me refresh, but session.token is only set
@@ -66,6 +70,10 @@ export function ApiProvider({baseUrl='',role,children}) {
   const sessionRef=useRef(null);
   const firebaseUserRef=useRef(null);
   const hydratedUidRef=useRef(null);
+  // Profile fields captured at registration, applied the moment the verified
+  // account first establishes its session — the name and phone typed at sign-up
+  // survive the verification round trip instead of being asked twice.
+  const pendingProfileRef=useRef(null);
   useEffect(()=>{ sessionRef.current=session; },[session]);
   const establishSession=useCallback(async()=>{
     const uid=firebaseUserRef.current?.uid ?? null;
@@ -82,6 +90,14 @@ export function ApiProvider({baseUrl='',role,children}) {
       setSession({token:null,user});
       setAuth(a=>({...a,error:'',hydrating:false}));
       hydratedUidRef.current=uid;
+      if(pendingProfileRef.current){
+        const pending=pendingProfileRef.current;
+        pendingProfileRef.current=null;
+        try{
+          const updated=await request('/me',{method:'PATCH',body:pending});
+          setSession(s=>s?{...s,user:updated}:s);
+        }catch{ /* profile completion remains available through ProfileForm */ }
+      }
       gate.resolve?.(user);
       return user;
     }catch(error){
@@ -105,7 +121,7 @@ export function ApiProvider({baseUrl='',role,children}) {
         // A provider not listed is not rendered — and when the API says nothing
         // about providers (an older API, a fixture), fail hidden.
         const googleAuth=Array.isArray(data.firebase?.providers) && data.firebase.providers.includes('google');
-        setAuth({loading:false,demoLogin:data.demoLogin===true,firebase:data.firebase ?? null,googleAuth,error:'',hydrating:false});
+        setAuth({loading:false,demoLogin:data.demoLogin===true,firebase:data.firebase ?? null,googleAuth,error:'',hydrating:false,verifyEmail:null});
 
         if(!googleAuth){
           // The provider is disabled: a redirect attempt that started under an
@@ -160,6 +176,18 @@ export function ApiProvider({baseUrl='',role,children}) {
         }catch(error){
           if(cancelled)return;
           if(error?.code==='REGISTRATION_SUSPENDED')await signOutFirebase(auth.firebase).catch(()=>{});
+          if(error?.code==='EMAIL_NOT_VERIFIED'){
+            // Firebase authenticated them, LeRoutier refused to establish a
+            // session: sign the provider session back out and show the
+            // "confirm your email" panel with a resend. Never a half state.
+            const unverifiedEmail=firebaseUserRef.current?.email;
+            await signOutFirebase(auth.firebase).catch(()=>{});
+            if(cancelled)return;
+            setSession(null);
+            setAuth(a=>({...a,hydrating:false,error:'',
+              verifyEmail:a.verifyEmail ?? {email:unverifiedEmail?String(unverifiedEmail):'',kind:'login'}}));
+            return;
+          }
           if(cancelled)return;
           setSession(null);
           const message=error?.name==='TimeoutError'
@@ -213,18 +241,37 @@ export function ApiProvider({baseUrl='',role,children}) {
     const user=await request('/me',{method:'PATCH',body});setSession(s=>s?{...s,user}:s);
   },[request]);
 
+  // The verification email endpoint takes the Firebase ID token itself — the
+  // address in the message always comes from the verified token's claims,
+  // never from whatever a caller might put in a body.
+  const requestVerificationEmail=useCallback(async()=>{
+    const result=await request('/auth/email-verification',{method:'POST'});
+    return result?.status ?? 'sent';
+  },[request]);
+
   const createAccount=useCallback(async({email,password,displayName,phone})=>{
     if(!auth.firebase)throw new Error('La connexion sécurisée n’est pas encore configurée.');
     const result=await createAccountWithEmail(auth.firebase,{email,password});
     if(!result?.user)throw new Error('La création du compte a échoué. Réessayez.');
-    await establishSession();
-    try{ await updateProfile({displayName:String(displayName||'').trim()||email.split('@')[0],phone:String(phone||'').trim()||null}); }catch{ /* profile completion remains available */ }
+    // A new password account is NOT a LeRoutier identity yet — /me refuses it
+    // until the address is confirmed. Send the verification link while the
+    // fresh Firebase session still exists, remember the profile fields for the
+    // first verified sign-in, then sign out cleanly. A failed send is not a
+    // failed account: the panel below offers a resend.
+    pendingProfileRef.current={displayName:String(displayName||'').trim()||String(email).trim().split('@')[0],phone:String(phone||'').trim()||null};
+    let sendFailed=null;
+    try{ await requestVerificationEmail(); }catch(error){ sendFailed=error.message; }
+    await signOutFirebase(auth.firebase).catch(()=>{});
+    setSession(null);
+    setAuth(a=>({...a,error:'',hydrating:false,verifyEmail:{email:String(email).trim(),kind:'created',sendFailed}}));
     return result.user;
-  },[auth.firebase,establishSession,updateProfile]);
+  },[auth.firebase,requestVerificationEmail]);
 
   const loginEmail=useCallback(async({email,password})=>{
     if(!auth.firebase)throw new Error('La connexion sécurisée n’est pas encore configurée.');
     await signInWithEmail(auth.firebase,{email,password});
+    // An unverified account throws EMAIL_NOT_VERIFIED from /me; the auth-state
+    // listener turns that into the "confirm your email" panel with a resend.
     await establishSession();
   },[auth.firebase,establishSession]);
 
@@ -233,6 +280,24 @@ export function ApiProvider({baseUrl='',role,children}) {
     try{ await sendPasswordReset(auth.firebase,email); return 'Si cette adresse possède un compte, un e-mail de réinitialisation a été envoyé.'; }
     catch{ throw new Error('Impossible d’envoyer le lien de réinitialisation. Réessayez.'); }
   },[auth.firebase]);
+
+  // Resend from the "confirm your email" panel. The provider session was
+  // signed out cleanly, so the resend re-authenticates with the password —
+  // that is what proves the caller owns the account — then signs back out.
+  const resendVerification=useCallback(async({email,password})=>{
+    if(!auth.firebase)throw new Error('La connexion sécurisée n’est pas encore configurée.');
+    await signInWithEmail(auth.firebase,{email,password});
+    try{
+      return await requestVerificationEmail();
+    }finally{
+      await signOutFirebase(auth.firebase).catch(()=>{});
+    }
+  },[auth.firebase,requestVerificationEmail]);
+
+  const backToSignin=useCallback(()=>{
+    setSession(null);
+    setAuth(a=>({...a,verifyEmail:null,error:''}));
+  },[]);
 
   const refresh=useCallback(async()=>{
     const user=await request('/me');setSession(s=>s?{...s,user}:s);
@@ -243,9 +308,13 @@ export function ApiProvider({baseUrl='',role,children}) {
     // Hydrating (a redirect just delivered its user and /me is in flight) is
     // loading too: the login UI must not offer a second attempt mid-hydration.
     demoLogin:auth.demoLogin,authLoading:auth.loading||auth.hydrating,authError:auth.error,canSignin:!!auth.firebase,
+    // The published Firebase web config, for the verify-email route to apply
+    // the oobCode through the same SDK instance. Public identifiers only.
+    firebase:auth.firebase,
+    verifyEmail:auth.verifyEmail,resendVerification,backToSignin,
     googleAuth:auth.googleAuth,login,loginDemo:demoLogin,logout,updateProfile,refresh,
     createAccount,loginEmail,resetPassword}),
-  [request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles,createAccount,loginEmail,resetPassword]);
+  [request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles,createAccount,loginEmail,resetPassword,resendVerification,backToSignin]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

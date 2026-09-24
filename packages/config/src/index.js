@@ -59,6 +59,17 @@ export function serverConfig(env = process.env) {
     // Local development, CI and previews may set ALLOW_TEST_INVENTORY=true.
     allowTestInventory: env.ALLOW_TEST_INVENTORY === 'true' && env.NODE_ENV !== 'production' && env.VERCEL !== '1' && env.VERCEL_ENV !== 'production',
     ...authConfig(env),
+    // Server-only Firebase identity administration: the raw service-account
+    // JSON (one value) that mints email-verification links and deletes the
+    // Firebase Authentication identity when an account deletion executes.
+    // Never published, never bundled — publicAuthConfig below is the only
+    // thing a browser can read, and it knows nothing of this. A malformed
+    // value disables the capability (fail closed) rather than crashing.
+    firebaseAdminServiceAccount: env.FIREBASE_ADMIN_SERVICE_ACCOUNT || null,
+    googleApplicationCredentials: env.GOOGLE_APPLICATION_CREDENTIALS || null,
+    // The canonical app origin, used for branded links in transactional email
+    // (account verification). Defaults to the production domain.
+    appUrl: (env.APP_URL || 'https://leroutier.app').replace(/\/+$/, ''),
     corsOrigins: (env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
     // Server-only payment configuration. FEDAPAY_ENVIRONMENT must be 'sandbox' or 'live';
     // production never falls back to sandbox. Payout credentials are modelled separately:

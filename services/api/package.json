@@ -18,7 +18,8 @@
     "jose": "^6.1.0",
     "@leroutier/agents": "workspace:*",
     "@leroutier/routing": "workspace:*",
-    "@leroutier/ussd": "workspace:*"
+    "@leroutier/ussd": "workspace:*",
+    "@leroutier/firebase-admin": "workspace:*"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"

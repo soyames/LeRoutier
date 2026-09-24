@@ -52,8 +52,17 @@ export const managesOperator = user =>
   user?.role === 'ops' ||
   (user?.role === 'driver' && user?.operator_type === 'independent' && user?.owner_user_id === user?.id);
 
-export async function mapIdentity(db,{subject,issuer,notificationEmail=null}) {
+export async function mapIdentity(db,{subject,issuer,notificationEmail=null,emailVerified=false,signInProvider=null}) {
   invariant(typeof subject==='string' && subject.length>0 && subject.length<=255,'UNAUTHORIZED','Invalid identity.',401);
+  // The verified-email gate. A password identity whose address has not been
+  // confirmed is not a LeRoutier account yet: /me must refuse it, or the
+  // "provision on first sign-in" model would create a row for an address
+  // nobody has proven they control. Google verifies its own addresses and
+  // keeps sign_in_provider='google.com', custom-token identities are
+  // provisioned through reviewed paths, and demo identities never reach this
+  // function — so the gate is exactly one claim pair, and nothing else.
+  invariant(!(signInProvider==='password' && emailVerified!==true),
+    'EMAIL_NOT_VERIFIED','Confirm your email address before signing in.',403);
   return db.transaction(async tx=>{
     // An identity that already exists always signs in: registration capacity
     // never locks anybody out of an account they already have. Only the
