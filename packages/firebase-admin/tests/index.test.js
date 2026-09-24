@@ -70,13 +70,32 @@ test('getUser returns null for a missing identity and rethrows other errors', as
   assert.deepEqual(await admin.getUser('present'), { uid: 'present' });
 });
 
-test('the verification link passes the branded continue URL', async () => {
+test('the verification link keeps Firebase code but uses the branded LeRoutier route', async () => {
   const calls = [];
   const client = {
-    async generateEmailVerificationLink(email, options) { calls.push([email, options]); return 'https://leroutier.app/verify-email?oobCode=TEST'; },
+    async generateEmailVerificationLink(email, options) {
+      calls.push([email, options]);
+      return 'https://leroutier-df848.firebaseapp.com/__/auth/action?mode=verifyEmail&oobCode=TEST-OOB-CODE&continueUrl=https%3A%2F%2Fleroutier.app%2Fverify-email';
+    },
   };
   const admin = createFirebaseAdmin({}, client);
   const link = await admin.generateEmailVerificationLink('test@example.invalid', 'https://leroutier.app/verify-email');
-  assert.equal(link, 'https://leroutier.app/verify-email?oobCode=TEST');
+  const url = new URL(link);
+  assert.equal(url.origin + url.pathname, 'https://leroutier.app/verify-email');
+  assert.equal(url.searchParams.get('mode'), 'verifyEmail');
+  assert.equal(url.searchParams.get('oobCode'), 'TEST-OOB-CODE');
   assert.deepEqual(calls, [['test@example.invalid', { url: 'https://leroutier.app/verify-email' }]]);
+});
+
+test('verification link generation fails closed when Firebase returns no oobCode', async () => {
+  const client = {
+    async generateEmailVerificationLink() {
+      return 'https://leroutier-df848.firebaseapp.com/__/auth/action?mode=verifyEmail';
+    },
+  };
+  const admin = createFirebaseAdmin({}, client);
+  await assert.rejects(
+    admin.generateEmailVerificationLink('test@example.invalid', 'https://leroutier.app/verify-email'),
+    /did not contain an action code/,
+  );
 });
