@@ -69,10 +69,13 @@ test('a current schema is ready, and says which build answered', async () => {
 
 test('readiness turns red on the exact condition /health cannot see', async () => {
   // Reproduce the outage: the ledger forgets the newest migration and the
-  // table it created is gone, which is what "deployed ahead of the database"
-  // actually looks like from inside the process.
+  // objects it created are gone, which is what "deployed ahead of the
+  // database" actually looks like from inside the process. The newest
+  // migration may create tables OR add columns to existing ones (ALTER-based
+  // migrations); both shapes are undone here.
   await db.transaction(async tx => {
     for (const table of lastMigration.tables) await tx.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
+    for (const { table, column } of lastMigration.columns) await tx.query(`ALTER TABLE ${table} DROP COLUMN IF EXISTS ${column}`);
     await tx.query('DELETE FROM schema_migrations WHERE name=$1', [lastMigration.name]);
   });
 

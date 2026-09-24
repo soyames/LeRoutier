@@ -12,6 +12,7 @@ import { reminders } from '@leroutier/database/reminders';
 import { privacyCenter, retentionEngine } from '@leroutier/database/privacy';
 import { createActions, createWorkflowEngine } from '@leroutier/agents';
 import { paymentAdapter } from '../../../services/api/src/payment-adapter.js';
+import { createFirebaseAdmin } from '@leroutier/firebase-admin';
 
 // Event-driven workflow runner: consumes undelivered outbox events, drives
 // workflow steps and dispatches notifications through the same domain services
@@ -47,8 +48,10 @@ try {
   }
   // Deletion requests whose blockers have cleared are anonymized here —
   // tombstone, never cascade — and the completion event notifies the user
-  // through the mandatory policy path.
-  const deletions = await privacyCenter(db).processDueDeletions();
+  // through the mandatory policy path. The Firebase Authentication identity
+  // is deleted as part of the same step (outside any transaction), so a
+  // completed deletion means the account is gone from the provider too.
+  const deletions = await privacyCenter(db, null, createFirebaseAdmin(config)).processDueDeletions();
   console.log(`Workflow tick processed ${result.processed} events and raised ${due.raised} reminders `
     + `(${due.journeyReminders} journey, ${due.parcelReminders} parcel). Retention ${execute ? 'executed' : 'dry-run'}: `
     + `${retention.report.map(r => `${r.category}=${r.eligible}`).join(', ')}; ${expiring.length} retention warning(s) raised; `

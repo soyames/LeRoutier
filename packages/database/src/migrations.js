@@ -6,7 +6,11 @@ const checksumOf = sql => createHash('sha256').update(sql.replace(/\r\n/g, '\n')
 
 /**
  * Every migration this build of the code declares, with its checksum and the
- * tables it creates.
+ * schema objects it creates: tables, and columns it adds to existing tables.
+ * Both are the artifacts whose absence means "the database is behind this
+ * build" — an ALTER-based migration never creates a table, but a missing
+ * column is exactly the undefined_column failure the readiness check exists
+ * to catch (users.last_authenticated_at, 2026-09-22).
  *
  * Read from the deployed bundle, so it answers "what does the RUNNING code
  * expect" rather than "what is in the repository". That distinction is the
@@ -21,6 +25,8 @@ export async function declaredMigrations() {
       name,
       checksum: checksumOf(sql),
       tables: [...sql.matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+([a-z_]+)/gi)].map(m => m[1].toLowerCase()),
+      columns: [...sql.matchAll(/ALTER TABLE\s+([a-z_]+)\s+ADD COLUMN(?: IF NOT EXISTS)?\s+([a-z_]+)/gi)]
+        .map(m => ({ table: m[1].toLowerCase(), column: m[2].toLowerCase() })),
     };
   }));
 }
@@ -80,7 +86,10 @@ export async function schemaStatus(db) {
       const applied = present.has('schema_migrations')
         ? (await tx.query('SELECT name,checksum FROM schema_migrations')).rows
         : [];
-      return { present, applied };
+      const columnRows = present.has('schema_migrations')
+        ? (await tx.query('SELECT table_name,column_name FROM information_schema.columns WHERE table_schema=$1', [db.schema])).rows
+        : [];
+      return { present, applied, columnRows };
     });
 
     const appliedByName = new Map(state.applied.map(r => [r.name, r.checksum]));
@@ -88,14 +97,23 @@ export async function schemaStatus(db) {
     const drifted = declared.filter(m => appliedByName.has(m.name) && appliedByName.get(m.name) !== m.checksum).map(m => m.name);
     const declaredNames = new Set(declared.map(m => m.name));
     const unknown = state.applied.map(r => r.name).filter(name => !declaredNames.has(name));
+    const columns = new Map();
+    for (const row of state.columnRows) {
+      if (!columns.has(row.table_name)) columns.set(row.table_name, new Set());
+      columns.get(row.table_name).add(row.column_name);
+    }
     // Only migrations this database HAS applied are expected to have produced
-    // their tables. A pending migration's table being absent is the pending
-    // migration, not separate damage.
+    // their tables and columns. A pending migration's object being absent is
+    // the pending migration, not separate damage.
     const missingTables = declared
       .filter(m => appliedByName.has(m.name))
       .flatMap(m => m.tables.filter(t => !state.present.has(t)));
+    const missingColumns = declared
+      .filter(m => appliedByName.has(m.name))
+      .flatMap(m => m.columns.filter(c => !columns.get(c.table)?.has(c.column))
+        .map(c => `${c.table}.${c.column}`));
 
-    const status = drifted.length || missingTables.length ? 'drift'
+    const status = drifted.length || missingTables.length || missingColumns.length ? 'drift'
       : pending.length ? 'behind'
         : unknown.length ? 'ahead'
           : 'current';
@@ -104,7 +122,7 @@ export async function schemaStatus(db) {
       status,
       reachable: true,
       counts: { declared: declared.length, applied: state.applied.length, pending: pending.length },
-      pending, drifted, unknown, missingTables,
+      pending, drifted, unknown, missingTables, missingColumns,
     };
   } catch {
     // Never the connection string, never the driver's message: this endpoint is
@@ -113,7 +131,7 @@ export async function schemaStatus(db) {
       status: 'unreachable',
       reachable: false,
       counts: { declared: declared.length, applied: null, pending: null },
-      pending: [], drifted: [], unknown: [], missingTables: [],
+      pending: [], drifted: [], unknown: [], missingTables: [], missingColumns: [],
     };
   }
 }

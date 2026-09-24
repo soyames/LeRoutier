@@ -18,7 +18,10 @@ export function SessionPanel({onWorkspace=undefined}) {
   // during render — the documented "derived state" adjustment pattern — so
   // no cascading effect render is needed.
   const [prevVerify,setPrevVerify]=useState(verifyEmail);
-  if(verifyEmail===null && prevVerify!==null){ setPrevVerify(null); setMode('signin'); }
+  if(prevVerify!==verifyEmail){
+    setPrevVerify(verifyEmail);
+    if(verifyEmail===null) setMode('signin');
+  }
   const [email,setEmail]=useState(''),[password,setPassword]=useState('');
   const [regName,setRegName]=useState(''),[regPhone,setRegPhone]=useState('');
   async function run(action){setBusy(true);setError('');setNotice('');

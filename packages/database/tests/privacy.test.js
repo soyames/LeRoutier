@@ -7,6 +7,7 @@ import {migrate} from '../src/migrations.js';
 import {seed,demo,demoId} from '../src/seed.js';
 import {dropDisposableSchema} from '../src/guards.js';
 import {privacyCenter,retentionEngine} from '../src/privacy.js';
+import {mapIdentity} from '../src/identities.js';
 import {transport} from '../src/transport.js';
 import {parcels} from '../src/parcels.js';
 import {createApi} from '../../../services/api/src/app.js';
@@ -316,7 +317,10 @@ test('a verified operator’s dossier is never swept, and a legal hold stops a r
 
 test('deleting an account removes the face and the identity numbers, not only the name',async()=>{
   const driver=randomUUID();
-  await sql(`INSERT INTO users(id,display_name,role,auth_subject,auth_issuer) VALUES($1,'Chauffeur Partant','driver',$2,'test')`,[driver,'sub-'+driver]);
+  // No auth_subject: this test pins the tombstone erasure itself. A provider
+  // identity would additionally delete through the Admin SDK first, which is
+  // covered by the Firebase identity deletion tests below.
+  await sql(`INSERT INTO users(id,display_name,role,auth_issuer) VALUES($1,'Chauffeur Partant','driver','test')`,[driver]);
   await sql(`INSERT INTO driver_profiles(user_id,operator_id,license_reference,id_document_reference,photo_url,active)
     VALUES($1,$2,'PC-BJ-0001','CNI-0001','https://photos.example.test/visage.jpg',true)`,[driver,demo.operator]);
   await sql(`INSERT INTO verification_evidence(operator_id,subject_user_id,kind,reference,file_url,status)
@@ -354,4 +358,186 @@ test('an account that runs a transport operation cannot quietly delete itself',a
   await privacy.processDueDeletions();
   const user=await one('SELECT display_name FROM users WHERE id=$1',[owner]);
   assert.equal(user.display_name,'Propriétaire Actif','and the operator owner is still there');
+});
+
+// ------------------------------------------- Firebase identity deletion ------
+// The processor deletes the provider identity OUTSIDE any transaction before
+// the tombstone anonymizes auth_subject; the injected admin double records
+// every call, so these tests prove the ordering, the idempotency and the
+// retry contract without a provider.
+
+/** An admin double that records every deleteUser and obeys a failure script.
+ * @param {{deleteUser?: (uid: string) => Promise<{status: 'deleted'|'not_found'}>, available?: boolean}} [options] */
+function fakeAdmin({ deleteUser, available = true } = {}) {
+  const calls = [];
+  const del = deleteUser ?? (async () => ({ status: 'deleted' }));
+  return { calls, admin: { available, deleteUser: async uid => { calls.push(uid); return del(uid); } } };
+}
+
+test('a completed deletion also deletes the Firebase identity, uid captured before the tombstone',async()=>{
+  const user=randomUUID(),uid='fb-'+randomUUID();
+  await db.transaction(async tx=>{
+    await tx.query(`INSERT INTO users(id,display_name,role,auth_subject,auth_issuer) VALUES($1,'À Effacer','passenger',$2,'https://issuer.test.invalid')`,[user,uid]);
+    await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1)',[user]);
+  });
+  const {calls,admin}=fakeAdmin();
+  const withAdmin=privacyCenter(db,null,admin);
+  await withAdmin.requestDeletion({id:user,role:'passenger'});
+  const result=await withAdmin.processDueDeletions();
+  assert.equal(result.processed.length,1);
+  assert.deepEqual(calls,[uid],'the Firebase UID from auth_subject is deleted');
+  const deletion=await one('SELECT status,outcome,identity_uid,identity_deleted_at FROM deletion_requests WHERE user_id=$1',[user]);
+  assert.equal(deletion.status,'completed');
+  assert.equal(deletion.outcome,'anonymized');
+  assert.equal(deletion.identity_uid,uid,'the UID is recorded before auth_subject is erased');
+  assert.ok(deletion.identity_deleted_at,'the identity deletion is timestamped');
+  const tombstone=await one('SELECT display_name,auth_subject,active FROM users WHERE id=$1',[user]);
+  assert.equal(tombstone.display_name,'Utilisateur supprimé');
+  assert.equal(tombstone.auth_subject,null);
+  assert.equal(tombstone.active,false);
+});
+
+test('a Firebase user-not-found is the idempotent success case',async()=>{
+  const user=randomUUID(),uid='fb-'+randomUUID();
+  await db.transaction(async tx=>{
+    await tx.query(`INSERT INTO users(id,display_name,role,auth_subject) VALUES($1,'Déjà Effacé','passenger',$2)`,[user,uid]);
+    await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1)',[user]);
+  });
+  const {calls,admin}=fakeAdmin({deleteUser:async()=>({status:'not_found'})});
+  const withAdmin=privacyCenter(db,null,admin);
+  await withAdmin.requestDeletion({id:user,role:'passenger'});
+  const result=await withAdmin.processDueDeletions();
+  assert.equal(result.processed.length,1);
+  assert.deepEqual(calls,[uid]);
+  assert.equal((await one('SELECT status FROM deletion_requests WHERE user_id=$1',[user])).status,'completed');
+});
+
+test('a provider outage never completes the deletion and retries the next tick',async()=>{
+  const user=randomUUID(),uid='fb-'+randomUUID();
+  await db.transaction(async tx=>{
+    await tx.query(`INSERT INTO users(id,display_name,role,auth_subject) VALUES($1,'En Panne','passenger',$2)`,[user,uid]);
+    await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1)',[user]);
+  });
+  const failing=fakeAdmin({deleteUser:async()=>{throw new Error('provider down');}});
+  const failingCenter=privacyCenter(db,null,failing.admin);
+  await failingCenter.requestDeletion({id:user,role:'passenger'});
+  const first=await failingCenter.processDueDeletions();
+  assert.equal(first.processed.length,0,'nothing completes while the identity may still exist');
+  const afterFailure=await one('SELECT status,processed_at FROM deletion_requests WHERE user_id=$1',[user]);
+  assert.equal(afterFailure.status,'processing');
+  assert.equal(afterFailure.processed_at,null,'the request is NOT marked completed');
+  const untouched=await one('SELECT display_name,auth_subject,active FROM users WHERE id=$1',[user]);
+  assert.equal(untouched.auth_subject,uid,'the account is not tombstoned while the provider identity survives');
+  assert.equal(untouched.active,true);
+  // The next tick finds the identity already gone (crash between provider and
+  // database) and completes normally — idempotent across retries.
+  const healed=fakeAdmin({deleteUser:async()=>({status:'not_found'})});
+  const healedCenter=privacyCenter(db,null,healed.admin);
+  const second=await healedCenter.processDueDeletions();
+  assert.equal(second.processed.length,1);
+  assert.equal((await one('SELECT status FROM deletion_requests WHERE user_id=$1',[user])).status,'completed');
+});
+
+test('without an admin capability the request waits in processing rather than claiming the identity is gone',async()=>{
+  const user=randomUUID(),uid='fb-'+randomUUID();
+  await db.transaction(async tx=>{
+    await tx.query(`INSERT INTO users(id,display_name,role,auth_subject) VALUES($1,'Sans Clé','passenger',$2)`,[user,uid]);
+    await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1)',[user]);
+  });
+  const noAdmin=privacyCenter(db,null,{available:false});
+  await noAdmin.requestDeletion({id:user,role:'passenger'});
+  await noAdmin.processDueDeletions();
+  assert.equal((await one('SELECT status FROM deletion_requests WHERE user_id=$1',[user])).status,'processing');
+  assert.equal((await one('SELECT auth_subject FROM users WHERE id=$1',[user])).auth_subject,uid);
+  // Clean up the residue so later ticks in this shared schema stay scoped:
+  // with a credential present again, the waiting request completes.
+  await privacyCenter(db,null,fakeAdmin().admin).processDueDeletions();
+  assert.equal((await one('SELECT status FROM deletion_requests WHERE user_id=$1',[user])).status,'completed');
+});
+
+test('a demo identity has no provider user and completes without any admin call',async()=>{
+  const user=randomUUID();
+  await db.transaction(async tx=>{
+    await tx.query(`INSERT INTO users(id,display_name,role,is_demo) VALUES($1,'Démo Effaçable','passenger',true)`,[user]);
+    await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1)',[user]);
+  });
+  const {calls,admin}=fakeAdmin();
+  const withAdmin=privacyCenter(db,null,admin);
+  await withAdmin.requestDeletion({id:user,role:'passenger'});
+  const result=await withAdmin.processDueDeletions();
+  assert.equal(result.processed.length,1);
+  assert.equal(calls.length,0,'no provider call for an identity without a provider');
+  const deletion=await one('SELECT status,identity_uid,identity_deleted_at FROM deletion_requests WHERE user_id=$1',[user]);
+  assert.equal(deletion.status,'completed');
+  assert.equal(deletion.identity_uid,null);
+});
+
+test('the same address can register again after deletion: a new uid maps to a NEW account, never the tombstone',async()=>{
+  const email='reincarnation@example.invalid';
+  const oldUid='fb-'+randomUUID();
+  const user=randomUUID();
+  await db.transaction(async tx=>{
+    await tx.query(`INSERT INTO users(id,display_name,role,auth_subject) VALUES($1,'À Réincarner','passenger',$2)`,[user,oldUid]);
+    await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1)',[user]);
+    await tx.query('UPDATE users SET notification_email=$2 WHERE id=$1',[user,email]);
+  });
+  const {admin}=fakeAdmin();
+  const withAdmin=privacyCenter(db,null,admin);
+  await withAdmin.requestDeletion({id:user,role:'passenger'});
+  await withAdmin.processDueDeletions();
+  // The same mailbox signs up again: Firebase issues a NEW uid, which maps to
+  // a NEW LeRoutier account — the tombstone keeps its old records untouched.
+  const newUid='fb-'+randomUUID();
+  const reborn=await mapIdentity(db,{subject:newUid,issuer:'https://issuer.test.invalid',signInProvider:'password',emailVerified:true,notificationEmail:email});
+  assert.notEqual(reborn.id,user,'a new account, never the tombstone');
+  assert.notEqual(reborn.display_name,'Utilisateur supprimé');
+  const tombstone=await one('SELECT auth_subject,display_name FROM users WHERE id=$1',[user]);
+  assert.equal(tombstone.auth_subject,null,'the tombstone is not reconnected to the new identity');
+  assert.equal(tombstone.display_name,'Utilisateur supprimé');
+});
+
+// ---------------------------------------- Platform Ops-initiated deletion ---
+test('Platform Ops deletion requests reuse the retention model and audit the initiator',async()=>{
+  const target=randomUUID();
+  await db.transaction(async tx=>{
+    await tx.query(`INSERT INTO users(id,display_name,role) VALUES($1,'Cible Ops','passenger')`,[target]);
+    await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1)',[target]);
+  });
+  const row=await privacy.requestDeletionFor(PLATFORM_OPS,target);
+  assert.equal(row.status,'requested','no blockers: executable immediately');
+  const auditRow=await one(`SELECT actor_id,action,entity_id,details FROM audit_events WHERE action='privacy.deletion_requested' AND entity_id=$1 ORDER BY created_at DESC LIMIT 1`,[target]);
+  assert.equal(auditRow.actor_id,PLATFORM_OPS.id,'who initiated the deletion is audited');
+  assert.equal(auditRow.details.initiatedBy,'platform');
+  // Idempotent across initiators: the same request is returned, never a second.
+  const again=await privacy.requestDeletionFor(PLATFORM_OPS,target);
+  assert.equal(again.id,row.id);
+});
+
+test('Platform Ops deletion is refused for self, for the superadmin seat, and without the users grant',async()=>{
+  // Nobody deletes their own account through Ops.
+  await assert.rejects(privacy.requestDeletionFor(PLATFORM_OPS,PLATFORM_OPS.id),{code:'FORBIDDEN'});
+  // A non-superadmin platform member cannot delete a platform identity.
+  const member={id:randomUUID(),role:'ops',operator_id:null,platform_capabilities:['users']};
+  const seat=randomUUID();
+  await db.transaction(async tx=>{
+    await tx.query(`INSERT INTO users(id,display_name,role) VALUES($1,'Plateforme Cible','ops')`,[seat]);
+    await tx.query(`INSERT INTO platform_grants(user_id,capability,granted_by) VALUES($1,'superadmin',$1)`,[seat]);
+  });
+  await assert.rejects(privacy.requestDeletionFor(member,seat),{code:'FORBIDDEN'});
+  // Even the superadmin cannot delete the superadmin seat.
+  await assert.rejects(privacy.requestDeletionFor(PLATFORM_OPS,seat),{code:'FORBIDDEN'});
+  // A passenger (or anyone without the users grant) cannot initiate at all.
+  await assert.rejects(privacy.requestDeletionFor(PASSENGER,randomUUID()),{code:'FORBIDDEN'});
+});
+
+test('a blocked Platform Ops deletion is scheduled with the blockers named',async()=>{
+  const target=randomUUID();
+  await db.transaction(async tx=>{
+    await tx.query(`INSERT INTO users(id,display_name,role) VALUES($1,'Cible Occupée','passenger')`,[target]);
+    await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1)',[target]);
+  });
+  await domain.hold({id:target,role:'passenger'},{serviceId:demo.service,origin:0,destination:1},'ops-del-'+randomUUID().slice(0,8));
+  const row=await privacy.requestDeletionFor(PLATFORM_OPS,target);
+  assert.equal(row.status,'scheduled');
+  assert.ok(row.blockers.some(b=>b.kind==='active_booking'));
 });

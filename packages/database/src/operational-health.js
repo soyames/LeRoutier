@@ -173,12 +173,17 @@ export function operationalHealth(db) {
           u.last_authenticated_at,u.last_meaningful_activity_at,
           o.name AS operator_name,o.type AS operator_type,o.verification_status,
           p.phone AS passenger_phone,d.active AS driver_active,c.active AS convoyeur_active,
-          status_change.created_at AS status_changed_at,status_change.details->>'active' AS status_changed_to
+          status_change.created_at AS status_changed_at,status_change.details->>'active' AS status_changed_to,
+          -- Deletion state, so the register can tell a completed tombstone
+          -- ("Compte supprimé") from an account that is merely inactive, and
+          -- never presents a deleted identity as still authenticatable.
+          deletion.status AS deletion_status
           FROM users u
           LEFT JOIN operators o ON o.id=u.operator_id
           LEFT JOIN passenger_profiles p ON p.user_id=u.id
           LEFT JOIN driver_profiles d ON d.user_id=u.id
           LEFT JOIN convoyeur_profiles c ON c.user_id=u.id
+          LEFT JOIN deletion_requests deletion ON deletion.user_id=u.id
           -- The most recent suspension or reactivation, from the audit trail
           -- rather than a second column that could disagree with it.
           LEFT JOIN LATERAL (SELECT a.created_at,a.details FROM audit_events a

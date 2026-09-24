@@ -1,9 +1,16 @@
 {
-  "name": "@leroutier/worker", "version": "0.1.0", "private": true, "type": "module",
-  "scripts": { "expire": "node --env-file=../../.env.local src/expire.js", "workflows": "node --env-file=../../.env.local src/workflows.js" },
+  "name": "@leroutier/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "expire": "node --env-file=../../.env.local src/expire.js",
+    "workflows": "node --env-file=../../.env.local src/workflows.js"
+  },
   "dependencies": {
     "@leroutier/database": "workspace:*",
     "@leroutier/config": "workspace:*",
-    "@leroutier/agents": "workspace:*"
+    "@leroutier/agents": "workspace:*",
+    "@leroutier/firebase-admin": "workspace:*"
   }
 }

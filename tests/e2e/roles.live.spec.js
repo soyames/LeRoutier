@@ -216,7 +216,39 @@ test('the platform summary lays its cards out as a grid, not one per line', asyn
   expect(narrow.rows).toBeLessThan(narrow.cards);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);
 });
-
+
+
+// The user register's lifecycle actions — disable, reactivate, and the
+// retention-aware delete with its explicit confirmation — over the real API,
+// real PostgreSQL and the real (disposable) test identities.
+test('Platform Ops disables, reactivates and requests deletion of an account', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await login(page, 'Exploitation plateforme');
+  await page.getByRole('navigation').getByRole('button', { name: 'Utilisateurs', exact: true }).click();
+  await expect(page.getByText('Vue administrative des comptes LeRoutier')).toBeVisible();
+  const card = page.locator('.card').filter({ hasText: 'TEST Passenger' }).first();
+  await expect(card.getByRole('button', { name: 'Désactiver', exact: true })).toBeVisible();
+  // Disable through the existing status endpoint, then the register re-renders
+  // with the fresh state and an announced result.
+  await card.getByRole('button', { name: 'Désactiver', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Compte désactivé.' })).toBeVisible();
+  await expect(card.getByText('Inactif', { exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Réactiver', exact: true })).toBeVisible();
+  await card.getByRole('button', { name: 'Réactiver', exact: true }).click();
+  await expect(page.getByText('Compte réactivé.', { exact: true })).toBeVisible();
+  await expect(card.getByText('Actif', { exact: true })).toBeVisible();
+  // Deletion is never one click: an explicit panel names the account, says
+  // what is removed and what retention keeps.
+  await card.getByRole('button', { name: 'Supprimer le compte', exact: true }).click();
+  await expect(card.getByRole('alert')).toContainText('TEST Passenger');
+  await expect(card.getByRole('alert')).toContainText(/politique de rétention LeRoutier/);
+  await card.getByRole('button', { name: 'Supprimer ce compte', exact: true }).click();
+  // With the TEST passenger's boarded journey the request is scheduled and
+  // the blockers are the reason; without any it would be requested outright.
+  await expect(page.getByRole('status').filter({ hasText: /Suppression demandée|Suppression planifiée/ })).toBeVisible();
+  await expect(card.getByText('Suppression planifiée', { exact: true })).toBeVisible();
+});
 
 // Platform authorizations decide what a member of LeRoutier's staff is OFFERED.
 //

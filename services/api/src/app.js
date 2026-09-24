@@ -753,6 +753,12 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       return provision.platformGrants(actor,uuid(platformGrants[1]),await body(),req.headers.get('idempotency-key'));
     const activation=path.match(/^\/ops\/users\/([^/]+)\/status$/);
     if(method==='PATCH' && activation) return provision.userStatus(actor,uuid(activation[1]),await body(),req.headers.get('idempotency-key'));
+    // Platform Ops account deletion: the SAME retention-aware privacy model as
+    // self-service deletion, targeted at another account and audited with the
+    // initiator. Never a SQL DELETE, never a cascade — blockers schedule,
+    // and the processor (with Firebase identity deletion) completes later.
+    const opsDeletion=path.match(/^\/ops\/users\/([^/]+)\/deletion-request$/);
+    if(method==='POST' && opsDeletion) { await limited('ops-deletion:'+actor.id); return privacy.requestDeletionFor(actor,uuid(opsDeletion[1])); }
     if(method==='POST' && path==='/bookings') {
       invariant(!actor.needs_profile,'PROFILE_REQUIRED','Complete your passenger profile before booking.',409);
       const booking=await body();

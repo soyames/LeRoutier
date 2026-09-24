@@ -106,6 +106,13 @@ export async function mockApi(page) {
   await page.route('**/api/v1/ops/fleet',r=>r.fulfill({json:{data:{services:[service],vehicles:[{id:id(20),registration:'DEMO-BUS-01',capacity:12,status:'active'}]}}}));
   await page.route('**/api/v1/ops/bookings',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/api/v1/ops/provisioning',r=>r.fulfill({json:{data:{operators:[],users:[],routes:[],vehicles:[],places:[],stops:[]}}}));
+  // The platform user register: one active account with an external identity.
+  await page.route('**/api/v1/ops/users*',r=>r.fulfill({json:{data:{total:1,users:[{id:id(2),display_name:'Compte Démo',role:'passenger',
+    operator_id:null,active:true,is_demo:true,notification_email:null,authenticated:false,auth_issuer:null,
+    created_at:'2026-09-15T00:00:00Z',updated_at:null,profile_completed_at:null,last_authenticated_at:null,
+    last_meaningful_activity_at:'2026-09-15T00:00:00Z',operator_name:null,operator_type:null,verification_status:null,
+    passenger_phone:null,driver_active:null,convoyeur_active:null,status_changed_at:null,status_changed_to:null,
+    deletion_status:null}],limit:25,offset:0,query:null}}}));
   await page.route('**/api/v1/incidents',r=>r.fulfill({json:{data:[]}}));
   // FedaPay / payouts / agentic Ops sections
   await page.route('**/api/v1/payments/config',r=>r.fulfill({json:{data:{available:true}}}));

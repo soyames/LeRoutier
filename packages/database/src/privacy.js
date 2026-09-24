@@ -14,7 +14,7 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import { invariant, uuid } from '@leroutier/domain';
-import { requirePlatform } from './platform-access.js';
+import { requirePlatform, requireSuperadmin } from './platform-access.js';
 import { audit } from './identities.js';
 
 const one = async (tx, sql, args = []) => (await tx.query(sql, args)).rows[0];
@@ -35,7 +35,7 @@ const notifyPlatformOps = (tx, template, data = {}) => tx.query(
 
 export const CONSENT_TYPES = ['marketing', 'partner_offers', 'optional_analytics'];
 
-export function privacyCenter(db, store = null) {
+export function privacyCenter(db, store = null, firebaseAdmin = null) {
   return {
     // ---- consent -----------------------------------------------------------
     async consents(actor) {
@@ -199,18 +199,46 @@ export function privacyCenter(db, store = null) {
       return db.transaction(async tx => {
         const existing = await one(tx, 'SELECT * FROM deletion_requests WHERE user_id=$1', [actor.id]);
         if (existing) return existing; // idempotent: one open request per user
-        const blockers = [];
-        const activeBooking = await one(tx, `SELECT count(*)::integer AS n FROM bookings WHERE passenger_id=$1 AND status IN ('held','confirmed','boarded')`, [actor.id]);
-        if (activeBooking.n) blockers.push({ kind: 'active_booking', count: activeBooking.n });
-        const pendingPayment = await one(tx, `SELECT count(*)::integer AS n FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE b.passenger_id=$1 AND p.status IN ('pending')`, [actor.id]);
-        if (pendingPayment.n) blockers.push({ kind: 'pending_payment', count: pendingPayment.n });
-        const activeParcel = await one(tx, `SELECT count(*)::integer AS n FROM parcels WHERE created_by=$1 AND status NOT IN ('collected','cancelled','rejected','returned','lost','damaged')`, [actor.id]);
-        if (activeParcel.n) blockers.push({ kind: 'active_parcel', count: activeParcel.n });
-        for (const found of await operatorBlockers(tx, actor.id)) blockers.push(found);
+        const blockers = await collectBlockers(tx, actor.id);
         const row = await one(tx, `INSERT INTO deletion_requests(user_id,status,blockers) VALUES($1,$2,$3) RETURNING *`,
           [actor.id, blockers.length ? 'scheduled' : 'requested', JSON.stringify(blockers)]);
         await audit(tx, actor.id, 'privacy.deletion_requested', actor.id, null, { blockers });
         await notifyUser(tx, actor.id, 'privacy_deletion_received', { status: row.status });
+        await tx.query(`INSERT INTO operational_signals(signal) VALUES('deletion_requests')
+          ON CONFLICT(minute,signal) DO UPDATE SET count=operational_signals.count+1`);
+        return row;
+      });
+    },
+
+    /**
+     * Platform Ops-initiated deletion of another account. The SAME deletion
+     * model as self-service — blockers, scheduling, tombstoning — because an
+     * admin delete must never cascade bookings, payments or audit truth any
+     * more than a user's own delete may. The actor is recorded on the audit
+     * event, so who asked for the deletion is always answerable.
+     */
+    async requestDeletionFor(actor, targetId) {
+      requirePlatform(actor, 'users');
+      invariant(actor?.id, 'UNAUTHORIZED', 'Sign in to continue.', 401);
+      return db.transaction(async tx => {
+        const target = await one(tx, 'SELECT * FROM users WHERE id=$1', [targetId]);
+        invariant(target, 'NOT_FOUND', 'Utilisateur introuvable.', 404);
+        invariant(target.id !== actor.id, 'FORBIDDEN', 'Vous ne pouvez pas demander la suppression de votre propre compte.', 403);
+        // A platform identity may only be deleted by the superadmin, and the
+        // superadmin's own seat is never deletable: the one account that can
+        // restore everyone else's access must not disappear.
+        if (target.role === 'ops' && target.operator_id === null) {
+          requireSuperadmin(actor);
+          invariant(!await one(tx, "SELECT 1 FROM platform_grants WHERE user_id=$1 AND capability='superadmin'", [target.id]),
+            'FORBIDDEN', 'Le compte super-administrateur ne peut pas être supprimé.', 403);
+        }
+        const existing = await one(tx, 'SELECT * FROM deletion_requests WHERE user_id=$1', [targetId]);
+        if (existing) return existing; // idempotent: one request per user, whoever asks
+        const blockers = await collectBlockers(tx, targetId);
+        const row = await one(tx, `INSERT INTO deletion_requests(user_id,status,blockers) VALUES($1,$2,$3) RETURNING *`,
+          [targetId, blockers.length ? 'scheduled' : 'requested', JSON.stringify(blockers)]);
+        await audit(tx, actor.id, 'privacy.deletion_requested', targetId, null, { blockers, initiatedBy: 'platform' });
+        await notifyUser(tx, targetId, 'privacy_deletion_received', { status: row.status });
         await tx.query(`INSERT INTO operational_signals(signal) VALUES('deletion_requests')
           ON CONFLICT(minute,signal) DO UPDATE SET count=operational_signals.count+1`);
         return row;
@@ -258,29 +286,79 @@ export function privacyCenter(db, store = null) {
     // Deletion processing: the worker's typed, authorized step. Only requests
     // whose blockers have cleared are processed; the user row becomes a
     // tombstone (anonymized identifiers, every FK preserved) — financial,
-    // booking, parcel and audit truth is never cascaded away. Firebase
-    // identity deletion stays an external owner action AFTER this step, and
-    // the completion event rides the existing notification pipeline.
+    // booking, parcel and audit truth is never cascaded away, and the
+    // completion event rides the existing notification pipeline.
+    //
+    // The Firebase Authentication identity is deleted AUTOMATICALLY here, in
+    // three phases so no provider call ever happens inside a transaction:
+    //
+    //   1. claim + decide. One short transaction: blockers re-checked (an
+    //      account can pick up an operator role or a running service between
+    //      asking and being processed), the provider UID captured BEFORE the
+    //      tombstone anonymizes users.auth_subject, status set to `processing`.
+    //   2. the provider call. deleteUser outside any transaction; `not_found`
+    //      is the idempotent success case, an error leaves the request in
+    //      `processing` and the next tick retries. A missing credential does
+    //      the same — a request is never completed while the authentication
+    //      identity may still exist.
+    //   3. anonymize + complete. A second transaction re-checks blockers one
+    //      last time (a blocker created in the provider-call window wins, and
+    //      the tombstone waits), then tombstones and completes. Nothing is
+    //      marked completed unless BOTH the Firebase identity and the LeRoutier
+    //      anonymization have reached their intended state.
     async processDueDeletions() {
-      return db.transaction(async tx => {
-        const candidates = await rows(tx, `SELECT * FROM deletion_requests WHERE status IN ('requested','scheduled')
+      // Phase 1 — claim and decide, in one short transaction.
+      const ready = await db.transaction(async tx => {
+        const candidates = await rows(tx, `SELECT * FROM deletion_requests WHERE status IN ('requested','scheduled','processing')
           ORDER BY requested_at LIMIT 20 FOR UPDATE SKIP LOCKED`);
-        const processed = [];
+        const ready = [];
         for (const request of candidates) {
-          const blockers = [];
-          const activeBooking = await one(tx, `SELECT count(*)::integer AS n FROM bookings WHERE passenger_id=$1 AND status IN ('held','confirmed','boarded')`, [request.user_id]);
-          if (activeBooking.n) blockers.push({ kind: 'active_booking', count: activeBooking.n });
-          const pendingPayment = await one(tx, `SELECT count(*)::integer AS n FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE b.passenger_id=$1 AND p.status='pending'`, [request.user_id]);
-          if (pendingPayment.n) blockers.push({ kind: 'pending_payment', count: pendingPayment.n });
-          const activeParcel = await one(tx, `SELECT count(*)::integer AS n FROM parcels WHERE created_by=$1 AND status NOT IN ('collected','cancelled','rejected','returned','lost','damaged')`, [request.user_id]);
-          if (activeParcel.n) blockers.push({ kind: 'active_parcel', count: activeParcel.n });
-          // Re-checked here and not only at request time: an account can pick
-          // up an operator role, or a running service, between asking and being
-          // processed.
-          for (const found of await operatorBlockers(tx, request.user_id)) blockers.push(found);
+          const blockers = await collectBlockers(tx, request.user_id);
           if (blockers.length) {
             await tx.query(`UPDATE deletion_requests SET status='scheduled',blockers=$2,updated_at=now() WHERE id=$1`, [request.id, JSON.stringify(blockers)]);
             continue;
+          }
+          // The UID is captured here, once, before the tombstone erases it.
+          if (!request.identity_uid) {
+            const user = await one(tx, 'SELECT auth_subject FROM users WHERE id=$1', [request.user_id]);
+            if (user?.auth_subject) {
+              await tx.query('UPDATE deletion_requests SET identity_uid=$2,updated_at=now() WHERE id=$1', [request.id, user.auth_subject]);
+              request.identity_uid = user.auth_subject;
+            }
+          }
+          await tx.query(`UPDATE deletion_requests SET status='processing',blockers='[]',updated_at=now() WHERE id=$1`, [request.id]);
+          ready.push(request);
+        }
+        return ready;
+      });
+
+      // Phase 2 — the provider call, outside any transaction.
+      for (const request of ready) {
+        if (!request.identity_uid) {
+          // Demo identities have no provider user; there is nothing to delete.
+          request.identityDeleted = true;
+          continue;
+        }
+        if (!firebaseAdmin?.available) continue; // stays `processing`; retried next tick
+        try {
+          const result = await firebaseAdmin.deleteUser(request.identity_uid);
+          request.identityDeleted = result.status === 'deleted' || result.status === 'not_found';
+        } catch {
+          request.identityDeleted = false; // provider outage: retried next tick
+        }
+      }
+
+      // Phase 3 — anonymize and complete, one transaction per request.
+      const processed = [];
+      for (const request of ready) {
+        if (!request.identityDeleted) continue;
+        const completed = await db.transaction(async tx => {
+          const fresh = await one(tx, 'SELECT status FROM deletion_requests WHERE id=$1 FOR UPDATE', [request.id]);
+          if (fresh?.status !== 'processing') return false; // a concurrent tick finished it
+          const blockers = await collectBlockers(tx, request.user_id);
+          if (blockers.length) {
+            await tx.query(`UPDATE deletion_requests SET status='scheduled',blockers=$2,updated_at=now() WHERE id=$1`, [request.id, JSON.stringify(blockers)]);
+            return false;
           }
           await tx.query(`UPDATE users SET display_name='Utilisateur supprimé',auth_subject=NULL,notification_email=NULL,active=false,updated_at=now() WHERE id=$1`, [request.user_id]);
           await tx.query('UPDATE passenger_profiles SET phone=NULL WHERE user_id=$1', [request.user_id]);
@@ -295,20 +373,40 @@ export function privacyCenter(db, store = null) {
           await tx.query(`UPDATE driver_profiles SET photo_url=NULL,id_document_reference=NULL,
             license_reference='[supprimé]',active=false WHERE user_id=$1`, [request.user_id]);
           await redactEvidence(tx, 'subject_user_id=$1', [request.user_id], store);
-          await tx.query(`UPDATE deletion_requests SET status='completed',processed_at=now(),blockers='[]',outcome='anonymized',updated_at=now() WHERE id=$1`, [request.id]);
+          await tx.query(`UPDATE deletion_requests SET status='completed',processed_at=now(),blockers='[]',outcome='anonymized',
+            identity_deleted_at=CASE WHEN $2::text IS NOT NULL THEN now() ELSE NULL END,updated_at=now() WHERE id=$1`, [request.id, request.identity_uid ?? null]);
           await tx.query('DELETE FROM api_sessions WHERE user_id=$1', [request.user_id]);
           // The completion notice fires before the identity is gone from the
           // in-app inbox scope; it lands in the same pipeline as everything else.
           await notifyUser(tx, request.user_id, 'privacy_deletion_completed', {});
           await tx.query(`INSERT INTO operational_signals(signal) VALUES('deletions_completed')
             ON CONFLICT(minute,signal) DO UPDATE SET count=operational_signals.count+1`);
-          processed.push({ userId: request.user_id, outcome: 'anonymized' });
-        }
-        return { processed };
-      });
+          return true;
+        });
+        if (completed) processed.push({ userId: request.user_id, outcome: 'anonymized' });
+      }
+      return { processed };
     },
   };
 }
+/**
+ * Every obligation that keeps an account from being deletable, checked the
+ * same way at request time and at execution time — one function so the two
+ * can never drift apart. Counting blockers carry `count`; operator ownership
+ * carries the operator identity so a console can name it.
+ */
+async function collectBlockers(tx, userId) {
+  const blockers = [];
+  const activeBooking = await one(tx, `SELECT count(*)::integer AS n FROM bookings WHERE passenger_id=$1 AND status IN ('held','confirmed','boarded')`, [userId]);
+  if (activeBooking.n) blockers.push({ kind: 'active_booking', count: activeBooking.n });
+  const pendingPayment = await one(tx, `SELECT count(*)::integer AS n FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE b.passenger_id=$1 AND p.status IN ('pending')`, [userId]);
+  if (pendingPayment.n) blockers.push({ kind: 'pending_payment', count: pendingPayment.n });
+  const activeParcel = await one(tx, `SELECT count(*)::integer AS n FROM parcels WHERE created_by=$1 AND status NOT IN ('collected','cancelled','rejected','returned','lost','damaged')`, [userId]);
+  if (activeParcel.n) blockers.push({ kind: 'active_parcel', count: activeParcel.n });
+  for (const found of await operatorBlockers(tx, userId)) blockers.push(found);
+  return blockers;
+}
+
 /**
  * Why an account that runs a transport operation cannot simply disappear.
  *

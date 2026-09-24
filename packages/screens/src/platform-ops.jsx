@@ -9,7 +9,16 @@ import { EVIDENCE_LABELS } from './operator-onboarding.jsx';
 
 const fmtBytes=value=>{if(!Number.isFinite(Number(value)))return '–';const n=Number(value);if(n<1024)return `${n} o`;const units=['Ko','Mo','Go','To'];let v=n/1024,i=0;while(v>=1024&&i<units.length-1){v/=1024;i++;}return `${v.toFixed(v>=10?1:2)} ${units[i]}`;};
 const fmtDate=value=>value?new Date(value).toLocaleString('fr-FR'):'–';
-const authProvider=issuer=>issuer?.includes('securetoken.google.com')?'Firebase / Google':issuer?'Fournisseur externe':'Aucune identité externe';
+// The securetoken issuer names the provider only as "Firebase": password and
+// Google accounts share it, so claiming one over the other would be invented
+// provenance. Neutral and truthful beats specific and wrong.
+const authProvider=issuer=>issuer?.includes('securetoken.google.com')?'Firebase':issuer?'Fournisseur externe':'Aucune identité externe';
+// How a deletion blocker reads to somebody deciding whether the delete can
+// proceed. Server-side kinds, never invented: the same vocabulary the
+// self-service privacy screen uses.
+const BLOCKER_LABELS={active_booking:'réservation active',pending_payment:'paiement en attente',active_parcel:'colis en cours',
+  operator_ownership:'propriété d’un opérateur actif',crew_assignment:'affectation d’équipage en cours',pending_payout:'versement en attente'};
+const blockerLabel=b=>BLOCKER_LABELS[b.kind]??b.kind;
 
 /**
  * The platform gate, now asking for a NAMED authorization.
@@ -241,6 +250,10 @@ function StorageCard({storage}){
 // result means "no such account", not "beyond the first 500".
 export function PlatformUsers(){
   const [query,setQuery]=useState(''),[term,setTerm]=useState(''),[page,setPage]=useState(0);
+  // Action results live HERE, not on the cards: a reload replaces the card
+  // components (skeletons while the next page arrives), and a notice stored
+  // on a card would die with it — the operator would act and read nothing.
+  const [notice,setNotice]=useState(''),[actionError,setActionError]=useState('');
   const size=25;
   const params=new URLSearchParams({limit:String(size),offset:String(page*size)});
   if(term)params.set('q',term);
@@ -256,33 +269,104 @@ export function PlatformUsers(){
         <input className="control" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Nom, e-mail, rôle, opérateur ou identifiant"/></label>
         <div className="controls"><button className="btn btn-primary">Rechercher</button>
           {term&&<button type="button" className="btn btn-soft" onClick={()=>{setQuery('');setTerm('');setPage(0);}}>Effacer</button>}</div></form></Card>
+    {notice && <p role="status">{notice}</p>}
+    {actionError && <p role="alert">{actionError}</p>}
     {result.loading?<SkeletonCards count={4}/>:result.error?<Card><p role="alert">{result.error}</p></Card>:users.length?<>
       <p className="small muted" role="status">{total} compte{total>1?'s':''} correspondant{total>1?'s':''} · affichage {page*size+1}–{shown}</p>
-      {users.map(u=><Card key={u.id} className="stack">
-        <div className="between wrap"><div><strong>{u.display_name||'Profil sans nom'}</strong><p className="small muted">{u.role} · {u.operator_name||'Aucun opérateur'}</p></div>
-          <div className="controls"><Badge tone={u.active?'success':'warning'}>{u.active?'Actif':'Inactif'}</Badge>
-            <Badge tone={u.authenticated?'success':'neutral'}>{u.authenticated?'Authentifié':'Sans identité externe'}</Badge>{u.is_demo&&<Badge tone="warning">TEST</Badge>}</div></div>
-        <div className="summary"><div className="row"><span>E-mail de notification</span><span>{u.notification_email||'–'}</span></div>
-          <div className="row"><span>Téléphone</span><span>{u.passenger_phone||'–'}</span></div>
-          <div className="row"><span>Fournisseur d’identité</span><span>{authProvider(u.auth_issuer)}</span></div>
-          <div className="row"><span>Compte créé</span><span>{fmtDate(u.created_at)}</span></div>
-          {/* Never fabricated. Accounts that predate the measurement read as
-              not observed, because a dashboard that is confidently wrong gets
-              consulted and one that is honestly empty gets investigated. */}
-          <div className="row"><span>Dernière connexion</span>
-            <span>{u.last_authenticated_at?fmtDate(u.last_authenticated_at):'Aucune connexion observée'}</span></div>
-          <div className="row"><span>Dernière activité (réservation ou envoi)</span>
-            <span>{u.last_meaningful_activity_at?fmtDate(u.last_meaningful_activity_at):'–'}</span></div>
-          {u.status_changed_at&&<div className="row"><span>Dernier changement de statut</span>
-            <span>{u.status_changed_to==='true'?'Réactivé':'Désactivé'} · {fmtDate(u.status_changed_at)}</span></div>}
-          <div className="row"><span>Profil complété</span><span>{u.profile_completed_at?'Oui':'Non'}</span></div>
-          <div className="row"><span>Identifiant interne</span><span className="mono">{u.id}</span></div></div>
-      </Card>)}
+      {users.map(u=><UserCard key={u.id} u={u} onChanged={result.reload} onNotice={setNotice} onError={setActionError}/>)}
       {(page>0||more)&&<div className="controls">
         <button className="btn btn-soft" disabled={page===0} onClick={()=>setPage(p=>Math.max(0,p-1))}>Page précédente</button>
         <button className="btn btn-soft" disabled={!more} onClick={()=>setPage(p=>p+1)}>Page suivante</button></div>}
     </>:<EmptyState icon={CircleUserRound} title="Aucun utilisateur trouvé" text={term?`Aucun compte ne correspond à « ${term} ».`:'Aucun compte enregistré.'}/>}
   </div></PlatformOnly>;
+}
+
+/**
+ * One account card, with the lifecycle actions.
+ *
+ * The buttons shown are the ones this viewer may actually perform: a platform
+ * identity can only be touched by the superadmin (the server refuses everyone
+ * else), nobody may touch their own row, and a completed tombstone has no
+ * actions left — it is marked "Compte supprimé" rather than offered as an
+ * account somebody could still switch on. The delete path is the retention-
+ * aware privacy workflow, never a SQL delete: blockers schedule it, and the
+ * confirmation names them.
+ */
+function UserCard({u,onChanged,onNotice,onError}){
+  const {user,request,online}=useSession();
+  const [busy,setBusy]=useState(false);
+  const [confirming,setConfirming]=useState(false);
+  const self=user?.id===u.id;
+  const deleted=u.deletion_status==='completed';
+  const pendingDeletion=u.deletion_status && !deleted;
+  const platformTarget=u.role==='ops' && !u.operator_id;
+  const superadmin=Array.isArray(user?.platform_capabilities) && user.platform_capabilities.includes('superadmin');
+  const canTouch=!self && !deleted && (!platformTarget || superadmin);
+  const canDelete=canTouch && !pendingDeletion;
+  async function setStatus(active){
+    setBusy(true);onNotice('');onError('');
+    try{
+      await request(`/ops/users/${u.id}/status`,{method:'PATCH',body:{active},key:crypto.randomUUID()});
+      onNotice(active?'Compte réactivé.':'Compte désactivé. Les sessions de ce compte sont invalidées.');
+      onChanged?.();
+    }catch(e){onError(e.message);}finally{setBusy(false);}
+  }
+  async function confirmDelete(){
+    setBusy(true);onNotice('');onError('');
+    try{
+      const result=await request(`/ops/users/${u.id}/deletion-request`,{method:'POST'});
+      const blockers=Array.isArray(result?.blockers)?result.blockers:[];
+      setConfirming(false);
+      if(blockers.length){
+        onNotice(`Suppression planifiée : des obligations actives doivent d’abord être résolues (${blockers.map(blockerLabel).join(', ')}). Le traitement se terminera automatiquement ensuite.`);
+      }else{
+        onNotice(result?.status==='scheduled'
+          ? 'Suppression planifiée : des obligations actives doivent d’abord être résolues. Le traitement se terminera automatiquement ensuite.'
+          : 'Suppression demandée. Le compte sera supprimé au prochain traitement.');
+      }
+      onChanged?.();
+    }catch(e){onError(e.message);}finally{setBusy(false);}
+  }
+  return <Card className="stack">
+    <div className="between wrap"><div><strong>{u.display_name||'Profil sans nom'}</strong><p className="small muted">{u.role} · {u.operator_name||'Aucun opérateur'}</p></div>
+      <div className="controls"><Badge tone={u.active?'success':'warning'}>{u.active?'Actif':'Inactif'}</Badge>
+        <Badge tone={u.authenticated?'success':'neutral'}>{u.authenticated?'Authentifié':'Sans identité externe'}</Badge>
+        {pendingDeletion&&<Badge tone="warning">Suppression planifiée</Badge>}
+        {deleted&&<Badge tone="danger">Compte supprimé</Badge>}
+        {u.is_demo&&<Badge tone="warning">TEST</Badge>}</div></div>
+    <div className="summary"><div className="row"><span>E-mail de notification</span><span>{u.notification_email||'–'}</span></div>
+      <div className="row"><span>Téléphone</span><span>{u.passenger_phone||'–'}</span></div>
+      <div className="row"><span>Fournisseur d’identité</span><span>{authProvider(u.auth_issuer)}</span></div>
+      <div className="row"><span>Compte créé</span><span>{fmtDate(u.created_at)}</span></div>
+      {/* Never fabricated. Accounts that predate the measurement read as
+          not observed, because a dashboard that is confidently wrong gets
+          consulted and one that is honestly empty gets investigated. */}
+      <div className="row"><span>Dernière connexion</span>
+        <span>{u.last_authenticated_at?fmtDate(u.last_authenticated_at):'Aucune connexion observée'}</span></div>
+      <div className="row"><span>Dernière activité (réservation ou envoi)</span>
+        <span>{u.last_meaningful_activity_at?fmtDate(u.last_meaningful_activity_at):'–'}</span></div>
+      {u.status_changed_at&&<div className="row"><span>Dernier changement de statut</span>
+        <span>{u.status_changed_to==='true'?'Réactivé':'Désactivé'} · {fmtDate(u.status_changed_at)}</span></div>}
+      <div className="row"><span>Profil complété</span><span>{u.profile_completed_at?'Oui':'Non'}</span></div>
+      <div className="row"><span>Identifiant interne</span><span className="mono">{u.id}</span></div></div>
+    {confirming && <div className="danger-box stack">
+      <p role="alert">Supprimer le compte de <strong>{u.display_name||'Profil sans nom'}</strong> ({u.role}) ?
+        L’accès à l’authentification sera retiré, et le compte ne pourra plus se connecter.
+        Les données opérationnelles et légales déjà conservées continuent de suivre la politique de rétention LeRoutier.
+        {pendingDeletion && ' Des obligations actives repoussent déjà la suppression.'}</p>
+    </div>}
+    {canTouch && <div className="controls">
+      {!confirming && (u.active
+        ? <button type="button" className="btn btn-soft" disabled={busy||!online} onClick={()=>setStatus(false)}>Désactiver</button>
+        : <button type="button" className="btn btn-primary" disabled={busy||!online} onClick={()=>setStatus(true)}>Réactiver</button>)}
+      {canDelete && (confirming
+        ? <>
+          <button type="button" className="btn btn-danger" disabled={busy||!online} onClick={confirmDelete}>Supprimer ce compte</button>
+          <button type="button" className="btn btn-soft" disabled={busy} onClick={()=>setConfirming(false)}>Annuler</button>
+        </>
+        : <button type="button" className="btn btn-danger" disabled={busy||!online} onClick={()=>setConfirming(true)}>Supprimer le compte</button>)}
+    </div>}
+  </Card>;
 }
 
 /**
