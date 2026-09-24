@@ -64,11 +64,26 @@ export function createFirebaseAdmin(config = {}, client = null) {
     /** Whether a usable credential exists. Callers fail closed when false. */
     get available() { return available; },
     /**
-     * A verification action link carrying the oobCode. The caller sends it
-     * through Brevo; the raw link never reaches an API response or a log.
+     * Generate Firebase's real one-time verification code, but do not send the
+     * provider-hosted action URL to the passenger. Admin SDK action links point
+     * at Firebase's handler and carry LeRoutier only as a continue URL; sending
+     * that link directly would let Firebase consume the code first and then
+     * return to /verify-email without the oobCode our branded page needs.
+     *
+     * Instead, extract the trusted oobCode from Firebase's generated URL and
+     * place it on the LeRoutier verification route. The browser still applies
+     * the code with Firebase's supported applyActionCode API, but the user sees
+     * leroutier.app from the email click onward.
      */
     async generateEmailVerificationLink(email, continueUrl) {
-      return (client ?? await admin()).generateEmailVerificationLink(email, { url: continueUrl });
+      const raw = await (client ?? await admin()).generateEmailVerificationLink(email, { url: continueUrl });
+      const action = new URL(raw);
+      const code = action.searchParams.get('oobCode');
+      if (!code) throw new Error('Firebase verification link did not contain an action code.');
+      const branded = new URL(continueUrl);
+      branded.searchParams.set('mode', 'verifyEmail');
+      branded.searchParams.set('oobCode', code);
+      return branded.toString();
     },
     /**
      * Deletes the Firebase Authentication identity. `not_found` is the
