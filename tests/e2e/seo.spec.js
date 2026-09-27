@@ -9,7 +9,10 @@ const APP = 'http://127.0.0.1:4173';
 const corridorPages = CORRIDORS.map(c => [`/${c.slug}`, new RegExp(c.label), new RegExp(c.h1)]);
 
 const publicPages = [
-  ['/', /Transport interurbain et colis au Bénin/, /Où allez-vous \?/],
+  // The home page's single H1 is the promise the photograph behind it makes;
+  // "Où allez-vous ?" moved to the search panel, where it labels the form
+  // rather than the document, and is an <h2> there.
+  ['/', /Transport interurbain et colis au Bénin/, /Voyagez entre les villes, simplement\./],
   ['/bus-benin', /Bus et transport interurbain au Bénin/, /Bus et transport interurbain au Bénin/],
   ...corridorPages,
   ['/colis-benin', /Envoi et suivi de colis/, /Envoi et suivi de colis au Bénin/],

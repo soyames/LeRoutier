@@ -34,9 +34,12 @@ async function open(page, identity, route) {
 test('public home leads with travel tasks and keeps professional access secondary', async ({ page }) => {
   await mockApi(page);
   await page.goto(APP + '/');
+  // The three travel tasks are still the first thing offered, and the trip
+  // search is still the only one of them that is a button: the other two lead
+  // to pages, so they are links and can be opened in a new tab.
   await expect(page.getByRole('button', { name: 'Rechercher' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Envoyer un colis/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Suivre un colis/ })).toBeVisible();
+  await expect(page.getByRole('link', { name: /Envoyer un colis/ }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: /Suivre/ }).first()).toBeVisible();
   // Working with LeRoutier is a real path, but it is not what a visitor came
   // for: it is one link below the travel tasks, not a pair of buttons
   // competing with the trip search.

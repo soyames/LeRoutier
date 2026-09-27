@@ -62,7 +62,14 @@ test('in-app notification centre and unread badge work end to end', async ({ pag
   await page.route('**/api/v1/notifications', r => r.fulfill({ json: { data: notifications } }));
   await page.goto(APP + '/account');
   await page.getByRole('button', { name: 'Connexion de développement' }).click();
-  await expect(page.getByRole('button', { name: /Notifications \(1 non lues\)/ })).toBeVisible();
-  await page.getByRole('button', { name: /Notifications/ }).click();
+  // The unread count is no longer a bell in the header of every passenger
+  // screen — that header now carries four destinations and an account button —
+  // so the count is on the account button and named on the menu item behind it.
+  const account = page.getByRole('button', { name: `Compte de ${PASSENGER.display_name}` });
+  await expect(account.locator('.icon-badge')).toHaveText('1');
+  await account.click();
+  const centre = page.getByRole('menuitem', { name: 'Notifications (1 non lues)' });
+  await expect(centre).toBeVisible();
+  await centre.click();
   await expect(page.getByRole('heading', { name: /Notifications/ })).toBeVisible();
 });

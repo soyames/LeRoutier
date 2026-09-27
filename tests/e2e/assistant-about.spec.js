@@ -128,17 +128,25 @@ test.describe('Assistant', () => {
     await expect(dialog.getByText('Quels départs depuis Cotonou ?')).toBeVisible();
   });
 
-  test('the assistant link sits in the footer after the legal links and never floats over navigation', async ({ page }) => {
+  // The assistant used to be a full-width card in the middle of the home page
+  // — a heading, a paragraph and a button, competing with the trip search for
+  // the same glance. It is one restrained launcher in the corner now, plus the
+  // footer link for anybody who looks for help in a footer. What has not
+  // changed is the reason the old rule existed: it must never sit on top of
+  // the task navigation. `the assistant launcher never covers the task
+  // navigation` in accessibility.spec.js holds that line.
+  test('the assistant is one restrained launcher and one footer link, not a section', async ({ page }) => {
     await mockApi(page);
     await page.goto(APP + '/');
-    // No fixed-position launcher button exists anywhere.
-    await expect(page.locator('.assistant-launcher')).toHaveCount(0);
-    const footer = page.locator('footer').first();
-    const assistant = footer.getByRole('button', { name: 'Assistant', exact: true });
-    await expect(assistant).toBeVisible();
-    // The mobile navigation remains fully clickable: the panel only appears
-    // after the link is activated.
+    await expect(page.locator('.assistant-launcher')).toHaveCount(1);
+    // The panel only appears once something is activated.
     await expect(page.getByRole('dialog', { name: 'Assistant LeRoutier' })).toHaveCount(0);
+    const assistant = page.locator('footer').first().getByRole('button', { name: 'Assistant', exact: true });
+    await expect(assistant).toBeVisible();
+    await assistant.click();
+    await expect(page.getByRole('dialog', { name: 'Assistant LeRoutier' })).toBeVisible();
+    // And the home page no longer carries a card inviting the visitor in.
+    await expect(page.getByRole('button', { name: 'Ouvrir l’assistant' })).toHaveCount(0);
   });
 });
 

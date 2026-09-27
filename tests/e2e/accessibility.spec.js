@@ -146,16 +146,50 @@ test('loading and error states are announced, not just drawn', async ({ page }) 
   await expect(announced.first()).toContainText('Impossible de charger les villes');
 });
 
+// The primary navigation is two different things at two widths: a drawer on a
+// phone and a header row on a desktop. Both are aimed at with a thumb, so both
+// are measured.
 test('touch targets on the primary navigation are large enough to hit', async ({ page }) => {
   await open(page, '/trips');
-  const items = page.getByRole('navigation').getByRole('button');
-  const count = await items.count();
-  expect(count).toBeGreaterThan(0);
-  for (let i = 0; i < count; i++) {
-    const box = await items.nth(i).boundingBox();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Ouvrir le menu' }).click();
+  const drawerItems = page.getByRole('navigation', { name: 'Menu principal' }).getByRole('link');
+  const drawerCount = await drawerItems.count();
+  expect(drawerCount).toBeGreaterThan(0);
+  for (let i = 0; i < drawerCount; i++) {
+    const box = await drawerItems.nth(i).boundingBox();
     if (!box) continue;
     // 44 px is the WCAG 2.1 AAA target; 24 px is the AA floor. A bus station
     // is not a desk, so this asserts the AA floor with room to spare.
-    expect(box.height, `navigation item ${i} is only ${Math.round(box.height)}px tall`).toBeGreaterThanOrEqual(36);
+    expect(box.height, `menu item ${i} is only ${Math.round(box.height)}px tall`).toBeGreaterThanOrEqual(36);
+    expect(box.width, `menu item ${i} is only ${Math.round(box.width)}px wide`).toBeGreaterThanOrEqual(36);
   }
+  await page.keyboard.press('Escape');
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const headerItems = page.getByRole('navigation', { name: 'Navigation principale' }).getByRole('link');
+  const headerCount = await headerItems.count();
+  expect(headerCount).toBeGreaterThan(0);
+  for (let i = 0; i < headerCount; i++) {
+    const box = await headerItems.nth(i).boundingBox();
+    if (!box) continue;
+    expect(box.height, `header link ${i} is only ${Math.round(box.height)}px tall`).toBeGreaterThanOrEqual(36);
+  }
+});
+
+// The launcher is fixed to the bottom-right corner, which is exactly where the
+// operational task bar lives. It is lifted clear of it on every workspace that
+// has one; if that rule is ever lost, this fails rather than a driver's thumb
+// discovering it at a station.
+test('the assistant launcher never covers the task navigation', async ({ page }) => {
+  await open(page, '/work/today', DRIVER);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const launcher = await page.locator('.assistant-launcher').boundingBox();
+  const nav = await page.locator('.lr-bottom-nav').boundingBox();
+  expect(launcher, 'the launcher is on screen').toBeTruthy();
+  expect(nav, 'the task bar is on screen').toBeTruthy();
+  expect(launcher.y + launcher.height,
+    'the launcher overlaps the task navigation').toBeLessThanOrEqual(nav.y + 1);
+  await expect(page.getByRole('button', { name: 'Ouvrir le menu' })).toHaveCount(0);
 });
