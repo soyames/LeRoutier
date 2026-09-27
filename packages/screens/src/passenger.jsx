@@ -55,7 +55,11 @@ export function PlaceCombobox({ label, placeholder, value, onSelect, onClear, in
     else setOpen(true);
   }
   return <div className="place-combobox">
-    <label className="field" htmlFor={inputId}>{label}</label>
+    {/* The label text is wrapped rather than left as a bare text node: a
+        flex container turns a loose text node into an anonymous item that no
+        selector can reach, so the label rendered in body type instead of the
+        small uppercase field style every other input in the product uses. */}
+    <label className="field" htmlFor={inputId}><span>{label}</span></label>
     <div className="combobox-control">
       {value && selected ? <button type="button" className="combobox-chip" aria-label={`${label} : ${selected.name}. Effacer`}
         onClick={onClear}>{selected.name}<span aria-hidden="true">×</span></button>
@@ -88,77 +92,51 @@ export function JourneySearchFields({ originMode, setOriginMode, originPlace, se
   const [minDay] = useState(() => isoDay(Date.now()));
   const same = originMode === 'place' && originPlace && originPlace === destinationPlace;
   const swappable = destinationPlace && (originMode === 'current' || originPlace);
-  return <form className="trip-search stack" onSubmit={onSearch}>
-    <div className="trip-endpoints">
-      <div className="endpoint-cell">
-        <label className="field" htmlFor="trip-origin">Départ
-          <select id="trip-origin" className="control" aria-label="Départ" value={originMode} onChange={e => setOriginMode(e.target.value)}>
-            {/* "Ma position", not "Ma position actuelle": this cell is 120px on
-                a phone and a <select> truncates its own option, so the longer
-                label rendered as "Ma position" with the tail cut off anyway.
-                Same meaning, no visible amputation. */}
-            <option value="current">Ma position</option>
-            <option value="place">Choisir une ville…</option>
-          </select>
-        </label>
-        {/* An example, not a restatement of the label above it. These cells are
-            120px wide on a phone, where "Rechercher une ville ou une localité"
-            rendered as "Rechercher une" and stopped mid-sentence. A city name
-            fits, and it also answers the question the label does not: what
-            kind of thing do I type here. */}
-        {originMode === 'place' && <PlaceCombobox label="Ville de départ" placeholder="Ex. Cotonou" inputId="trip-origin-place"
-          value={originPlace} onSelect={setOriginPlace} onClear={() => setOriginPlace(null)}/>}
+  return <form className="trip-search" onSubmit={onSearch}>
+    <div className="trip-row">
+      <div className="trip-endpoints">
+        <div className="endpoint-cell">
+          <label className="field" htmlFor="trip-origin"><span>Départ</span>
+            <select id="trip-origin" className="control" aria-label="Départ" value={originMode} onChange={e => setOriginMode(e.target.value)}>
+              {/* "Ma position", not "Ma position actuelle": this cell is 120px on
+                  a phone and a <select> truncates its own option, so the longer
+                  label rendered as "Ma position" with the tail cut off anyway.
+                  Same meaning, no visible amputation. */}
+              <option value="current">Ma position</option>
+              <option value="place">Choisir une ville…</option>
+            </select>
+          </label>
+          {/* An example, not a restatement of the label above it. These cells are
+              120px wide on a phone, where "Rechercher une ville ou une localité"
+              rendered as "Rechercher une" and stopped mid-sentence. A city name
+              fits, and it also answers the question the label does not: what
+              kind of thing do I type here. */}
+          {originMode === 'place' && <PlaceCombobox label="Ville de départ" placeholder="Ex. Cotonou" inputId="trip-origin-place"
+            value={originPlace} onSelect={setOriginPlace} onClear={() => setOriginPlace(null)}/>}
+        </div>
+        <button type="button" className="swap-btn" aria-label="Inverser départ et arrivée" disabled={!swappable} onClick={onSwap}><ArrowLeftRight size={17}/></button>
+        <div className="endpoint-cell">
+          <PlaceCombobox label="Destination" placeholder="Ex. Parakou" inputId="trip-destination"
+            value={destinationPlace} onSelect={setDestinationPlace} onClear={() => setDestinationPlace(null)}/>
+        </div>
       </div>
-      <button type="button" className="swap-btn" aria-label="Inverser départ et arrivée" disabled={!swappable} onClick={onSwap}><ArrowLeftRight size={17}/></button>
-      <div className="endpoint-cell">
-        <PlaceCombobox label="Destination" placeholder="Ex. Parakou" inputId="trip-destination"
-          value={destinationPlace} onSelect={setDestinationPlace} onClear={() => setDestinationPlace(null)}/>
-      </div>
+      <label className="field" htmlFor="trip-date"><span>Date</span>
+        <input id="trip-date" className="control" type="date" aria-label="Date" value={day} min={minDay} onChange={e => setDay(e.target.value)}/>
+      </label>
+      <button className="btn btn-primary search-cta" type="submit" disabled={!destinationPlace || (originMode === 'place' && !originPlace) || same}><Search size={16}/>{submitLabel}</button>
     </div>
-    <label className="field" htmlFor="trip-date">Date
-      <input id="trip-date" className="control" type="date" aria-label="Date" value={day} min={minDay} onChange={e => setDay(e.target.value)}/>
-    </label>
     {same && <p className="small muted" role="status">Choisissez deux villes différentes.</p>}
-    <button className="btn btn-primary" type="submit" disabled={!destinationPlace || (originMode === 'place' && !originPlace) || same}><Search size={16}/>{submitLabel}</button>
   </form>;
 }
 
-/** Public home hero: the single most important action in the product. */
-// The corridors people actually ask for, offered as one tap instead of two
-// pickers. Each pill is resolved against the real geography the API serves:
-// a corridor whose endpoints do not both exist simply is not shown, so this
-// can never advertise a route LeRoutier has no places for. Tapping one runs
-// the ordinary search, which still answers honestly when nothing is published.
-//
-// The LIST itself arrives as a prop and is not defined here. It used to be a
-// second hardcoded array beside the footer's catalogue, and the two drifted:
-// the home page offered Abomey-Calavi and Ouidah, the footer offered
-// Sèmè-Kpodji, Lokossa, Malanville and Parakou–Natitingou, and only four pairs
-// appeared in both. One product, one answer to "where do people go".
-const foldName = value => String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
-
-function CorridorPills({ corridors = [], onPick }) {
-  const places = useApi('/places?type=commune');
-  const byName = useMemo(() => {
-    const index = new Map();
-    for (const place of places.data || []) index.set(foldName(place.name), place);
-    return index;
-  }, [places.data]);
-  const available = useMemo(() => corridors
-    .map(({ from, to }) => ({ from: byName.get(foldName(from)), to: byName.get(foldName(to)) }))
-    .filter(pair => pair.from && pair.to), [byName, corridors]);
-  if (!available.length) return null;
-  return <div className="corridor-pills">
-    <span className="small muted" id="corridor-pills-label">Trajets fréquents</span>
-    <div className="corridor-pill-row" role="group" aria-labelledby="corridor-pills-label">
-      {available.map(({ from, to }) => <button key={from.id + to.id} type="button" className="corridor-pill"
-        onClick={() => onPick(from.id, to.id)}>{from.name} → {to.name}</button>)}
-    </div>
-    <span className="small muted">Vous pouvez aussi descendre à une étape intermédiaire : le tarif correspond au trajet réellement parcouru.</span>
-  </div>;
-}
-
-export function TripSearchHero({ corridors = [] }) {
+/**
+ * The public homepage's journey search, with its own state.
+ *
+ * Extracted from the old hero card because the hero is now a photograph and
+ * the search is a panel that overlaps it: the two are different surfaces that
+ * happen to be adjacent, not one card with a heading in it.
+ */
+export function JourneySearch({ onSearched = null }) {
   const navigate = useNavigate();
   const [originMode, setOriginMode] = useState('current');
   const [originPlace, setOriginPlace] = useState(null);
@@ -177,22 +155,62 @@ export function TripSearchHero({ corridors = [] }) {
     params.set('to', `place:${destinationPlace}`);
     if (new URLSearchParams(window.location.search).get('testMode') === '1') params.set('testMode', '1');
     navigate(`/trips?${params}`);
+    onSearched?.();
   }
-  return <Card className="hero stack">
-    <span className="eyebrow">Voyager</span>
-    <h1>Où allez-vous ?</h1>
-    <p>Recherchez un trajet partout au Bénin.</p>
+  return <section className="search-panel" aria-labelledby="journey-search-title">
+    <h2 id="journey-search-title">Où allez-vous ?</h2>
+    <p className="search-hint">Aucun compte nécessaire pour chercher. Une seule place par réservation.</p>
     <JourneySearchFields originMode={originMode} setOriginMode={setOriginMode}
       originPlace={originPlace} setOriginPlace={setOriginPlace}
       destinationPlace={destinationPlace} setDestinationPlace={setDestinationPlace}
       day={day} setDay={setDay} onSearch={search} onSwap={swap}/>
-    <CorridorPills corridors={corridors} onPick={(from, to) => {
-      const params = new URLSearchParams({ date: day, from: `place:${from}`, to: `place:${to}` });
-      if (new URLSearchParams(window.location.search).get('testMode') === '1') params.set('testMode', '1');
-      navigate(`/trips?${params}`);
-    }}/>
-    <span className="small muted">Aucun compte nécessaire pour rechercher.</span>
-  </Card>;
+  </section>;
+}
+
+/** Public home hero: the single most important action in the product. */
+// The corridors people actually ask for, offered as one tap instead of two
+// pickers. Each pill is resolved against the real geography the API serves:
+// a corridor whose endpoints do not both exist simply is not shown, so this
+// can never advertise a route LeRoutier has no places for. Tapping one runs
+// the ordinary search, which still answers honestly when nothing is published.
+//
+// The LIST itself arrives as a prop and is not defined here. It used to be a
+// second hardcoded array beside the footer's catalogue, and the two drifted:
+// the home page offered Abomey-Calavi and Ouidah, the footer offered
+// Sèmè-Kpodji, Lokossa, Malanville and Parakou–Natitingou, and only four pairs
+// appeared in both. One product, one answer to "where do people go".
+const foldName = value => String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+
+export function PopularCorridors({ corridors = [], limit = null }) {
+  const navigate = useNavigate();
+  const places = useApi('/places?type=commune');
+  const [day] = useState(() => isoDay(Date.now()));
+  const byName = useMemo(() => {
+    const index = new Map();
+    for (const place of places.data || []) index.set(foldName(place.name), place);
+    return index;
+  }, [places.data]);
+  const available = useMemo(() => corridors
+    .map(({ from, to }) => ({ from: byName.get(foldName(from)), to: byName.get(foldName(to)) }))
+    .filter(pair => pair.from && pair.to), [byName, corridors]);
+  const shown = limit ? available.slice(0, limit) : available;
+  if (!shown.length) return null;
+  return <section className="lr-section">
+    <div className="section-head">
+      <span className="eyebrow">Destinations</span>
+      <h2 id="corridor-pills-label">Trajets fréquents</h2>
+      <p>Un axe qui vous parle ? Il lance la même recherche que le formulaire, sur les départs réellement publiés.</p>
+    </div>
+    <div className="corridor-grid" role="group" aria-labelledby="corridor-pills-label">
+      {shown.map(({ from, to }) => <button key={from.id + to.id} type="button" className="corridor-pill"
+        onClick={() => {
+          const params = new URLSearchParams({ date: day, from: `place:${from.id}`, to: `place:${to.id}` });
+          if (new URLSearchParams(window.location.search).get('testMode') === '1') params.set('testMode', '1');
+          navigate(`/trips?${params}`);
+        }}>{from.name} <span aria-hidden="true">→</span> {to.name}</button>)}
+    </div>
+    <p className="small muted" style={{ marginTop: 16 }}>Vous pouvez aussi descendre à une étape intermédiaire : le tarif correspond au trajet réellement parcouru.</p>
+  </section>;
 }
 
 /** One leg of a trip: a dot, the place, and its landmark. */
@@ -308,20 +326,18 @@ export function Trips() {
   };
 
   return <>
-    <Card className="hero stack">
+    <div className="page-head">
       <span className="eyebrow">Voyager</span>
       <h1>Trouvez votre départ.</h1>
       <p>Recherchez librement. Le compte n’est demandé qu’au moment de réserver.</p>
-    </Card>
+    </div>
 
-    <div id="trip-search">
-      <Card className="stack">
-        <JourneySearchFields originMode={originMode} setOriginMode={setOriginMode}
-          originPlace={originPlace} setOriginPlace={setOriginPlace}
-          destinationPlace={destinationPlace} setDestinationPlace={setDestinationPlace}
-          day={day} setDay={setDay} onSearch={search} onSwap={swap} submitLabel="Rechercher un trajet"/>
-        <span className="small muted">1 place par réservation · paiement en ligne sécurisé</span>
-      </Card>
+    <div id="trip-search" className="search-panel">
+      <JourneySearchFields originMode={originMode} setOriginMode={setOriginMode}
+        originPlace={originPlace} setOriginPlace={setOriginPlace}
+        destinationPlace={destinationPlace} setDestinationPlace={setDestinationPlace}
+        day={day} setDay={setDay} onSearch={search} onSwap={swap} submitLabel="Rechercher un trajet"/>
+      <span className="search-note">1 place par réservation · paiement en ligne sécurisé</span>
     </div>
 
     {searched && (destinationPlace || legacyStopDest) && (legacyStops
@@ -563,8 +579,12 @@ export function Tracking() {
   const booking = bookings.data?.find(b => ['confirmed', 'boarded'].includes(b.status));
   return <>
     <SectionTitle icon={Navigation} title="Suivi de mon trajet"/>
+    {/* The screen is reachable without an account — "Suivi" is one of the four
+        public header destinations — so its anonymous state has to offer the
+        way in, rather than telling somebody to connect with no door. */}
     {!user ? <ApiState resource={{ loading: false, error: null }} emptyTitle="Connectez-vous"
-      empty="Le suivi s’affiche pour vos trajets confirmés."/>
+      empty="Le suivi s’affiche pour vos trajets confirmés."
+      action={<button className="btn btn-primary" onClick={() => navigate('/account')}>Se connecter</button>}/>
       : bookings.loading ? <SkeletonCards count={1} lines={3}/>
         : !booking ? <Card className="stack">
           <strong>Aucun trajet en cours</strong>

@@ -4,7 +4,6 @@ import { useApi,useSession } from '@leroutier/config/client';
 import { Card,Badge,ErrorState,SkeletonCards } from '@leroutier/ui';
 import { fcfa,time,dayLong } from '@leroutier/ui';
 import { Armchair,Bus,Car,List,Map as MapIcon,X,ShieldCheck,Star,UserRound } from 'lucide-react';
-import './operator-trust.css';
 
 const JourneyMap=lazy(()=>import('./map.jsx').then(m=>({default:m.JourneyPlanMap})));
 export function TestBadge(){return <Badge tone="danger">TEST</Badge>;}
@@ -117,7 +116,18 @@ export function JourneySearchResults({originMode,originPlace,destinationPlace,de
   return <div className="stack journey-results">
     {originMode==='current'&&position===null&&<div className="controls"><button className="btn btn-primary" disabled={geoState==='asking'} onClick={onLocate}>{geoState==='asking'?'Localisation en cours…':'Utiliser ma position actuelle'}</button>{geoError&&<p className="small muted" role="status">{geoError}</p>}</div>}
     {planUrl&&(plan.loading?<><p role="status">Recherche des trajets…</p><SkeletonCards count={2} lines={4}/></>:plan.error?<ErrorState text="Impossible de calculer votre trajet pour le moment." onRetry={plan.reload}/>:<div className="journey-results-grid"><div className="journey-offers stack">
-      <Card className="stack results-summary"><div className="search-summary between wrap"><div><h2>{originLabel??'Départ'} → {destinationLabel??'Destination'}</h2><span className="small muted">{dayLong(day)} · 1 voyageur</span></div><button className="btn btn-soft" onClick={onEditDate}>Modifier</button></div>{options.length>0&&<><div className="between wrap"><label className="field">Trier<select className="control" aria-label="Trier les trajets" value={sort} onChange={e=>setSort(e.target.value)}>{SORTS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><span className="small muted" role="status">{options.length} trajet{options.length>1?'s':''} disponible{options.length>1?'s':''}</span></div><div className="filter-chips" role="group" aria-label="Filtrer les trajets">{FILTERS.map(([value,label])=><button key={value} type="button" className={`chip ${filter===value?'active':''}`} aria-pressed={filter===value} onClick={()=>setFilter(value)}>{label}</button>)}</div></>}{(anyTest||plan.data?.includeDemo)&&<ModeTestBanner/>}</Card>
+      <Card className="stack results-summary"><div className="search-summary between wrap"><div><h2>{originLabel??'Départ'} → {destinationLabel??'Destination'}</h2><span className="small muted">{dayLong(day)} · 1 voyageur</span></div><button className="btn btn-soft" onClick={onEditDate}>Modifier</button></div>{options.length>0&&<div className="results-controls">
+          {/* Sort, filters and the count are one band rather than three
+              stacked rows. The count rides at the end of the same line: it is
+              a fact about the list below, not a control of its own. */}
+          <label className="field results-sort"><span>Trier</span>
+            <select className="control" aria-label="Trier les trajets" value={sort} onChange={e=>setSort(e.target.value)}>{SORTS.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select>
+          </label>
+          <div className="results-filters">
+            <div className="filter-chips" role="group" aria-label="Filtrer les trajets">{FILTERS.map(([value,label])=><button key={value} type="button" className={`chip ${filter===value?'active':''}`} aria-pressed={filter===value} onClick={()=>setFilter(value)}>{label}</button>)}</div>
+            <span className="small muted results-count" role="status">{options.length} trajet{options.length>1?'s':''} disponible{options.length>1?'s':''}</span>
+          </div>
+        </div>}{(anyTest||plan.data?.includeDemo)&&<ModeTestBanner/>}</Card>
       {/* The picture says what the words say: the road is real, nothing is
           running on it yet. It is decoration only in the sense that a person
           who searched and found nothing deserves something warmer than three

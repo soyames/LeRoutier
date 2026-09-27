@@ -1,11 +1,23 @@
 import { useLocation, useNavigate } from 'react-router';
-import { Package, QrCode, Route, ShieldCheck, Smartphone, MapPin } from 'lucide-react';
+import { Package, QrCode } from 'lucide-react';
+import { MEDIA, Photo } from '@leroutier/ui';
 import { Parcels as LegacyParcels, ParcelTracking as LegacyParcelTracking } from './passenger.jsx';
-import './parcel-experience.css';
 
 export * from './passenger.jsx';
 export { OnboardingPage } from './operator-onboarding.jsx';
 
+// The parcel entrance.
+//
+// It used to be a hero card, then three "assurance" cards each carrying a title
+// and a sentence, then the actual form — five blocks of explanation before the
+// first field. One of the three said "Téléphone suffisant", which the heading
+// above it already implied; another explained that a QR and a reference exist,
+// which the screen shows two inches lower.
+//
+// What is left: the photograph, the heading, one sentence, the tab pair, and
+// the form. The one reassurance that is genuinely not visible in the form —
+// that printing is optional — moved into the hero as a single line, because a
+// sender who thinks they must find a printer will not start.
 function ParcelHero({ tracking }) {
   const navigate = useNavigate();
   return <section className="parcel-hero" aria-labelledby="parcel-hero-title">
@@ -14,42 +26,26 @@ function ParcelHero({ tracking }) {
       <h1 id="parcel-hero-title">{tracking ? 'Suivre votre colis' : 'Envoyer un colis entre les villes'}</h1>
       <p>{tracking
         ? 'Scannez le QR ou saisissez la référence LRP pour retrouver les étapes déjà confirmées.'
-        : 'Préparez l’envoi sur votre téléphone, obtenez sa référence LRP puis confiez-le au point de prise en charge indiqué.'}</p>
+        : 'Préparez l’envoi sur votre téléphone, puis confiez-le au point de prise en charge indiqué. L’impression reste facultative.'}</p>
+      <div className="parcel-mode-tabs" role="tablist" aria-label="Colis">
+        <button type="button" role="tab" aria-selected={!tracking} className={!tracking ? 'active' : ''} onClick={() => navigate('/parcels')}>
+          <Package size={18}/>Nouvel envoi
+        </button>
+        <button type="button" role="tab" aria-selected={tracking} className={tracking ? 'active' : ''} onClick={() => navigate('/parcels/track')}>
+          <QrCode size={18}/>Suivi colis
+        </button>
+      </div>
     </div>
-    <div className="parcel-hero-mark" aria-hidden="true"><Package size={34}/></div>
-    <div className="parcel-mode-tabs" role="tablist" aria-label="Colis">
-      <button type="button" role="tab" aria-selected={!tracking} className={!tracking ? 'active' : ''} onClick={() => navigate('/parcels')}>
-        <Package size={18}/>Nouvel envoi
-      </button>
-      <button type="button" role="tab" aria-selected={tracking} className={tracking ? 'active' : ''} onClick={() => navigate('/parcels/track')}>
-        <QrCode size={18}/>Suivi colis
-      </button>
-    </div>
+    {/* One photograph, at the entrance only. The parcel sub-pages — devis,
+        création, suivi, documents — inherit the design system and add no
+        imagery of their own. */}
+    <div className="parcel-hero-media"><Photo media={MEDIA.colis} priority/></div>
   </section>;
-}
-
-function ParcelAssurances({ tracking }) {
-  const items = tracking ? [
-    { icon: QrCode, title: 'QR ou référence LRP', text: 'Deux façons de retrouver le même envoi.' },
-    { icon: Route, title: 'Étapes confirmées', text: 'Le suivi montre uniquement les jalons réellement enregistrés.' },
-    { icon: ShieldCheck, title: 'Suivi public protégé', text: 'Les données privées de l’expéditeur et du destinataire restent masquées.' },
-  ] : [
-    { icon: Smartphone, title: 'Téléphone suffisant', text: 'L’impression reste facultative. Le QR et la référence LRP vivent dans l’application.' },
-    { icon: MapPin, title: 'Départ et destination clairs', text: 'Choisissez les points disponibles avant de confirmer l’envoi.' },
-    { icon: ShieldCheck, title: 'Retrait sécurisé', text: 'Le destinataire utilise son code de retrait lorsque le colis est prêt.' },
-  ];
-  return <div className="parcel-assurances" aria-label="Repères utiles">
-    {items.map(({ icon: Icon, title, text }) => <article key={title} className="parcel-assurance">
-      <span className="parcel-assurance-icon"><Icon size={18}/></span>
-      <div><strong>{title}</strong><span>{text}</span></div>
-    </article>)}
-  </div>;
 }
 
 function ParcelExperience({ tracking }) {
   return <div className={`parcel-stitch-shell ${tracking ? 'parcel-mode-track' : 'parcel-mode-send'}`}>
     <ParcelHero tracking={tracking}/>
-    <ParcelAssurances tracking={tracking}/>
     <div className="parcel-task-surface">
       {tracking ? <LegacyParcelTracking/> : <LegacyParcels/>}
     </div>
