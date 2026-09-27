@@ -1,6 +1,5 @@
 import { Link } from 'react-router';
 import { Card } from '@leroutier/ui';
-import { LegalFooter } from './legal.jsx';
 import { CORRIDORS, CORRIDOR_BY_SLUG, CORRIDOR_NOTE } from './corridors.js';
 
 // The direction is shown beside each pair on purpose. Eight links out of a
@@ -18,11 +17,11 @@ function SearchLinks() {
   </div>;
 }
 
+// These pages carry the public shell from <PageChrome> in main.jsx, which
+// supplies the header, the drawer, the <main> landmark and the footer. What
+// is left here is the article itself.
 function InfoLayout({ children }) {
-  return <main className="page stack" style={{ maxWidth: 920, margin: '0 auto', minWidth: 0 }}>
-    {children}
-    <LegalFooter/>
-  </main>;
+  return <div className="stack about-section">{children}</div>;
 }
 
 export function BusBeninPage() {

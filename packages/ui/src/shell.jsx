@@ -1,15 +1,126 @@
-import { Bell, Wifi, WifiOff } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Bell, Wifi, WifiOff, Menu, X, ChevronRight } from 'lucide-react';
 import { Logo } from './logo.jsx';
+
+/**
+ * One link primitive for both shells.
+ *
+ * `@leroutier/ui` deliberately does not depend on react-router — the console
+ * screens are rendered by the web app, and a router import here would make the
+ * component library unusable outside it. The web app passes its own `Link` in;
+ * everything else falls back to an anchor, which is also what a static render
+ * of this shell would want.
+ *
+ * @param {{ to: string, component?: any, className?: string, children: ReactNode, [key: string]: any }} props
+ */
+function ShellLink({ to, component: Component, className, children, ...rest }) {
+  if (Component) return <Component to={to} className={className} {...rest}>{children}</Component>;
+  return <a href={to} className={className} {...rest}>{children}</a>;
+}
+
+/**
+ * The mobile navigation drawer.
+ *
+ * A modal dialog rather than a panel that happens to be on screen: focus moves
+ * in on open, cannot leave while it is open, Escape closes it, and focus goes
+ * back to the button that opened it. On a phone this is the only route to half
+ * the product, so it has to be usable without a pointer.
+ *
+ * @param {{ open: boolean, onClose: () => void, title: string, items: any[], linkComponent?: any, footer?: ReactNode }} props
+ */
+function Drawer({ open, onClose, title, items, linkComponent, footer }) {
+  const panel = useRef(/** @type {HTMLDivElement | null} */ (null));
+  const close = useRef(/** @type {HTMLButtonElement | null} */ (null));
+
+  useEffect(() => {
+    if (!open) return;
+    close.current?.focus();
+    // The page behind a modal must not scroll away underneath it.
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = event => {
+      if (event.key === 'Escape') { event.preventDefault(); onClose(); return; }
+      if (event.key !== 'Tab') return;
+      const nodes = /** @type {HTMLElement[]} */ ([...(panel.current?.querySelectorAll('a[href], button:not(:disabled)') ?? [])]);
+      if (!nodes.length) return;
+      const active = /** @type {HTMLElement | null} */ (document.activeElement);
+      const first = nodes[0], last = nodes[nodes.length - 1];
+      if (event.shiftKey && active === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = previous; };
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return <>
+    <div className="lr-drawer-scrim" onClick={onClose}/>
+    <div className="lr-drawer" ref={panel} role="dialog" aria-modal="true" aria-label={title} id="lr-menu">
+      <div className="lr-drawer-head">
+        <span className="lr-drawer-title">{title}</span>
+        <button ref={close} className="icon-btn" onClick={onClose} aria-label="Fermer le menu"><X size={19}/></button>
+      </div>
+      <nav aria-label="Menu principal">
+        <ul>{items.map((item, index) => {
+          const Icon = item.icon;
+          const inner = <>
+            {Icon && <Icon size={19} aria-hidden="true"/>}
+            <span className="grow">{item.label}</span>
+            {item.badge > 0 && <Badge tone="danger">{item.badge > 9 ? '9+' : item.badge}</Badge>}
+            {!item.badge && <ChevronRight size={16} aria-hidden="true" style={{ opacity: .35 }}/>}
+          </>;
+          // An entry that acts rather than navigates — opening the assistant —
+          // is a button, not a link to nowhere.
+          return <li key={`${item.to ?? 'action'}:${item.label}:${index}`}>
+            {item.onSelect && !item.to
+              ? <button type="button" className="lr-drawer-item" onClick={() => { item.onSelect(); onClose(); }}>{inner}</button>
+              : <ShellLink to={item.to} component={linkComponent} onClick={onClose} aria-current={item.current ? 'page' : undefined}>{inner}</ShellLink>}
+          </li>;
+        })}</ul>
+      </nav>
+      {footer && <div className="lr-drawer-foot">{footer}</div>}
+    </div>
+  </>;
+}
 
 /**
  * @typedef {import('react').ReactNode} ReactNode
  * @typedef {import('lucide-react').LucideIcon} Icon
- * @param {{ role: string, title: string, subtitle?: string, nav?: { id: string, label: string, icon: Icon }[], active?: string, onNavigate?: (id: string) => void, children: ReactNode, online?: boolean, actions?: ReactNode, avatar?: ReactNode, onNotifications?: () => void, unread?: number, onHome?: () => void }} props
+ * @param {{
+ *   role: string, title: string, subtitle?: string,
+ *   nav?: { id: string, label: string, icon: Icon }[], active?: string, onNavigate?: (id: string) => void,
+ *   children: ReactNode, online?: boolean, actions?: ReactNode, avatar?: ReactNode,
+ *   onNotifications?: () => void, unread?: number, onHome?: () => void,
+ *   variant?: 'public'|'app', links?: { label: string, to: string, current?: boolean }[],
+ *   menu?: { label: string, to?: string, icon?: Icon, badge?: number, onSelect?: () => void }[],
+ *   menuTitle?: string, menuFooter?: ReactNode, footer?: ReactNode, linkComponent?: any, bleed?: boolean,
+ * }} props
  */
-export function AppShell({ role, title, subtitle, nav = [], active, onNavigate, children, online = true, actions, avatar = null, onNotifications, unread = 0, onHome }) {
-  const roleKey = String(role || 'public').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-');
-  const pageKey = String(active || title || 'home').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-');
-  return <div className="lr-app" data-role={roleKey} data-page={pageKey}>
+export function AppShell({
+  role, title, subtitle, nav = [], active, onNavigate, children,
+  online = true, actions, avatar = null, onNotifications, unread = 0, onHome,
+  variant = 'app', links = [], menu = [], menuTitle = 'Menu', menuFooter = null, footer = null, linkComponent, bleed = false,
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const isPublic = variant === 'public';
+  // The floating assistant is mounted by the application, outside this shell —
+  // it stays alive across navigations, which is what keeps a conversation
+  // going when somebody moves between pages. So it cannot be found with a
+  // descendant selector from here, and it has to be told in a way that outlives
+  // a selector: the body carries the fact that the bottom of the screen is
+  // already occupied by task navigation.
+  useEffect(() => { document.body.dataset.nav = nav.length > 0 ? 'bottom' : 'none'; }, [nav.length]);
+  const roleKey = String(role || 'public').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-');
+  const pageKey = String(active || title || 'home').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-');
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  // Escape has to work from the trigger too: focus is on the button for a
+  // moment after the drawer's own trap hands it back.
+  const onMenuKey = useCallback(event => { if (event.key === 'Escape') setMenuOpen(false); }, []);
+  const hasDrawer = menu.length > 0;
+
+  // `data-nav` is how the floating assistant knows whether the bottom of the
+  // screen is already occupied by task navigation it must not cover.
+  return <div className="lr-app" data-role={roleKey} data-page={pageKey} data-variant={isPublic ? 'public' : 'app'} data-nav={nav.length > 0 ? 'bottom' : 'none'}>
     <a className="skip-link" href="#lr-content">Aller au contenu</a>
     <header className="lr-header">
       <div className="lr-header-main">
@@ -17,25 +128,51 @@ export function AppShell({ role, title, subtitle, nav = [], active, onNavigate, 
           {onHome
             ? <button className="lr-brand-btn" onClick={onHome} aria-label="Accueil LeRoutier"><Logo className="lr-logo"/></button>
             : <Logo className="lr-logo"/>}
-          <div className="lr-page-title"><strong>{title}</strong><span>{subtitle || role}</span></div>
+          {!isPublic && <div className="lr-page-title"><strong>{title}</strong><span>{subtitle || role}</span></div>}
         </div>
-        <div className="lr-header-actions"><Badge tone={online ? 'success' : 'neutral'}>{online ? <Wifi size={14}/> : <WifiOff size={14}/>} {online ? 'En ligne' : 'Hors-ligne'}</Badge>{actions}
-          <button className="icon-btn" aria-label={unread > 0 ? `Notifications (${unread} non lues)` : 'Notifications'} onClick={onNotifications} disabled={!onNotifications}>
-            <Bell size={19}/>{unread > 0 && <span className="icon-badge" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>}
-          </button>{avatar}</div>
+
+        {/* Public header: four destinations, and a menu button on a phone.
+            Operational consoles keep their workspace furniture instead. */}
+        {isPublic && <nav className="lr-nav" aria-label="Navigation principale">
+          <ul>{links.map(link => <li key={link.to}>
+            <ShellLink to={link.to} component={linkComponent} aria-current={link.current ? 'page' : undefined}>{link.label}</ShellLink>
+          </li>)}</ul>
+        </nav>}
+
+        <div className="lr-header-actions">
+          {!isPublic && <>
+            <Badge tone={online ? 'success' : 'neutral'}>{online ? <Wifi size={14}/> : <WifiOff size={14}/>} {online ? 'En ligne' : 'Hors-ligne'}</Badge>
+            {actions}
+            <button className="icon-btn" aria-label={unread > 0 ? `Notifications (${unread} non lues)` : 'Notifications'} onClick={onNotifications} disabled={!onNotifications}>
+              <Bell size={19}/>{unread > 0 && <span className="icon-badge" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>}
+            </button>
+          </>}
+          {avatar}
+          {isPublic && hasDrawer && <button className="lr-menu-btn" aria-label="Ouvrir le menu" aria-expanded={menuOpen}
+            aria-controls="lr-menu" onClick={() => setMenuOpen(v => !v)} onKeyDown={onMenuKey}>
+            <Menu size={20}/>
+          </button>}
+        </div>
       </div>
       {/* Where "what page am I on" lives below 720px, because .lr-page-title is
           display:none there. Above 720px that title is already on screen two
-          elements away, so this half is hidden rather than repeated.
-
-          It used to read `{title} · LeRoutier Bénin`, which on the passenger
-          home — where the title IS "LeRoutier" — rendered "LeRoutier ·
-          LeRoutier Bénin". The brand name appeared four times in the top 100px
-          (logo, page title, its subtitle, and this), one of them stuttering. */}
-      <div className="lr-role-strip"><span>{role}</span><small>{title}</small></div>
+          elements away, so this half is hidden rather than repeated. */}
+      {!isPublic && <div className="lr-role-strip"><span>{role}</span><small>{title}</small></div>}
     </header>
-    <main className="lr-main" id="lr-content">{children}</main>
+
+    {/* `bleed` is for the one page that carries full-width bands — the public
+        home, whose hero is edge to edge. Every other page keeps the container:
+        without it their content starts at x=0 with no gutter at all.
+
+        `key` is the page, and it is what makes the entrance replay: a change
+        of destination remounts this element, which restarts one 240ms fade and
+        rise. Keyed on the page rather than the URL, so refining a search on
+        the results screen does not re-animate the page underneath the user. */}
+    <main key={active} className={`${bleed ? 'lr-main is-public' : 'lr-main'} lr-enter`} id="lr-content">{children}</main>
+
+    {footer}
     {nav.length > 0 && <nav className="lr-bottom-nav" aria-label={`Navigation ${role}`}>{nav.map(item => { const Icon = item.icon; const selected = active === item.id; return <button key={item.id} className={selected ? 'active' : ''} onClick={() => onNavigate?.(item.id)} aria-current={selected ? 'page' : undefined}><Icon size={22}/><span>{item.label}</span></button>; })}</nav>}
+    {hasDrawer && <Drawer open={menuOpen} onClose={closeMenu} title={menuTitle} items={menu} linkComponent={linkComponent} footer={menuFooter}/>}
   </div>;
 }
 

@@ -2,8 +2,11 @@ import { ApiProvider } from '@leroutier/config/client';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router';
+// One stylesheet, one set of tokens. There used to be a second layer here
+// ("stitch-polish") that overrode the first with `!important`; the two files
+// kept fighting over the same properties, and the layer that always won was
+// the one nobody thought to look in. It is merged into @leroutier/ui now.
 import '@leroutier/ui/styles.css';
-import './stitch-polish.css';
 import App from './App.jsx';
 import {PwaUpdate} from './pwa-update.jsx';
 import {Assistant} from './assistant.jsx';
@@ -12,6 +15,7 @@ import { LegalNotice, PrivacyPolicy, TermsOfUse, CancellationPolicy, CookiePolic
 import { Seo } from './seo.jsx';
 import { VerifyEmail } from './verify-email.jsx';
 import { BusBeninPage, RoutePage, ColisBeninPage, StationsBeninPage, TransporteursBeninPage } from './seo-pages.jsx';
+import { PageChrome } from './page-chrome.jsx';
 import { CORRIDORS } from './corridors.js';
 // Imported for its side effect and imported EARLY: it listens for
 // `beforeinstallprompt`, which Chromium fires once, soon after load. Miss it
@@ -35,21 +39,24 @@ createRoot(document.getElementById('root')).render(
       <PwaUpdate/>
       <Seo/>
       <Routes>
-        <Route path="/about" element={<About/>}/>
-        <Route path="/bus-benin" element={<BusBeninPage/>}/>
+        {/* Routed above <App>, so they carry their own instance of the public
+            shell. They used to carry no header at all: a visitor arriving from
+            a search engine had one link in the footer as the only way back. */}
+        <Route path="/about" element={<PageChrome><About/></PageChrome>}/>
+        <Route path="/bus-benin" element={<PageChrome><BusBeninPage/></PageChrome>}/>
         {CORRIDORS.map(corridor =>
-          <Route key={corridor.slug} path={`/${corridor.slug}`} element={<RoutePage slug={corridor.slug}/>}/>)}
-        <Route path="/colis-benin" element={<ColisBeninPage/>}/>
-        <Route path="/gares-routieres-benin" element={<StationsBeninPage/>}/>
-        <Route path="/transporteurs-benin" element={<TransporteursBeninPage/>}/>
-        <Route path="/legal" element={<LegalNotice/>}/>
-        <Route path="/privacy" element={<PrivacyPolicy/>}/>
-        <Route path="/terms" element={<TermsOfUse/>}/>
-        <Route path="/cancellations" element={<CancellationPolicy/>}/>
-        <Route path="/cookies" element={<CookiePolicy/>}/>
+          <Route key={corridor.slug} path={`/${corridor.slug}`} element={<PageChrome><RoutePage slug={corridor.slug}/></PageChrome>}/>)}
+        <Route path="/colis-benin" element={<PageChrome><ColisBeninPage/></PageChrome>}/>
+        <Route path="/gares-routieres-benin" element={<PageChrome><StationsBeninPage/></PageChrome>}/>
+        <Route path="/transporteurs-benin" element={<PageChrome><TransporteursBeninPage/></PageChrome>}/>
+        <Route path="/legal" element={<PageChrome><LegalNotice/></PageChrome>}/>
+        <Route path="/privacy" element={<PageChrome><PrivacyPolicy/></PageChrome>}/>
+        <Route path="/terms" element={<PageChrome><TermsOfUse/></PageChrome>}/>
+        <Route path="/cancellations" element={<PageChrome><CancellationPolicy/></PageChrome>}/>
+        <Route path="/cookies" element={<PageChrome><CookiePolicy/></PageChrome>}/>
         {/* The destination of the account-verification email. A fixed route, so
             it can never be shadowed by the workspace sections below. */}
-        <Route path="/verify-email" element={<VerifyEmail/>}/>
+        <Route path="/verify-email" element={<PageChrome><VerifyEmail/></PageChrome>}/>
         <Route path="/:section/:id" element={<App/>}/>
         <Route path="/:section" element={<App/>}/>
         <Route path="/work/:section/:id" element={<App/>}/>

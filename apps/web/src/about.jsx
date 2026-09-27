@@ -1,4 +1,3 @@
-import { LegalFooter } from './legal.jsx';
 import { Link } from 'react-router';
 
 // Public positioning. LeRoutier is a digital operating and transaction
@@ -11,7 +10,7 @@ function Section({ title, children }) {
 }
 
 export function About() {
-  return <main className="page stack" style={{ maxWidth: 920, margin: '0 auto', minWidth: 0 }}>
+  return <div className="stack about-section">
     <header className="stack">
       <img className="about-hero" src="/about-hero.svg" alt="Bus interurbain LeRoutier reliant des villes du Bénin, avec un colis et un repère de position" width="960" height="360"/>
       <h1>À propos de LeRoutier</h1>
@@ -58,7 +57,5 @@ export function About() {
     <Section title="Éditeur">
       <p>LeRoutier est exploité par <strong>DIGITAL CONDORDIA</strong>, entreprise immatriculée au Registre du Commerce et du Crédit Mobilier d’Abomey-Calavi sous le numéro RB/ABC/21 A 28773, Bénin. Voir les <Link to="/legal">mentions légales</Link>.</p>
     </Section>
-
-    <LegalFooter/>
-  </main>;
+  </div>;
 }

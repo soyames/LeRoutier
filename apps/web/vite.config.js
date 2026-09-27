@@ -58,7 +58,23 @@ export default defineConfig({
       // never ran, and Google sign-in died on the device while browsers
       // without an active service worker kept working.
       navigateFallbackDenylist: [/^\/api\//, /^\/__\/auth\//],
-      runtimeCaching: [],
+      // The redesign added photography to the public pages, and photography is
+      // not precached: putting a megabyte of images into the install payload
+      // makes the first install slower for everyone to spare a second fetch
+      // for the few. They are cached on first view instead, and kept for a
+      // month — so the second visit, including an offline one, has them.
+      //
+      // Authenticated API responses are still never cached: the queue in
+      // localStorage is what carries crew work through a dead spot.
+      runtimeCaching: [{
+        urlPattern: /\/assets\/[^/]+\.(?:avif|webp|jpe?g|png|svg)$/i,
+        handler: 'CacheFirst',
+        options: {
+          cacheName: 'leroutier-media',
+          expiration: { maxEntries: 40, maxAgeSeconds: 60 * 60 * 24 * 30 },
+          cacheableResponse: { statuses: [0, 200] },
+        },
+      }],
     },
   })],
   // No source maps are published. Vite's default is already false, but the

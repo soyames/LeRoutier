@@ -1,23 +1,22 @@
 import { Link } from 'react-router';
-import { Card, SectionTitle } from '@leroutier/ui';
+import { Card, SectionTitle, Logo } from '@leroutier/ui';
 import { CORRIDORS, CORRIDOR_NOTE } from './corridors.js';
 
 const UPDATED = '17 septembre 2026';
 const SUPPORT_EMAIL = 'leroutierbj@gmail.com';
 
+// The shell — header, drawer, <main> landmark and footer — comes from
+// <PageChrome> in main.jsx, which these routes are wrapped in. What is left
+// here is the policy itself.
 function LegalLayout({ title, intro, children }) {
-  // A landmark, because these pages are routed above the app shell and so do
-  // not inherit its <main>. Without one, a screen reader has no way to skip
-  // the page furniture and reach the policy itself.
-  return <main className="stack" style={{ maxWidth: 920, margin: '0 auto' }}>
+  return <div className="stack about-section">
     <Card className="stack">
       <SectionTitle title={title}/>
       {intro && <p className="muted">{intro}</p>}
       <p className="small muted">Version du {UPDATED}</p>
     </Card>
     {children}
-    <LegalFooter/>
-  </main>;
+  </div>;
 }
 
 function Section({ title, children }) {
@@ -31,62 +30,80 @@ function P({ children }) { return <p style={{ margin: 0 }}>{children}</p>; }
 function List({ children }) { return <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>{children}</ul>; }
 
 // The public footer is organised the way a traveller thinks: travel, parcels,
-// help, account — and only then, quietly, the door for people who work in
+// professionals, help — and only then, quietly, the door for people who work in
 // transport. Operator onboarding is a real product path, but it is not what a
 // passenger came here for, so it does not compete with the trip search.
 //
 // Platform Ops appears nowhere. It is not a thing anyone signs up for.
+//
+// Four columns and a brand block, where there used to be six columns and
+// twenty-seven links. The topic pages the footer used to spell out in full now
+// live inside the column they belong to, so the footer got shorter without
+// losing a single indexable destination — /bus-benin, /gares-routieres-benin,
+// /colis-benin and /transporteurs-benin are all still here.
 const FOOTER_GROUPS = [
   { title: 'Voyager', links: [
     { to: '/trips', label: 'Rechercher un trajet' },
     { to: '/tickets', label: 'Mes billets' },
-    { to: '/stations', label: 'Gares et points d’embarquement' },
+    { to: '/tracking', label: 'Suivi en direct' },
     { to: '/bus-benin', label: 'Bus et transport au Bénin' },
     { to: '/gares-routieres-benin', label: 'Gares routières du Bénin' },
   ] },
-  // The corridor pages. They belong in a footer, where somebody looking for a
-  // specific route can find them, rather than as a block of link text on the
-  // home page competing with the search box. "Populaires" and the note are
-  // load-bearing: an unqualified "Destinations" over a short list reads as the
-  // full extent of the service, which is the opposite of true.
-  { title: 'Destinations populaires', note: CORRIDOR_NOTE, links: CORRIDORS.map(c => ({ to: `/${c.slug}`, label: c.label })) },
   { title: 'Colis', links: [
     { to: '/parcels', label: 'Envoyer un colis' },
     { to: '/parcels/track', label: 'Suivre un colis' },
     { to: '/colis-benin', label: 'Envoi et suivi de colis au Bénin' },
   ] },
+  { title: 'Professionnels', links: [
+    { to: '/professionnel', label: 'Espace professionnel' },
+    { to: '/professionnel', label: 'Conducteurs indépendants' },
+    { to: '/professionnel', label: 'Compagnies de transport' },
+    { to: '/professionnel', label: 'Convoyeurs' },
+    { to: '/transporteurs-benin', label: 'Chauffeurs et compagnies au Bénin' },
+  ] },
   { title: 'Aide', links: [
+    { to: '/account', label: 'Mon compte' },
     { to: '/about', label: 'À propos de LeRoutier' },
     { to: '/cancellations', label: 'Annulations et remboursements' },
     { to: '/terms', label: 'Conditions d’utilisation' },
   ] },
-  { title: 'Compte', links: [
-    { to: '/account', label: 'Mon compte' },
-    { to: '/account/privacy', label: 'Confidentialité et données' },
-  ] },
-  { title: 'Professionnels', links: [
-    { to: '/professionnel', label: 'Espace professionnel' },
-    { to: '/transporteurs-benin', label: 'Chauffeurs et compagnies de transport' },
-  ] },
 ];
 
 export function LegalFooter() {
-  return <footer aria-label="Pied de page" className="site-footer small">
-    <nav className="site-footer-groups" aria-label="Navigation du pied de page">
-      {FOOTER_GROUPS.map(group => <div key={group.title} className="site-footer-group">
-        <h2>{group.title}</h2>
-        <ul>{group.links.map(link => <li key={link.to + link.label}><Link to={link.to}>{link.label}</Link></li>)}</ul>
-        {group.note && <p className="site-footer-note muted">{group.note}</p>}
-      </div>)}
-    </nav>
-    <div className="site-footer-legal muted">
-      <div className="site-footer-legal-links">
-        <Link to="/legal">Mentions légales</Link>
-        <Link to="/privacy">Confidentialité</Link>
-        <Link to="/cookies">Cookies et technologies</Link>
-        <button className="footer-link" onClick={() => window.dispatchEvent(new Event('leroutier:assistant-open'))}>Assistant</button>
+  return <footer aria-label="Pied de page" className="site-footer">
+    <div className="site-footer-inner">
+      <nav className="site-footer-top" aria-label="Navigation du pied de page">
+        <div className="site-footer-brand">
+          <Logo className="lr-logo"/>
+          <p>LeRoutier relie les voyageurs, les colis, les chauffeurs indépendants et les compagnies de transport interurbain au Bénin.</p>
+        </div>
+        {FOOTER_GROUPS.map(group => <div key={group.title} className="site-footer-group">
+          <h2>{group.title}</h2>
+          <ul>{group.links.map(link => <li key={link.to + link.label}><Link to={link.to}>{link.label}</Link></li>)}</ul>
+        </div>)}
+      </nav>
+
+      {/* The corridor pages. They belong in a footer, where somebody looking
+          for a specific route can find them, rather than as a block of link
+          text on the home page competing with the search box. "Populaires"
+          and the note are load-bearing: an unqualified "Destinations" over a
+          short list reads as the full extent of the service, which is the
+          opposite of true. */}
+      <div className="site-footer-corridors">
+        <h2>Destinations populaires</h2>
+        <ul>{CORRIDORS.map(c => <li key={c.slug}><Link to={`/${c.slug}`}>{c.label}</Link></li>)}</ul>
+        <p className="site-footer-note">{CORRIDOR_NOTE}</p>
       </div>
-      <p>LeRoutier est exploité par DIGITAL CONDORDIA, Bénin.</p>
+
+      <div className="site-footer-legal">
+        <div className="site-footer-legal-links">
+          <Link to="/legal">Mentions légales</Link>
+          <Link to="/privacy">Confidentialité</Link>
+          <Link to="/cookies">Cookies et technologies</Link>
+          <button className="footer-link" onClick={() => window.dispatchEvent(new Event('leroutier:assistant-open'))}>Assistant</button>
+        </div>
+        <p>LeRoutier est exploité par DIGITAL CONDORDIA, Bénin.</p>
+      </div>
     </div>
   </footer>;
 }

@@ -256,7 +256,18 @@ export function Assistant() {
   // tap away rather than gone.
   const followUps = useMemo(() => (lastIntent && FOLLOW_UPS[lastIntent]) || DEFAULT_FOLLOW_UPS, [lastIntent]);
 
-  if (!open) return null;
+  // The restrained entry point. It used to be a full-width card in the middle
+  // of the home page — a heading, a paragraph and a button competing with the
+  // trip search for the same glance. Now it is one pill in the corner that
+  // says what it does and stays out of the way; the footer link still exists
+  // for anybody who looks for help in a footer.
+  //
+  // It deliberately does not overlap the operational bottom navigation: the
+  // workspace data attribute lifts it clear on every screen that has one, and
+  // a driver's task bar is not something a help button gets to cover.
+  if (!open) return <button className="assistant-launcher" onClick={event => { opener.current = event.currentTarget; setOpen(true); }}>
+    <MessagesSquare size={18} aria-hidden="true"/><span>Besoin d’aide ?</span>
+  </button>;
   return <section ref={panel} className="assistant-panel" role="dialog" aria-modal="true" aria-label="Assistant LeRoutier">
     <header className="between">
       <h2><MessagesSquare size={16} aria-hidden="true"/>Assistant LeRoutier</h2>

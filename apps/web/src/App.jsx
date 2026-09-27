@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState, Component } from 'react';
-import { Navigate, useLocation, useNavigate, useParams } from 'react-router';
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router';
 import { AppShell, Card, Badge, SectionTitle, SessionPanel, EmptyState } from '@leroutier/ui';
 import { useSession } from '@leroutier/config/client';
 import { Trips, Tickets, Stations, Tracking, Account, Parcels as PassengerParcels, ParcelTracking, OnboardingPage, PrivacyCenter } from '@leroutier/screens/passenger';
@@ -39,12 +39,19 @@ import { JourneyTimeline } from '@leroutier/screens/journey';
 import { JourneyTracking } from '@leroutier/screens/tracking';
 import { NotificationCentre, useUnreadCount } from '@leroutier/screens/notifications';
 import { Home } from './home.jsx';
+import { LegalFooter } from './legal.jsx';
 import { ProfessionalEntry } from './professional.jsx';
+import { publicLinks, publicMenu } from './public-nav.js';
 import { PASSENGER, WORK, OPS, workspacesFor, capabilities, workspaceOf, isAuthorized } from './workspaces.js';
 import {
-  Search, Ticket, UserRound, Package, Bell, Home as HomeIcon, Route, Users, QrCode,
+  UserRound, Package, Bell, Ticket, Home as HomeIcon, Route, Users, QrCode,
   Wallet, BusFront, MapPin, Radio, WalletCards, ShieldAlert, Settings as SettingsIcon, Layers, Lock, LogOut, ShieldCheck, Building2, Database, Umbrella,
 } from 'lucide-react';
+
+// The public pages that carry the site footer. The authenticated passenger
+// tools — tickets, account, notifications — do not: a footer under somebody's
+// boarding pass is furniture, not navigation.
+const FOOTER_PAGES = new Set(['', 'trips', 'professionnel', 'parcels', 'tracking', 'stations']);
 
 function trimTrailingSlashes(value) {
   let end = value.length;
@@ -105,21 +112,31 @@ function SignInRequired() {
   </div>;
 }
 
-function AccountMenu() {
+// The public header carries four destinations and an account button. Everything
+// else a signed-in traveller needs lives here — including notifications, which
+// used to be a bell in the header of every passenger screen and is now one item
+// in the menu that the header already has.
+function AccountMenu({ unread = 0 }) {
   const { user, logout } = useSession();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const initials = user?.display_name
     ? user.display_name.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
     : '';
+  const go = to => { setOpen(false); navigate(to); };
   return <div className="account-menu-wrap">
     <button className="avatar-btn" aria-label={user ? `Compte de ${user.display_name}` : 'Se connecter'}
-      aria-expanded={open} onClick={() => { if (user) setOpen(o => !o); else navigate('/account'); }}>
+      aria-expanded={open} aria-haspopup="menu" onClick={() => { if (user) setOpen(o => !o); else navigate('/account'); }}>
       {user && initials ? <span className="avatar" aria-hidden="true">{initials}</span> : <UserRound size={19} aria-hidden="true"/>}
+      {user && unread > 0 && <span className="icon-badge" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>}
     </button>
     {open && user && <div className="account-menu" role="menu" aria-label="Menu du compte">
-      <button role="menuitem" onClick={() => { setOpen(false); navigate('/account'); }}><UserRound size={15}/>Mon profil</button>
-      <button role="menuitem" onClick={() => { setOpen(false); navigate('/account/privacy'); }}><ShieldCheck size={15}/>Confidentialité et données</button>
+      <button role="menuitem" onClick={() => go('/account')}><UserRound size={15}/>Mon profil</button>
+      <button role="menuitem" onClick={() => go('/tickets')}><Ticket size={15}/>Mes billets</button>
+      <button role="menuitem" onClick={() => go('/notifications')}>
+        <Bell size={15}/>{unread > 0 ? `Notifications (${unread} non lues)` : 'Notifications'}
+      </button>
+      <button role="menuitem" onClick={() => go('/account/privacy')}><ShieldCheck size={15}/>Confidentialité et données</button>
       <button role="menuitem" onClick={async () => { setOpen(false); await logout(); }}><LogOut size={15}/>Déconnexion</button>
     </div>}
   </div>;
@@ -152,13 +169,12 @@ export default function App() {
   const workspace = workspaceOf(pathname);
   const segments = trimTrailingSlashes(pathname).split('/').filter(Boolean);
 
-  const passengerNav = [
-    { id: 'trips', label: 'Voyager', icon: Search },
-    { id: 'tickets', label: 'Billets', icon: Ticket },
-    { id: 'parcels', label: 'Colis', icon: Package },
-    { id: 'notifications', label: 'Alertes', icon: Bell },
-    { id: 'account', label: 'Compte', icon: UserRound },
-  ];
+  // The passenger surface has no bottom navigation. Its destinations are in
+  // the header on a wide screen and in the drawer on a phone, and a persistent
+  // bar under a travel page is the largest single piece of clutter this
+  // redesign removed. The operational workspaces keep theirs below: on a
+  // moving vehicle it is the fastest route between four tasks a driver repeats
+  // all day, which is a different problem with a different answer.
   const passengerScreens = {
     '': <Home/>, trips: <Trips/>, tickets: <TicketsRoute/>, stations: <Stations/>, parcels: <ParcelsRoute/>,
     tracking: <Tracking/>, account: <Account/>, onboarding: <OnboardingPage/>, checkout: <Checkout/>,
@@ -251,7 +267,7 @@ export default function App() {
   const opsNav=can.platformOps?platformOpsNav.filter(item=>!item.grant||can.can(item.grant)):companyOpsNav;
   const opsScreens=can.platformOps?platformOpsScreens:companyOpsScreens;
   const opsTitles=can.platformOps?platformOpsTitles:companyOpsTitles;
-  const scoped = workspace === PASSENGER ? { nav: passengerNav, screens: passengerScreens, titles: passengerTitles, prefix: '', role: 'Voyageur' }
+  const scoped = workspace === PASSENGER ? { nav: [], screens: passengerScreens, titles: passengerTitles, prefix: '', role: 'Voyageur' }
     : workspace === WORK ? { nav: workNav, screens: workScreens, titles: workTitles, prefix: '/work', role: can.convoyeur ? 'Convoyeur' : can.independent ? 'Chauffeur propriétaire' : 'Chauffeur' }
       : { nav: opsNav, screens: opsScreens, titles: opsTitles, prefix: '/ops', role: can.platformOps?'Exploitation plateforme':'Exploitation compagnie' };
   const fallbackPage=workspace===PASSENGER?'':workspace===OPS&&can.platformOps?'platform':'today';
@@ -259,12 +275,20 @@ export default function App() {
   const privacySub = workspace === PASSENGER && page === 'account' && segments[1] === 'privacy';
   const known = Object.hasOwn(scoped.screens, page);
 
+  const isPublicSurface = workspace === PASSENGER;
   const shell = content => <AppShell
     online={online} role={scoped.role} title={scoped.titles[page] ?? 'LeRoutier'} subtitle={can.platformOps&&workspace===OPS?'LeRoutier · Supervision plateforme':'LeRoutier · Bénin'}
     nav={scoped.nav} active={page} onNavigate={id => navigate(trimTrailingSlashes(`${scoped.prefix}/${id}`) || '/')}
     unread={unread} onNotifications={() => navigate(`${scoped.prefix}/notifications`)} onHome={() => navigate('/')}
-    avatar={<AccountMenu/>}
-    actions={<WorkspaceSwitcher current={workspace} onSwitch={path => navigate(path)}/>}>
+    avatar={<AccountMenu unread={unread}/>}
+    actions={<WorkspaceSwitcher current={workspace} onSwitch={path => navigate(path)}/>}
+    linkComponent={Link}
+    variant={isPublicSurface ? 'public' : 'app'}
+    bleed={isPublicSurface && page === ''}
+    links={publicLinks(page)}
+    menu={isPublicSurface ? publicMenu({ unread, signedIn: Boolean(user) }) : []}
+    menuTitle="Menu LeRoutier"
+    footer={isPublicSurface && FOOTER_PAGES.has(page) ? <LegalFooter/> : null}>
     {/* Keyed on the destination so each one gets a FRESH boundary.
         Without the key React treats a workspace change as an update to the
         existing boundary and keeps the previous tree on screen while the new
@@ -295,7 +319,12 @@ export default function App() {
   }
   // The professional landing page is public: somebody deciding whether to
   // work with LeRoutier must be able to read it before creating an account.
+  //
+  // /tracking is public for the same reason the header links to it: a menu
+  // entry that lands on a sign-in wall is a menu entry that lied. The screen
+  // itself already has an honest anonymous state — it says tracking appears
+  // once a booking is confirmed, and offers the search.
   const fullyPublic = workspace === PASSENGER && (page === '' || page === 'trips' || page === 'professionnel' ||
-    (page === 'parcels' && segments[1] === 'track') || page === 'checkout');
+    page === 'tracking' || (page === 'parcels' && segments[1] === 'track') || page === 'checkout');
   return shell(<>{user?.is_demo && <div className="notice" role="status">Espace TEST · données de démonstration · aucun paiement réel</div>}{!fullyPublic && <SessionPanel onWorkspace={navigate}/>}{privacySub ? <PrivacyCenter/> : scoped.screens[page]}</>);
 }
