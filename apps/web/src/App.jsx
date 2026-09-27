@@ -286,7 +286,7 @@ export default function App() {
     variant={isPublicSurface ? 'public' : 'app'}
     bleed={isPublicSurface && page === ''}
     links={publicLinks(page)}
-    menu={isPublicSurface ? publicMenu({ unread, signedIn: Boolean(user) }) : []}
+    menu={isPublicSurface ? publicMenu({ unread, signedIn: Boolean(user), pathname }) : []}
     menuTitle="Menu LeRoutier"
     footer={isPublicSurface && FOOTER_PAGES.has(page) ? <LegalFooter/> : null}>
     {/* Keyed on the destination so each one gets a FRESH boundary.

@@ -24,7 +24,7 @@ export function PageChrome({ children }) {
   return <AppShell
     variant="public" role="Voyageur" title="LeRoutier" active={pathname}
     onHome={() => navigate('/')} linkComponent={Link}
-    links={publicLinks(null)} menu={publicMenu({ signedIn: Boolean(user) })}
+    links={publicLinks(null)} menu={publicMenu({ signedIn: Boolean(user), pathname })}
     menuTitle="Menu LeRoutier" footer={<LegalFooter/>}>
     <div className="page-shell">{children}</div>
   </AppShell>;

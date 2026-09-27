@@ -13,6 +13,18 @@ async function downloadPdf(page,name){
   await file.saveAs(`.tmp/${name}.pdf`);
   expect((await readFile(await file.path())).subarray(0,5).toString()).toBe('%PDF-');
 }
+// The passenger surface has no bottom navigation: its destinations are in the
+// header on a wide screen and in the drawer on a phone. A live journey that
+// walked between screens through a bar that no longer exists would fail on a
+// navigation that is not the product's.
+async function openPassengerParcels(page,width){
+  if(width>=900){
+    await page.getByRole('navigation',{name:'Navigation principale'}).getByRole('link',{name:'Colis',exact:true}).click();
+  }else{
+    await page.getByRole('button',{name:'Ouvrir le menu'}).click();
+    await page.getByRole('navigation',{name:'Menu principal'}).getByRole('link',{name:'Envoyer un colis',exact:true}).click();
+  }
+}
 for(const width of [390,1280]) test(`documents: real ticket, invoice, label, print and share at ${width}px`,async({page})=>{
   test.setTimeout(90000);await page.setViewportSize({width,height:900});await login(page);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -43,7 +55,7 @@ for(const width of [390,1280]) test(`documents: real ticket, invoice, label, pri
   await page.getByRole('button',{name:'Fermer les documents'}).click();await expect(open).toBeFocused();
   await open.click();expect(await dialog.locator('.ticket-code').innerText()).toBe(manual);
   await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);
-  await page.getByRole('navigation').getByRole('button',{name:'Colis',exact:true}).click();
+  await openPassengerParcels(page,width);
   await page.getByRole('button',{name:'Afficher le reçu et le QR'}).first().click();
   const reference=(await page.getByText(/Référence courte :/).innerText()).match(/LRP-[A-F0-9]{8}/)[0];
   await page.getByRole('button',{name:'Étiquette et reçu · PDF / impression'}).click();

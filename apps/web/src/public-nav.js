@@ -22,9 +22,13 @@ export const publicLinks = page => PUBLIC_LINKS.map(link => ({ label: link.label
  * not a menu. "Aide" is an action rather than a destination — it opens the
  * assistant, which is why the drawer renders it as a button.
  *
- * @param {{ unread?: number, signedIn?: boolean }} state
+ * `current` marks where the reader already is. On a phone this drawer is the
+ * only navigation there is, so a menu that cannot answer "which one am I on"
+ * is a menu that makes people open it twice.
+ *
+ * @param {{ unread?: number, signedIn?: boolean, pathname?: string }} state
  */
-export const publicMenu = ({ unread = 0, signedIn = false } = {}) => [
+export const publicMenu = ({ unread = 0, signedIn = false, pathname = '' } = {}) => [
   { label: 'Voyager', to: '/trips', icon: Search },
   { label: 'Mes voyages', to: '/tickets', icon: Ticket },
   { label: 'Envoyer un colis', to: '/parcels', icon: Package },
@@ -34,4 +38,4 @@ export const publicMenu = ({ unread = 0, signedIn = false } = {}) => [
   { label: 'À propos', to: '/about', icon: Info },
   { label: 'Aide', icon: MessagesSquare, onSelect: () => window.dispatchEvent(new Event('leroutier:assistant-open')) },
   signedIn ? { label: 'Mon compte', to: '/account', icon: UserRound } : { label: 'Se connecter', to: '/account', icon: UserRound },
-];
+].map(item => ({ ...item, current: Boolean(item.to) && item.to === pathname }));

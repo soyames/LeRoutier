@@ -10,24 +10,56 @@ async function login(page,label){
   const landing=label==='Voyageur'?'/tickets':label==='Exploitation plateforme'?'/ops/platform':label.startsWith('Exploitation')?'/ops/today':'/work/today';
   await expect(page).toHaveURL(APP+landing);
 }
-/** @type {Array<[string,string,string[]]>} */
+// The passenger surface has no bottom navigation, so it is not reached the way
+// a task bar is: the header carries the destinations on a wide screen and the
+// drawer carries them on a phone. Whichever is on screen is the product's real
+// path, and that is what gets used.
+async function openPassengerDestination(page,name){
+  const header=page.getByRole('navigation',{name:'Navigation principale'}).getByRole('link',{name,exact:true});
+  if(await header.count())return header.click();
+  await page.getByRole('button',{name:'Ouvrir le menu'}).click();
+  await page.getByRole('navigation',{name:'Menu principal'}).getByRole('link',{name,exact:true}).click();
+}
+// The last element says how the workspace's navigation is reached. Every
+// operational workspace has a task bar pinned to the bottom of the screen; the
+// passenger surface does not — its destinations are in the header on a wide
+// screen and in the drawer on a phone, so its row is walked through the menu.
+/** @type {Array<[string,string,string[],('bar'|'menu')?]>} */
 const profiles=[
-  ['Voyageur','/tickets',['Billets','Colis','Alertes','Compte']],
+  ['Voyageur','/tickets',['Voyager','Envoyer un colis','Suivre un colis','Mes voyages','Notifications'],'menu'],
   ['Chauffeur indépendant','/work/today',['Aujourd’hui','Manifeste','Scanner','Comptant','Colis','Véhicule','Points','Recettes','Profil']],
   ['Conducteur de compagnie','/work/today',['Aujourd’hui','Manifeste','Scanner','Comptant','Colis','Véhicule','Profil']],
   ['Convoyeur','/work/today',['Service','Manifeste','Scanner','Comptant','Colis','Profil']],
   ['Exploitation compagnie','/ops/today',['Aujourd’hui','Services','Flotte','Équipage','Stations','Colis','Paiements','Règlements','Incidents','Alertes','Paramètres']],
   ['Exploitation plateforme','/ops/platform',['Vue plateforme','Opérateurs','Vérifications','Utilisateurs','Services','Colis','Incidents','Finances','Système','Administration','Équipe']],
 ];
-for(const [label,path,links] of profiles) test(`TEST ${label}: mobile login, workspace and every navigation destination`,async({page})=>{
+for(const [label,path,links,mode='bar'] of profiles) test(`TEST ${label}: mobile login, workspace and every navigation destination`,async({page})=>{
   test.setTimeout(120_000);
   await page.setViewportSize({width:390,height:844});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await login(page,label);await expect(page).toHaveURL(APP+path);
   await expect(page.getByText(/Espace TEST/)).toBeVisible();
+  // Where a destination is, in each kind of shell. A task bar answers with a
+  // button and stays on screen; the passenger's drawer answers with a link and
+  // has to be reopened to read where it says we are.
+  const goTo=async name=>{
+    if(mode!=='menu'){await page.getByRole('navigation').getByRole('button',{name,exact:true}).click();return;}
+    await page.getByRole('button',{name:'Ouvrir le menu'}).click();
+    await page.getByRole('navigation',{name:'Menu principal'}).getByRole('link',{name,exact:true}).click();
+  };
+  const destination=name=>mode==='menu'
+    ?page.getByRole('navigation',{name:'Menu principal'}).getByRole('link',{name,exact:true})
+    :page.getByRole('navigation').getByRole('button',{name,exact:true});
+  const assertCurrent=async name=>{
+    if(mode!=='menu'){await expect(destination(name)).toHaveAttribute('aria-current','page');return;}
+    await page.getByRole('button',{name:'Ouvrir le menu'}).click();
+    await expect(destination(name)).toHaveAttribute('aria-current','page');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog',{name:'Menu LeRoutier'})).toHaveCount(0);
+  };
   for(const name of links){
-    await page.getByRole('navigation').getByRole('button',{name,exact:true}).click();
-    await expect(page.getByRole('navigation').getByRole('button',{name,exact:true})).toHaveAttribute('aria-current','page');
+    await goTo(name);
+    await assertCurrent(name);
     await page.waitForLoadState('networkidle');
     await expect(page.locator('.skeleton')).toHaveCount(0);
     // No alert except the capacity warning, which is a deliberate operational
@@ -68,8 +100,8 @@ for(const [label,path,links] of profiles) test(`TEST ${label}: mobile login, wor
     await expect(page.getByRole('button',{name:/Je suis arrivé/})).toHaveCount(0);
   }
   if(['Convoyeur','Conducteur de compagnie'].includes(label)) await expect(page.getByRole('navigation').getByRole('button',{name:'Recettes'})).toHaveCount(0);
-  await page.getByRole('navigation').getByRole('button',{name:links[0],exact:true}).click();
-  await expect(page.getByRole('navigation').getByRole('button',{name:links[0],exact:true})).toHaveAttribute('aria-current','page');
+  await goTo(links[0]);
+  await assertCurrent(links[0]);
   await page.waitForLoadState('networkidle');
   await expect(page.locator('.skeleton')).toHaveCount(0);
   await page.screenshot({path:`.tmp/role-${label.replaceAll(' ','-')}.png`,fullPage:true});
@@ -124,7 +156,9 @@ test('camera decodes a passenger phone QR, shows the booking, confirms boarding 
 test('parcel receipt reopens without printing, camera decodes it and handwritten reference resolves',async({browser})=>{
   const sender=await browser.newPage(),driver=await browser.newPage();
   await login(sender,'Voyageur');
-  await sender.getByRole('navigation').getByRole('button',{name:'Colis',exact:true}).click();
+  // The sender is a passenger: this project runs at 1280×900, where the
+  // passenger's destinations are header links, not a task bar.
+  await openPassengerDestination(sender,'Colis');
   await sender.getByRole('button',{name:'Afficher le reçu et le QR'}).first().click();
   await expect(sender.getByText('Présentez ce QR depuis votre téléphone au conducteur. Aucune impression n’est nécessaire.')).toBeVisible();
   const svg=await sender.locator('.ticket-qr svg').evaluate(el=>el.outerHTML);
