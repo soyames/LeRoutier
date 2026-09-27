@@ -138,7 +138,7 @@ export function PrivacyPolicy() {
         <li>Données de paiement : statut, montant, devise, référence et informations techniques nécessaires au rapprochement. Les informations sensibles de carte ou de portefeuille sont traitées par le prestataire de paiement lorsque celui-ci les collecte directement.</li>
         <li>Données de colis : référence, étapes de garde, statuts et informations minimales nécessaires à l’expéditeur et au destinataire.</li>
         <li>Données d’exploitation : véhicule, équipage, incidents, scans, opérations de gare et informations nécessaires à la sécurité du service.</li>
-        <li>Données de localisation : position du véhicule et, lorsque la fonctionnalité l’exige et que l’autorisation est accordée, localisation nécessaire à l’itinéraire ou au suivi. La position privée du domicile d’un voyageur n’est pas communiquée aux opérateurs comme donnée d’exploitation.</li>
+        <li>Données de localisation : position du véhicule pendant un service, et position de votre appareil lorsque vous choisissez « Ma position » pour rechercher un départ. Cette dernière sert à identifier la commune et le point d’embarquement les plus proches ; elle est utilisée le temps de la recherche et n’est pas conservée. La position privée du domicile d’un voyageur n’est pas communiquée aux opérateurs comme donnée d’exploitation.</li>
         <li>Données techniques : adresse IP, type d’appareil, événements de sécurité, journaux nécessaires au fonctionnement, à la prévention des abus et au diagnostic.</li>
       </List>
     </Section>
@@ -165,6 +165,7 @@ export function PrivacyPolicy() {
     </Section>
     <Section title="6. Localisation et suivi des véhicules">
       <P>La localisation d’un véhicule peut être traitée pendant un service actif pour afficher sa progression, estimer l’arrivée, améliorer la coordination et gérer un incident. Les accès sont limités selon les rôles et l’opérateur concerné. Les données de localisation ne doivent pas être utilisées pour surveiller une personne en dehors des finalités opérationnelles autorisées.</P>
+      <P>La position de votre propre appareil n’est utilisée que si vous la demandez, en choisissant « Ma position » dans la recherche. Elle sert alors à trouver la commune et le point d’embarquement les plus proches de vous, et à estimer la marche jusqu’à ce point. Votre navigateur vous demande d’abord votre autorisation, vous pouvez la refuser et choisir votre ville manuellement, et le suivi n’en dépend jamais : il fonctionne à partir de la position du véhicule, pas de la vôtre.</P>
     </Section>
     <Section title="7. Conservation">
       <P>Les positions GPS brutes associées à un service terminé sont conservées pendant 30 jours, sauf lorsqu’elles doivent être conservées plus longtemps pour traiter un incident, un litige ou une obligation légale. Les preuves financières et les dossiers de litige ne sont pas effacés automatiquement par une demande de suppression de compte.</P>

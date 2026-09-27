@@ -36,6 +36,7 @@ export function About() {
       <ul>
         <li><strong>Réservation numérique</strong> : un billet confirmé uniquement après un paiement vérifié.</li>
         <li><strong>Tarifs finaux affichés</strong> : le prix publié par l’opérateur est le prix total payé par le client.</li>
+        <li><strong>Départ depuis votre position</strong> : en choisissant « Ma position », votre appareil fournit sa localisation pour identifier la commune et le point d’embarquement les plus proches, avec la marche jusqu’au point de départ. Cette position sert à cette recherche et n’est pas conservée.</li>
         <li><strong>Suivi de voyage en direct</strong> : la position du véhicule et l’heure d’arrivée estimée lorsque le service les transmet réellement.</li>
         <li><strong>Colis standard et express</strong> : l’express n’est proposé que lorsqu’un départ du jour peut réellement livrer le jour même.</li>
         <li><strong>Intelligence tarifaire</strong> : un outil consultatif réservé aux opérateurs pour comparer leurs tarifs au marché observé ; l’opérateur reste responsable du tarif final.</li>

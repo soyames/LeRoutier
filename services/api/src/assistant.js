@@ -407,7 +407,7 @@ export function assistantService({ db, domain, parcels, fares, health, track = n
           // Free-form question: the deterministic layer has no answer, so the
           // model may phrase one — grounded in public product facts only, and
           // never in PII. When the model is unavailable, an honest fallback.
-          const facts = 'LeRoutier est une plateforme béninoise de transport interurbain routier et de colis : recherche de trajets, réservation en ligne, suivi GPS en direct, billetterie, colis standard et express, et outils d’exploitation pour compagnies et chauffeurs indépendants. Les tarifs affichés sont les prix finaux. Assistance : ' + SUPPORT_EMAIL + '.';
+          const facts = 'LeRoutier est une plateforme béninoise de transport interurbain routier et de colis : recherche de trajets, réservation en ligne, suivi GPS en direct, billetterie, colis standard et express, et outils d’exploitation pour compagnies et chauffeurs indépendants. La recherche peut partir de la position de l’appareil du voyageur — l’option « Ma position » dans le formulaire — pour trouver la commune et le point d’embarquement les plus proches ; cette position n’est pas conservée. Les tarifs affichés sont les prix finaux. Assistance : ' + SUPPORT_EMAIL + '.';
           return explainWithModel(intent, facts, text,
             'Je peux toujours consulter les départs, vos réservations et vos colis, mais l’assistant d’explication est temporairement indisponible. Pour une question précise, écrivez à ' + SUPPORT_EMAIL + '.');
         }

@@ -104,17 +104,34 @@ function OfferDetails({option,originLabel,destinationLabel,originPoint,destinati
 const SORTS=[['recommended','Recommandé'],['earliest','Départ le plus tôt'],['arrival','Arrivée la plus tôt'],['cheapest','Prix le plus bas'],['shortest','Durée la plus courte']];
 const FILTERS=[['all','Tout'],['company','Compagnies'],['independent','Chauffeurs indépendants'],['seats','≥ 2 places'],['direct','Direct']];
 
-export function JourneySearchResults({originMode,originPlace,destinationPlace,destinationStopId,day,choose,onEditDate,onEditOrigin,onEditDestination,originPoint,destinationPoint,position,geoState,geoError,onLocate}){
+export function JourneySearchResults({originMode,originPlace,destinationPlace,destinationStopId,day,choose,onEditDate,onEditOrigin,onEditDestination,originPoint,destinationPoint,nearCity=null,position,geoState,geoError,onLocate}){
   const {user,online}=useSession(),[params]=useSearchParams(),places=useApi('/places?type=commune');
   const [sort,setSort]=useState('recommended'),[filter,setFilter]=useState('all'),[view,setView]=useState('list'),[selected,setSelected]=useState(null),[detail,setDetail]=useState(null);
   const destinationKey=destinationStopId?`destinationStopId=${destinationStopId}`:`destinationPlaceId=${destinationPlace}`;
   const baseUrl=originMode==='current'&&position?`/journey-plan?lat=${position.latitude}&lon=${position.longitude}&${destinationKey}`:originMode==='place'&&originPlace?`/journey-plan?originPlaceId=${originPlace}&${destinationKey}`:null;
   const planUrl=baseUrl?baseUrl+`&departureAt=${encodeURIComponent(day+'T00:00:00+01:00')}`+(params.get('testMode')==='1'?'&testMode=1':''):null,plan=useApi(planUrl);
-  const nameOf=id=>(places.data||[]).find(p=>p.id===id)?.name??null,originLabel=nameOf(originPlace)??plan.data?.options?.[0]?.pickupStop?.city??null,destinationLabel=nameOf(destinationPlace)??plan.data?.options?.[0]?.dropoffStop?.city??null;
+  // The origin's display name, in order of authority: the place the passenger
+// picked, the stop the planner actually resolved, then — before the plan has
+// come back — the commune their coordinates fell in. Without the last one a
+// "Ma position" search spends its first second titled "Départ → Parakou".
+const nameOf=id=>(places.data||[]).find(p=>p.id===id)?.name??null,originLabel=nameOf(originPlace)??plan.data?.options?.[0]?.pickupStop?.city??(originMode==='current'?nearCity:null)??null,destinationLabel=nameOf(destinationPlace)??plan.data?.options?.[0]?.dropoffStop?.city??null;
   const options=useMemo(()=>{let list=(plan.data?.options||[]).filter(o=>!day||(o.departureAt&&new Date(o.departureAt).toLocaleDateString('en-CA')===day));if(filter==='company')list=list.filter(o=>o.operatorType==='company');else if(filter==='independent')list=list.filter(o=>o.operatorType==='independent');else if(filter==='seats')list=list.filter(o=>o.available>=2);else if(filter==='direct')list=list.filter(o=>!o.firstMile&&!o.lastMile);const by={recommended:(a,b)=>(Number(b.feasible)-Number(a.feasible))||((a.totalDurationS??Infinity)-(b.totalDurationS??Infinity)),earliest:(a,b)=>Date.parse(a.departureAt)-Date.parse(b.departureAt),arrival:(a,b)=>(a.etaAt?Date.parse(a.etaAt):Infinity)-(b.etaAt?Date.parse(b.etaAt):Infinity),cheapest:(a,b)=>a.fare.amountMinor-b.fare.amountMinor,shortest:(a,b)=>(a.totalDurationS??Infinity)-(b.totalDurationS??Infinity)}[sort];return [...list].sort(by);},[plan.data,day,sort,filter]);
   const anyTest=options.some(o=>o.isTest),shown=detail??options.find(o=>o.serviceId===selected?.serviceId&&o.originSequence===selected?.originSequence&&o.destinationSequence===selected?.destinationSequence)??options[0];
   return <div className="stack journey-results">
-    {originMode==='current'&&position===null&&<div className="controls"><button className="btn btn-primary" disabled={geoState==='asking'} onClick={onLocate}>{geoState==='asking'?'Localisation en cours…':'Utiliser ma position actuelle'}</button>{geoError&&<p className="small muted" role="status">{geoError}</p>}</div>}
+    {/* Where the search starts from, said out loud.
+        "Ma position" is not an origin a passenger can check. While the device
+        is being asked, the line says so; once it answers, it names the commune
+        the coordinates fell in, resolved on the device against the same
+        geography the search uses. The manual button survives as the way back
+        from a refusal, which is the one case where the passenger has to act. */}
+    {originMode==='current'&&<div className="controls geo-origin">
+      {position===null
+        ? <><button className="btn btn-primary" disabled={geoState==='asking'} onClick={onLocate}>{geoState==='asking'?'Recherche de votre position…':'Utiliser ma position actuelle'}</button>
+          {geoError&&<p className="small muted" role="status">{geoError}</p>}</>
+        : <p className="small muted" role="status">
+            Départ depuis votre position{nearCity && <> — autour de <strong>{nearCity}</strong></>}.
+          </p>}
+    </div>}
     {planUrl&&(plan.loading?<><p role="status">Recherche des trajets…</p><SkeletonCards count={2} lines={4}/></>:plan.error?<ErrorState text="Impossible de calculer votre trajet pour le moment." onRetry={plan.reload}/>:<div className="journey-results-grid"><div className="journey-offers stack">
       <Card className="stack results-summary"><div className="search-summary between wrap"><div><h2>{originLabel??'Départ'} → {destinationLabel??'Destination'}</h2><span className="small muted">{dayLong(day)} · 1 voyageur</span></div><button className="btn btn-soft" onClick={onEditDate}>Modifier</button></div>{options.length>0&&<div className="results-controls">
           {/* Sort, filters and the count are one band rather than three

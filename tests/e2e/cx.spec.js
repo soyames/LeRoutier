@@ -197,18 +197,21 @@ test('empty production database shows the search form, never a passive empty car
   await expect(page.getByText(/Entrez votre destination/)).toHaveCount(0);
 });
 
-test('quick search offers current location with a graceful manual fallback', async ({ page }) => {
+test('quick search asks for the current location itself, and falls back gracefully', async ({ page }) => {
   await mockApi(page);
   await page.route('**/api/v1/journey-plan*', r => r.fulfill({ json: { data: { options: [], originResolved: null, generatedAt: '2026-09-17T00:00:00Z' } } }));
   await page.goto('http://127.0.0.1:4173/trips?from=my-location&to=place%3A00000000-0000-4000-8000-000000000303');
   const origin = page.getByLabel('Départ', { exact: true });
   await expect(origin.locator('option[value="current"]')).toHaveCount(1);
-  // Permission denied → clear guidance and the manual path stays available.
+  // Permission refused → clear guidance, without the passenger having to tap
+  // anything first: choosing "Ma position" already was the request.
   await page.context().grantPermissions([], { origin: 'http://127.0.0.1:4173' }).catch(() => {});
-  await expect(page.getByRole('button', { name: 'Utiliser ma position actuelle' })).toBeVisible();
-  await page.getByRole('button', { name: 'Utiliser ma position actuelle' }).click();
-  await expect(page.getByText(/Position non disponible/)).toBeVisible();
-  // The manual search path is never blocked by a missing GPS permission.
+  await expect(page.getByText(/Localisation refusée|Position indisponible/)).toBeVisible();
+  // And the manual path is never blocked by a missing permission, including
+  // as a retry: the button is still there and still works.
+  const retry = page.getByRole('button', { name: 'Utiliser ma position actuelle' });
+  await expect(retry).toBeVisible();
+  await retry.click();
   await expect(origin).toBeVisible();
 });
 
@@ -222,8 +225,11 @@ test('a granted position plans a door-to-destination itinerary with an honest no
   await page.addInitScript(() => {
     navigator.geolocation.getCurrentPosition = cb => cb(/** @type {any} */({ coords: { latitude: 6.355, longitude: 2.435 } }));
   });
+  // No tap: opening a "Ma position" search is asking for the position.
   await page.goto('http://127.0.0.1:4173/trips?from=my-location&to=place%3A00000000-0000-4000-8000-000000000303');
-  await page.getByRole('button', { name: 'Utiliser ma position actuelle' }).click();
   await expect(page.getByText('Aucun départ disponible pour cet itinéraire pour le moment.')).toBeVisible();
   expect(plans.some(u => u.includes('lat=6.355')), 'the plan request carries the transient position').toBeTruthy();
+  // The screen says what it used, so a wrong fix is visible rather than
+  // silently producing a journey from somewhere else.
+  await expect(page.getByText(/Départ depuis votre position/)).toBeVisible();
 });

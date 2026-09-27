@@ -122,8 +122,14 @@ test('geolocation denial falls back to manual origin without blocking search', a
   await mockGeography(page, CITIES);
   await page.route('**/api/v1/journey-plan*', r => r.fulfill({ json: { data: { options: [], originResolved: null, generatedAt: '2026-09-17T00:00:00Z' } } }));
   await page.goto(APP + `/trips?from=my-location&to=place:${id(3)}&date=${today()}`);
+  // A "Ma position" search asks the device by itself: the passenger already
+  // said what they wanted by choosing it, and a second button on the results
+  // page was the reason this screen could sit there showing nothing. When the
+  // answer is no, the search still works — the city picker is right above.
+  await expect(page.getByText(/Localisation refusée|Position indisponible/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Utiliser ma position actuelle' })).toBeVisible();
+  await expect(page.getByLabel('Départ', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Utiliser ma position actuelle' }).click();
-  await expect(page.getByText('Position non disponible. Choisissez votre ville de départ.')).toBeVisible();
   await expect(page.getByLabel('Départ', { exact: true })).toBeVisible();
 });
 
@@ -132,13 +138,43 @@ test('granted position activates the first-mile planner with transient coordinat
   const planRequests = [];
   await page.route('**/api/v1/journey-plan*', r => { planRequests.push(r.request().url()); return r.fulfill({ json: { data: { options: [], originResolved: null, generatedAt: '2026-09-17T00:00:00Z' } } }); });
   await page.addInitScript(() => { navigator.geolocation.getCurrentPosition = cb => cb(/** @type {any} */({ coords: { latitude: 6.355, longitude: 2.435 } })); });
+  // No tap: the search acquires the position on its own.
   await page.goto(APP + `/trips?from=my-location&to=place:${id(3)}&date=${today()}`);
-  await page.getByRole('button', { name: 'Utiliser ma position actuelle' }).click();
   await expect(page.getByText('Aucun départ disponible pour cet itinéraire pour le moment.')).toBeVisible();
   expect(planRequests.some(raw => {
     const url = new URL(raw);
     return url.searchParams.get('lat') === '6.355' && url.searchParams.get('lon') === '2.435' && Boolean(url.searchParams.get('destinationPlaceId'));
   }), 'the plan uses the transient position').toBeTruthy();
+});
+
+test('"Ma position" names the city the passenger is standing in', async ({ page }) => {
+  // The coordinates are Cotonou's; Abomey-Calavi is 15 km away and Porto-Novo
+  // is 30 km away, so naming the nearest commune is a real answer rather than
+  // whichever city happened to be first in the list.
+  await mockGeography(page, CITIES);
+  await page.route('**/api/v1/places?type=commune', r => r.fulfill({ json: { data: [
+    { id: id(0), name: 'Cotonou', kind: 'city', parent_id: null, latitude: 6.3654, longitude: 2.4183 },
+    { id: id(1), name: 'Abomey-Calavi', kind: 'city', parent_id: null, latitude: 6.4489, longitude: 2.3556 },
+    { id: id(2), name: 'Porto-Novo', kind: 'city', parent_id: null, latitude: 6.4969, longitude: 2.6289 },
+  ] } }));
+  await page.route('**/api/v1/journey-plan*', r => r.fulfill({ json: { data: { options: [], originResolved: null, generatedAt: '2026-09-17T00:00:00Z' } } }));
+  await page.addInitScript(() => { navigator.geolocation.getCurrentPosition = cb => cb(/** @type {any} */({ coords: { latitude: 6.3654, longitude: 2.4183 } })); });
+  await page.goto(APP + `/trips?from=my-location&to=place:${id(1)}&date=${today()}`);
+  // "Ma position" is not an origin anybody can check. The screen says which
+  // commune the coordinates fell in, so the search that runs is one the
+  // passenger recognises.
+  await expect(page.getByText(/autour de/)).toBeVisible();
+  await expect(page.getByText('Cotonou', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Utiliser ma position actuelle' })).toHaveCount(0);
+});
+
+test('the position is disclosed where it is asked for, not only in a policy', async ({ page }) => {
+  await mockGeography(page, CITIES);
+  await page.goto(APP + '/');
+  await expect(page.getByText(/Votre position sert uniquement à trouver la ville de départ la plus proche/)).toBeVisible();
+  // And the passenger who prefers not to share it keeps a way to search.
+  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await expect(page.getByText(/Votre position sert uniquement/)).toHaveCount(0);
 });
 
 test('no Google Maps dependency during the search flow', async ({ page }) => {

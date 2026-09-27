@@ -6,6 +6,7 @@ import { status, fcfa, time, dayShort, dayLong, dateTime, duration, reference, m
 import { QRCodeSVG } from 'qrcode.react';
 import { Armchair, Ticket, Building2, Navigation, UserRound, ArrowLeftRight, CreditCard, Package, Store, MapPin, QrCode, Search, Lock } from 'lucide-react';
 import { JourneySearchResults } from './journey-results.jsx';
+import { useGeolocation, nearestPlace } from './geolocation.js';
 import { rememberCheckout } from './checkout.jsx';
 import { JourneyTimeline } from './journey.jsx';
 import { JourneyTracking } from './tracking.jsx';
@@ -113,6 +114,10 @@ export function JourneySearchFields({ originMode, setOriginMode, originPlace, se
               kind of thing do I type here. */}
           {originMode === 'place' && <PlaceCombobox label="Ville de départ" placeholder="Ex. Cotonou" inputId="trip-origin-place"
             value={originPlace} onSelect={setOriginPlace} onClear={() => setOriginPlace(null)}/>}
+          {/* Said where the choice is made, not only in a policy. Somebody
+              about to let an app read their location is owed the sentence
+              that says what it is for and what happens to it. */}
+          {originMode === 'current' && <p className="small muted geo-note">Votre position sert uniquement à trouver la ville de départ la plus proche. Elle n’est pas enregistrée.</p>}
         </div>
         <button type="button" className="swap-btn" aria-label="Inverser départ et arrivée" disabled={!swappable} onClick={onSwap}><ArrowLeftRight size={17}/></button>
         <div className="endpoint-cell">
@@ -138,6 +143,7 @@ export function JourneySearchFields({ originMode, setOriginMode, originPlace, se
  */
 export function JourneySearch({ onSearched = null }) {
   const navigate = useNavigate();
+  const { request: locate } = useGeolocation();
   const [originMode, setOriginMode] = useState('current');
   const [originPlace, setOriginPlace] = useState(null);
   const [destinationPlace, setDestinationPlace] = useState(null);
@@ -148,6 +154,13 @@ export function JourneySearch({ onSearched = null }) {
   }
   function search(e) {
     e.preventDefault();
+    // "Ma position" is a request for the device's location, and pressing
+    // "Rechercher" is the moment the passenger makes it. Asking here rather
+    // than after the page has changed means the browser's permission prompt
+    // appears while they are still looking at the thing they just used —
+    // and the answer is cached for the results screen, which is already
+    // waiting for it.
+    if (originMode === 'current') locate();
     // `place:` namespaces geography ids: stop ids from legacy deep links live
     // in the same parameter space and must never be confused with places.
     const params = new URLSearchParams({ date: day });
@@ -252,19 +265,27 @@ export function Trips() {
   // Geolocation is requested only when the search needs it; the position is
   // transient and never stored. The canonical geography supplies place names
   // and coordinates for the summary and the map.
-  const [position, setPosition] = useState(null), [geoState, setGeoState] = useState('idle'), [geoError, setGeoError] = useState('');
+  const { position, state: geoState, error: geoError, request: locate } = useGeolocation();
   const places = useApi('/places?type=commune');
-  function locate() {
-    setGeoState('asking'); setGeoError('');
-    if (!navigator.geolocation) { setGeoState('denied'); setGeoError('La géolocalisation n’est pas disponible sur cet appareil. Choisissez votre ville de départ.'); return; }
-    navigator.geolocation.getCurrentPosition(
-      pos => { setPosition({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }); setGeoState('granted'); },
-      () => { setGeoState('denied'); setGeoError('Position non disponible. Choisissez votre ville de départ.'); },
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
-  }
+  // Somebody who chose "Ma position" has already said what they want. Asking
+  // them to then press a second button on the results page was the whole
+  // reason this screen could sit there showing nothing: the search cannot run
+  // without an origin, and the origin was one tap away the entire time.
+  //
+  // The request is made here rather than only from the results component so
+  // that a browser which shows a permission prompt shows it while the
+  // passenger is still looking at the search they just submitted.
+  useEffect(() => {
+    if (originMode !== 'current' || position) return;
+    locate();
+  }, [originMode, position, locate]);
   const placeById = id => (places.data || []).find(p => p.id === id) ?? null;
   const originPlaceRow = placeById(originPlace);
   const destinationPlaceRow = placeById(destinationPlace);
+  // The city the passenger is standing in, named from the same canonical
+  // geography the search uses — so "Autour de Cotonou" is a place LeRoutier
+  // can actually search from rather than a label invented from coordinates.
+  const nearPlace = useMemo(() => nearestPlace(places.data, position), [places.data, position]);
   const originPoint = (originMode === 'current' ? position : null) ?? (originPlaceRow ? { latitude: Number(originPlaceRow.latitude), longitude: Number(originPlaceRow.longitude), label: originPlaceRow.name } : null);
   const destinationPoint = destinationPlaceRow ? { latitude: Number(destinationPlaceRow.latitude), longitude: Number(destinationPlaceRow.longitude), label: destinationPlaceRow.name } : null;
 
@@ -353,6 +374,7 @@ export function Trips() {
           day={day} choose={choose}
           onEditDate={editDate} onEditOrigin={editOrigin} onEditDestination={editDestination}
           originPoint={originPoint} destinationPoint={destinationPoint}
+          nearCity={nearPlace?.name ?? null}
           position={position} geoState={geoState} geoError={geoError} onLocate={locate}/>)}
   </>;
 }
