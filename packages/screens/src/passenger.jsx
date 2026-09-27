@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
-import { Card, Badge, SectionTitle, ApiState, ProfileForm, ErrorState, SkeletonCards } from '@leroutier/ui';
+import { Card, Badge, SectionTitle, ApiState, ProfileForm, ErrorState, SkeletonCards, PageHero, PAGE_HERO } from '@leroutier/ui';
 import { status, fcfa, time, dayShort, dayLong, dateTime, duration, reference, mapLink, placeLabel } from '@leroutier/ui';
 import { QRCodeSVG } from 'qrcode.react';
 import { Armchair, Ticket, Building2, Navigation, UserRound, ArrowLeftRight, CreditCard, Package, Store, MapPin, QrCode, Search, Lock } from 'lucide-react';
@@ -181,7 +181,7 @@ export function JourneySearch({ onSearched = null }) {
 // appeared in both. One product, one answer to "where do people go".
 const foldName = value => String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
-export function PopularCorridors({ corridors = [], limit = null }) {
+export function PopularCorridors({ corridors = [], limit = null, note = '' }) {
   const navigate = useNavigate();
   const places = useApi('/places?type=commune');
   const [day] = useState(() => isoDay(Date.now()));
@@ -199,7 +199,12 @@ export function PopularCorridors({ corridors = [], limit = null }) {
     <div className="section-head">
       <span className="eyebrow">Destinations</span>
       <h2 id="corridor-pills-label">Trajets fréquents</h2>
-      <p>Un axe qui vous parle ? Il lance la même recherche que le formulaire, sur les départs réellement publiés.</p>
+      {/* The note is not decoration. Four or eight named pairs look like a
+          timetable unless something says they are a sample, and a reader who
+          believes this is the whole network stops looking. It is passed in
+          rather than written here because it also goes with the corridor
+          catalogue the SEO pages publish. */}
+      <p>{note || 'Un axe qui vous parle ? Il lance la même recherche que le formulaire, sur les départs réellement publiés.'}</p>
     </div>
     <div className="corridor-grid" role="group" aria-labelledby="corridor-pills-label">
       {shown.map(({ from, to }) => <button key={from.id + to.id} type="button" className="corridor-pill"
@@ -326,11 +331,11 @@ export function Trips() {
   };
 
   return <>
-    <div className="page-head">
-      <span className="eyebrow">Voyager</span>
-      <h1>Trouvez votre départ.</h1>
-      <p>Recherchez librement. Le compte n’est demandé qu’au moment de réserver.</p>
-    </div>
+    {/* The same photographic band the other public entry pages open with.
+        Its heading is this page's only <h1>, so the search panel below carries
+        its own question as a heading of a lower rank. */}
+    <PageHero media={PAGE_HERO.trips} eyebrow="Voyager" title="Trouvez votre départ."
+      lead="Recherchez librement. Le compte n’est demandé qu’au moment de réserver."/>
 
     <div id="trip-search" className="search-panel">
       <JourneySearchFields originMode={originMode} setOriginMode={setOriginMode}
@@ -578,7 +583,8 @@ export function Tracking() {
   const bookings = useApi(user ? '/me/bookings' : null);
   const booking = bookings.data?.find(b => ['confirmed', 'boarded'].includes(b.status));
   return <>
-    <SectionTitle icon={Navigation} title="Suivi de mon trajet"/>
+    <PageHero media={PAGE_HERO.tracking} eyebrow="Suivi" title="Suivi de mon trajet"
+      lead="La position du véhicule et les étapes confirmées, quand le service les transmet."/>
     {/* The screen is reachable without an account — "Suivi" is one of the four
         public header destinations — so its anonymous state has to offer the
         way in, rather than telling somebody to connect with no door. */}

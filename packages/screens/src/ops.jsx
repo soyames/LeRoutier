@@ -85,7 +85,7 @@ export function Today(){
       </> : <p>Contrôle en cours…</p>}
     </Card>}
     <SectionTitle icon={Home} title="Aujourd’hui"/>
-    <Card className="hero stack"><span className="eyebrow">{configured?'Centre opérationnel':'Compte en attente de vérification'}</span>
+    <Card className="stack"><span className="eyebrow">{configured?'Centre opérationnel':'Compte en attente de vérification'}</span>
       <h1>{platform?'Vue de la plateforme':user?.operator_type==='independent'?'Votre activité indépendante':user?.operator_name || 'Votre compagnie'}</h1>
       <p>{configured?'Supervision en temps réel : services, équipage, colis, paiements et incidents.':'Votre compte doit être vérifié par LeRoutier avant de créer des services ou de retirer des fonds. Préparez votre réseau en attendant.'}</p></Card>
     {/* An operator awaiting a decision sees its own file here: which proof

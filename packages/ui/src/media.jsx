@@ -1,68 +1,19 @@
-// The photography the public product uses, and nothing else.
-//
-// Five pictures, each with exactly one job. The problem this redesign solves is
-// density, so the answer is not more imagery: every file below is referenced
-// from exactly one place, which is why there is no reuse helper that takes a
-// slug and scatters it across cards.
-//
-// Delivery. Each source arrived as a ~2 MB generated PNG. A phone should not
-// download 2 MB to look at a bus, so every one is re-encoded to AVIF and WebP
-// at the two widths the layout actually requests, with an optimised JPEG as
-// the fallback for a user agent that negotiates neither. The originals are not
-// shipped: nothing references a PNG from this directory.
-//
-// `widths` are the responsive steps; `sizes` is the layout width the browser
-// should assume at each breakpoint. Getting `sizes` wrong makes the browser
-// pick the wrong step, which is the usual way a srcset quietly costs more than
-// a single image would have.
-export const MEDIA = {
-  hero: {
-    slug: 'leroutier-hero-benin-intercity',
-    widths: [640, 1280],
-    // Full-bleed band, so the browser is told the viewport width.
-    sizes: '100vw',
-    // Intrinsic size of the delivered source. Declared on the <img> so the box
-    // is reserved before the bytes arrive and the page never shifts.
-    ratio: [1448, 1086],
-    alt: 'Voyageurs montant dans un autocar interurbain au Bénin',
-  },
-  voyager: {
-    slug: 'leroutier-service-voyager',
-    widths: [480, 900],
-    sizes: '(min-width: 1000px) 360px, (min-width: 700px) 45vw, 92vw',
-    ratio: [1672, 941],
-    alt: 'Voyageurs chargeant leurs bagages dans un car interurbain',
-  },
-  colis: {
-    slug: 'leroutier-service-colis',
-    widths: [480, 900],
-    sizes: '(min-width: 1000px) 360px, (min-width: 700px) 45vw, 92vw',
-    ratio: [1448, 1086],
-    alt: 'Remise d’un colis à un agent, devant un véhicule utilitaire',
-  },
-  suivi: {
-    slug: 'leroutier-live-tracking',
-    widths: [640, 1100],
-    sizes: '(min-width: 1000px) 360px, (min-width: 700px) 45vw, 92vw',
-    ratio: [1448, 1086],
-    alt: 'Voyageuse consultant le suivi de son trajet sur son téléphone à l’arrêt',
-  },
-  professionnels: {
-    slug: 'leroutier-professionnels',
-    widths: [640, 1100],
-    sizes: '(min-width: 860px) 50vw, 100vw',
-    ratio: [1448, 1086],
-    alt: 'Conducteur d’autocar et agent d’exploitation devant leur véhicule',
-  },
-};
+import { MEDIA, PAGE_HERO, mediaFiles } from './media-assets.js';
+
+export { MEDIA, PAGE_HERO, mediaFiles };
 
 /**
  * One responsive photograph.
  *
  * AVIF first, then WebP, then the JPEG the browser lands on if it understands
- * neither. `priority` is for the hero only: it is the largest contentful paint,
+ * neither. `priority` is for a hero only: it is the largest contentful paint,
  * so it is fetched eagerly and at high priority; everything else is lazy and
  * decoded off the main thread.
+ *
+ * `alt` is never empty by accident. A photograph that carries meaning gets a
+ * sentence describing its purpose rather than its contents; one that is purely
+ * decorative would pass `alt=""` explicitly, and there are none in this
+ * product — every picture here is answering a question.
  *
  * @param {{ media: typeof MEDIA[keyof typeof MEDIA], priority?: boolean, className?: string }} props
  */
@@ -81,3 +32,29 @@ export function Photo({ media, priority = false, className }) {
   </picture>;
 }
 
+/**
+ * The photographic band that opens a public page.
+ *
+ * The home page's hero is full-bleed because it is the front door; every other
+ * public page — trips, tracking, parcels, professionals — opens with this
+ * band inside the product container. Same picture language, same scrim, same
+ * copy rules, one component, so a page that grows a hero grows the right one.
+ *
+ * The heading is the page's only <h1>: a page that renders this must not
+ * render a second one.
+ *
+ * @param {{ media: typeof MEDIA[keyof typeof MEDIA], eyebrow?: string, title: string, lead?: string, children?: any, priority?: boolean }} props
+ */
+export function PageHero({ media, eyebrow, title, lead, children, priority = true }) {
+  return <section className="page-hero" aria-labelledby="page-hero-title">
+    <Photo media={media} priority={priority}/>
+    <div className="page-hero-inner">
+      <div className="page-hero-copy">
+        {eyebrow && <span className="eyebrow">{eyebrow}</span>}
+        <h1 id="page-hero-title">{title}</h1>
+        {lead && <p>{lead}</p>}
+        {children && <div className="controls">{children}</div>}
+      </div>
+    </div>
+  </section>;
+}

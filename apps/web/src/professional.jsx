@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router';
 import { useSession } from '@leroutier/config/client';
-import { Badge, Card, SectionTitle, status } from '@leroutier/ui';
+import { Badge, Card, PageHero, PAGE_HERO, SectionTitle, status } from '@leroutier/ui';
 import { Building2, Car, IdCard, ShieldCheck, Users } from 'lucide-react';
 
 // The one public door for people who work in transport.
@@ -46,11 +46,17 @@ export function ProfessionalEntry() {
   const verification = user && user.role !== 'passenger' ? status('verification', user.verification_status) : null;
 
   return <div className="stack">
-    <Card className="hero stack">
-      <span className="eyebrow">Espace professionnel</span>
-      <h1>Vous travaillez dans le transport ?</h1>
-      <p>LeRoutier accueille les chauffeurs indépendants et les compagnies de transport du Bénin. Les comptes professionnels sont vérifiés avant toute activité opérationnelle ou financière.</p>
-    </Card>
+    {/* This page had a plain card where every other public page has a
+        photograph. The picture is the one the product already uses to say
+        "these are the people who drive and run the services" — it is on the
+        home page's professional section, and this is the page that section
+        links to. */}
+    {/* A band, not a paragraph: the verification detail this lead used to
+        carry is already stated in full by "Comment se passe la vérification"
+        below, where somebody deciding to register will actually read it. */}
+    <PageHero media={PAGE_HERO.professionnels} eyebrow="Espace professionnel"
+      title="Vous travaillez dans le transport ?"
+      lead="LeRoutier accueille les chauffeurs indépendants et les compagnies de transport du Bénin."/>
 
     {workspace && <Card className="card-success stack">
       <div className="between wrap">
