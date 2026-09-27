@@ -42,11 +42,20 @@ test.describe('SEO foundations', () => {
     }
   });
 
-  test('home links crawlers to useful public topic and route pages', async ({ page }) => {
+  test('home links crawlers to the topic pages, and the topic hubs link every corridor', async ({ page }) => {
     await mockApi(page);
     await page.goto(APP + '/');
-    for (const href of ['/bus-benin', '/cotonou-parakou', '/colis-benin', '/gares-routieres-benin', '/transporteurs-benin']) {
+    for (const href of ['/bus-benin', '/colis-benin', '/gares-routieres-benin', '/transporteurs-benin']) {
       await expect(page.locator(`a[href="${href}"]`)).toBeVisible();
+    }
+    // The corridor pages are not orphaned by the footer dropping its corridor
+    // list — the home page's "Trajets fréquents" says the same thing, in the
+    // same page, and its chips run a search rather than navigating. What has
+    // to stay true is that a crawler can still reach every one of them, and
+    // the hub carries the whole catalogue rather than a sample of it.
+    await page.goto(APP + '/bus-benin');
+    for (const corridor of CORRIDORS) {
+      await expect(page.locator(`a[href="/${corridor.slug}"]`)).toBeVisible();
     }
   });
 

@@ -2,7 +2,7 @@ import { Link } from 'react-router';
 import { JourneySearch, PopularCorridors } from '@leroutier/screens/passenger';
 import { MEDIA, Photo } from '@leroutier/ui';
 import { ArrowRight, Search, Ticket, QrCode, Navigation, Package } from 'lucide-react';
-import { CORRIDORS } from './corridors.js';
+import { CORRIDORS, CORRIDOR_NOTE } from './corridors.js';
 
 // The public homepage.
 //
@@ -101,7 +101,7 @@ export function Home() {
 
     {/* 4 — POPULAR CORRIDORS. Real geography, no photographs: six destination
         pictures would be exactly the density this redesign is removing. */}
-    <PopularCorridors corridors={CORRIDORS}/>
+    <PopularCorridors corridors={CORRIDORS} note={CORRIDOR_NOTE}/>
 
     {/* 5 — HOW IT WORKS. */}
     <section className="lr-section" aria-labelledby="how-title">

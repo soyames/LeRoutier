@@ -1,6 +1,5 @@
 import { Link } from 'react-router';
 import { Card, SectionTitle, Logo } from '@leroutier/ui';
-import { CORRIDORS, CORRIDOR_NOTE } from './corridors.js';
 
 const UPDATED = '17 septembre 2026';
 const SUPPORT_EMAIL = 'leroutierbj@gmail.com';
@@ -83,18 +82,15 @@ export function LegalFooter() {
         </div>)}
       </nav>
 
-      {/* The corridor pages. They belong in a footer, where somebody looking
-          for a specific route can find them, rather than as a block of link
-          text on the home page competing with the search box. "Populaires"
-          and the note are load-bearing: an unqualified "Destinations" over a
-          short list reads as the full extent of the service, which is the
-          opposite of true. */}
-      <div className="site-footer-corridors">
-        <h2>Destinations populaires</h2>
-        <ul>{CORRIDORS.map(c => <li key={c.slug}><Link to={`/${c.slug}`}>{c.label}</Link></li>)}</ul>
-        <p className="site-footer-note">{CORRIDOR_NOTE}</p>
-      </div>
+      {/* The corridor pages used to be listed here as a second "Destinations
+          populaires" block, which said the same thing as the "Trajets
+          fréquents" section on the home page — two views of one answer to
+          "where do people go", on the same page. The list is gone.
 
+          Nothing is orphaned by that: every corridor page is in
+          public/sitemap.xml, and /bus-benin and each corridor page still carry
+          the full catalogue as links (SearchLinks), which is what a crawler
+          and a reader looking for a specific axis both need. */}
       <div className="site-footer-legal">
         <div className="site-footer-legal-links">
           <Link to="/legal">Mentions légales</Link>
