@@ -1,269 +1,961 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-:root{font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:#111c2d;background:#f7f9ff;font-synthesis:none;--primary:#b15f00;--primary-strong:#8d4b00;--primary-soft:#ffdcc3;--navy:#0f172a;--navy-2:#263143;--green:#006948;--green-soft:#e5f6ee;--red:#ba1a1a;--red-soft:#ffdad6;--surface:#f7f9ff;--card:#fff;--muted:#475569;--line:#e6eaf2;--soft:#f0f3ff;--soft-2:#e7eeff;--radius:18px;--shadow:0 12px 32px rgba(15,23,42,.08)}*{box-sizing:border-box}html,body,#root{margin:0;min-height:100%;background:var(--surface)}body{min-width:320px}.lr-app{min-height:100vh;padding-bottom:86px}.lr-header{position:sticky;top:0;z-index:40;background:rgba(247,249,255,.93);backdrop-filter:blur(18px);border-bottom:1px solid rgba(230,234,242,.85)}.lr-header-main{height:76px;max-width:1180px;margin:auto;padding:0 18px;display:flex;align-items:center;justify-content:space-between;gap:14px}.lr-brand-wrap{display:flex;align-items:center;gap:10px;min-width:0}.lr-logo{width:155px;height:auto}.lr-page-title{display:none}.lr-header-actions{display:flex;align-items:center;gap:8px}.lr-role-strip{max-width:1180px;margin:auto;padding:0 18px 9px;display:flex;align-items:center;gap:8px}.lr-role-strip span{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--primary-strong)}.lr-role-strip small{font-size:11px;color:var(--muted)}.avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--navy);color:#fff;font-size:11px;font-weight:800}.icon-btn{width:40px;height:40px;border:0;border-radius:13px;background:#fff;color:var(--navy);display:grid;place-items:center;box-shadow:0 4px 14px rgba(15,23,42,.06);cursor:pointer}.lr-main{width:100%;max-width:1180px;margin:0 auto;padding:18px;display:flex;flex-direction:column;gap:16px}.lr-bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:50;display:flex;justify-content:center;overflow-x:auto;background:rgba(255,255,255,.95);backdrop-filter:blur(16px);border-top:1px solid var(--line);padding-bottom:max(6px,env(safe-area-inset-bottom))}.lr-bottom-nav button{height:68px;min-width:76px;max-width:150px;flex:1 0 76px;border:0;background:transparent;color:#6b7280;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font:inherit;font-size:10.5px;font-weight:700;cursor:pointer}.lr-bottom-nav button.active{color:var(--primary-strong)}.card{background:var(--card);border:1px solid rgba(230,234,242,.8);border-radius:var(--radius);padding:16px;box-shadow:0 6px 20px rgba(15,23,42,.05)}.card-primary{background:linear-gradient(135deg,var(--primary-strong),#92400e);color:#fff;border:0}.card-dark{background:var(--navy-2);color:#fff;border:0}.card-success{background:var(--green-soft);border-color:#c9f0df}.grid{display:grid;gap:12px}.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}.stack{display:flex;flex-direction:column;gap:12px}.row{display:flex;align-items:center;gap:10px}.between{display:flex;align-items:center;justify-content:space-between;gap:12px}.wrap{flex-wrap:wrap}.muted{color:var(--muted)}.small{font-size:12px}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:var(--muted)}h1,h2,h3,p{margin:0}h2{font-size:18px}h3{font-size:15px}.section-title{display:flex;align-items:center;justify-content:space-between;gap:12px}.section-title>div{display:flex;align-items:center;gap:8px}.section-title h2{font-size:18px}.badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:6px 9px;font-size:10.5px;font-weight:800;white-space:nowrap}.badge-success{background:var(--green-soft);color:#047857}.badge-warning{background:var(--primary-soft);color:#9a4e00}.badge-danger{background:var(--red-soft);color:#93000a}.badge-neutral{background:#eef2f7;color:#475569}.stats-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}.stat-card{display:flex;flex-direction:column;gap:6px;min-height:120px}.stat-card>span{font-size:11px;color:var(--muted);font-weight:700}.stat-card>strong{font-size:23px}.stat-card>small{font-size:11px;color:var(--muted)}.stat-icon{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;background:#eef2f7;color:var(--navy)}.stat-primary{background:var(--primary-soft);color:var(--primary-strong)}.stat-success{background:var(--green-soft);color:var(--green)}.search-panel{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center}.search-place span{font-size:11px;color:var(--muted);font-weight:700}.search-place strong{font-size:18px;display:block;margin-top:3px}.search-place small{font-size:11px;color:var(--muted)}.search-place.end{text-align:right}.swap{width:38px;height:38px;border:0;border-radius:50%;background:var(--soft-2);cursor:pointer}.controls{display:flex;gap:8px;flex-wrap:wrap}.control{border:0;background:var(--soft);border-radius:13px;padding:10px 12px;font:inherit;font-size:12px;font-weight:700;color:var(--navy);cursor:pointer}.control.active,.btn-primary{background:var(--primary-strong);color:#fff}.btn{border:0;border-radius:13px;padding:12px 15px;font:inherit;font-size:12px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px}.btn-primary{background:var(--primary-strong);color:#fff}.btn-dark{background:var(--navy);color:#fff}.btn-soft{background:var(--soft);color:var(--navy)}.btn-danger{background:var(--red);color:#fff}.route-card{display:flex;flex-direction:column;gap:12px}.operator{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;background:var(--primary-soft);color:var(--primary-strong);font-weight:800}.price{font-size:23px;font-weight:800;color:var(--primary-strong)}.route-line{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;background:var(--soft);border-radius:13px;padding:11px}.route-line .mid{text-align:center}.track{height:3px;background:#cbd5e1;border-radius:99px;position:relative;margin:6px 0}.track:before,.track:after{content:'';position:absolute;top:50%;transform:translateY(-50%);width:9px;height:9px;border-radius:50%;background:var(--primary)}.track:before{left:0}.track:after{right:0}.ticket{overflow:hidden;padding:0}.ticket-head{background:linear-gradient(135deg,var(--primary-strong),#92400e);color:#fff;padding:16px}.ticket-body{padding:16px}.qr{width:170px;height:170px;margin:4px auto;background:repeating-conic-gradient(#111 0 25%,#fff 0 50%) 50%/18px 18px;border:14px solid #fff;outline:1px solid var(--line)}.timeline{position:relative;padding-left:26px;display:flex;flex-direction:column;gap:18px}.timeline:before{content:'';position:absolute;left:8px;top:8px;bottom:8px;width:3px;background:#d7deea;border-radius:99px}.stop{position:relative}.stop:before{content:'';position:absolute;left:-24px;top:4px;width:12px;height:12px;border-radius:50%;background:#94a3b8;box-shadow:0 0 0 4px #fff}.stop.done:before{background:var(--green)}.stop.active:before{background:var(--primary);box-shadow:0 0 0 5px #ffe6c5}.manifest-row{display:grid;grid-template-columns:48px 1fr auto;gap:10px;align-items:center;padding:12px;border-radius:14px;background:#fff;border:1px solid var(--line)}.seat{width:48px;height:48px;border-radius:12px;background:var(--soft);display:flex;flex-direction:column;align-items:center;justify-content:center}.seat small{font-size:9px;color:var(--muted)}.seat strong{color:var(--primary-strong)}.progress{height:8px;background:#e6eaf2;border-radius:99px;overflow:hidden}.progress>span{height:100%;display:block;background:var(--primary);border-radius:99px}.empty{text-align:center;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:9px;padding:28px}.empty-icon{width:48px;height:48px;border-radius:16px;background:var(--soft);display:grid;place-items:center;color:var(--primary-strong)}.empty p{font-size:12px;color:var(--muted);max-width:380px}.map-placeholder{height:190px;border-radius:16px;background:linear-gradient(135deg,#dbeafe,#dcfce7);position:relative;overflow:hidden}.map-placeholder:before{content:'';position:absolute;inset:0;background:linear-gradient(28deg,transparent 43%,rgba(255,255,255,.82) 44% 48%,transparent 49%),linear-gradient(112deg,transparent 54%,rgba(255,255,255,.62) 55% 59%,transparent 60%)}.map-pin{position:absolute;left:58%;top:43%;width:18px;height:18px;border-radius:50% 50% 50% 0;background:var(--primary);transform:rotate(-45deg);box-shadow:0 4px 10px rgba(0,0,0,.18)}.map-pin:after{content:'';position:absolute;width:7px;height:7px;border-radius:50%;background:#fff;left:5px;top:5px}.profile-block{display:flex;align-items:center;gap:13px}.profile-avatar{width:62px;height:62px;border-radius:50%;background:linear-gradient(135deg,var(--primary-strong),#92400e);display:grid;place-items:center;font-weight:800;color:#fff;font-size:18px}.wallet{background:linear-gradient(135deg,#0f172a,#263143);color:#fff}.desktop-sidebar{display:none}.danger-box{background:#fff2f0;border:1px solid #ffd5cf;border-radius:16px;padding:14px}.notice{background:var(--green-soft);color:#065f46;border-radius:14px;padding:12px;font-size:12px;font-weight:600}.hero{background:linear-gradient(135deg,#fff7ed,#f8fafc);border:1px solid #ffedd5}.hero h1{font-size:24px;line-height:1.15}.hero p{color:var(--muted);font-size:13px;line-height:1.55;max-width:700px}.kpi-scroll{display:flex;gap:10px;overflow:auto;padding-bottom:2px}.kpi-scroll .stat-card{min-width:160px}.service-chip{display:flex;align-items:center;gap:7px;padding:10px;border-radius:12px;background:var(--soft);font-size:11px;font-weight:700}.grow{flex:1;min-width:0}.end{display:flex;flex-direction:column;align-items:flex-end;gap:6px}.payment-box{background:var(--soft);border-radius:14px;padding:12px}.qr-box{background:var(--soft);border-radius:14px;padding:12px}.qr-canvas{display:grid;place-items:center;background:#fff;border-radius:14px;padding:12px}.qr-video{width:100%;max-width:320px;border-radius:12px;background:#111}.scanner{min-height:220px;background:linear-gradient(135deg,var(--primary-strong),#92400e);color:#fff;display:flex;flex-direction:column;gap:12px}.viewfinder{width:132px;height:132px;border:2px solid rgba(255,255,255,.9);border-radius:16px;margin:auto;display:grid;place-items:center;background:rgba(15,23,42,.18)}@media(min-width:720px){.lr-page-title{display:flex;flex-direction:column}.lr-page-title strong{font-size:14px}.lr-page-title span{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}.lr-logo{width:145px}.lr-main{padding:24px}.lr-bottom-nav{left:50%;right:auto;transform:translateX(-50%);width:min(720px,calc(100% - 24px));bottom:12px;border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);overflow:hidden}.grid-md-4{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(min-width:980px){.lr-app{padding-bottom:24px}.lr-bottom-nav{position:sticky;top:76px;bottom:auto;transform:none;left:auto;width:100%;max-width:1180px;margin:0 auto;border-radius:0 0 18px 18px;box-shadow:none}.lr-bottom-nav button{height:56px;flex-direction:row;font-size:11px}.hero h1{font-size:30px}}
-/* Unified shell: notification badge, workspace switcher, journey timeline. */
-.icon-btn{position:relative}.icon-btn:disabled{opacity:1;cursor:default}.icon-badge{position:absolute;top:2px;right:2px;min-width:16px;height:16px;padding:0 4px;border-radius:99px;background:var(--red);color:#fff;font-size:9px;font-weight:800;display:grid;place-items:center}
-.workspace-switch{display:flex;align-items:center;gap:6px;border:0;border-radius:13px;padding:8px 10px;background:var(--soft);color:var(--navy);font:inherit;font-size:11px;font-weight:800;cursor:pointer}
-.workspace-menu{display:flex;flex-direction:column;gap:6px}.workspace-menu button{display:flex;align-items:center;gap:9px;text-align:left;border:1px solid var(--line);border-radius:13px;padding:11px;background:#fff;font:inherit;font-size:12px;font-weight:700;color:var(--navy);cursor:pointer}.workspace-menu button.active{border-color:var(--primary);background:var(--primary-soft)}.workspace-menu small{display:block;font-weight:600;color:var(--muted)}
-.journey-step{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:start;padding:11px;border-radius:13px;background:#fff;border:1px solid var(--line)}.journey-step.advice{background:var(--primary-soft);border-color:#ffdfba}.journey-step.done{background:var(--green-soft);border-color:#c9f0df}.journey-step.cancelled{background:#f6f7f9;color:var(--muted)}
-.note-row{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start;padding:11px;border-radius:13px;background:#fff;border:1px solid var(--line);width:100%;text-align:left;font:inherit;cursor:pointer}.note-row.unread{border-color:var(--primary);background:var(--primary-soft)}.note-row.urgent{border-color:#ffb4a8}
-.home-actions{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.home-action{display:flex;align-items:center;gap:10px;text-align:left;border:1px solid var(--line);border-radius:16px;padding:14px;background:#fff;font:inherit;font-size:13px;font-weight:800;color:var(--navy);cursor:pointer}.home-action small{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-top:2px}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LeRoutier design system — one file, one set of decisions.
+
+   This file used to be two: a base stylesheet and a "polish" layer in the web
+   app that overrode it with `!important`. That is a fight, not a system, and
+   it produced the bugs the old comments in both files kept recording — four
+   ambers for two roles, a 38px swap button under a 44px floor, a bottom
+   navigation that undercut its own touch target. The layers are merged here,
+   the tokens are semantic, and nothing below needs `!important` to win.
+
+   Brand colours are unchanged. They were already the measured ones: the
+   primary is #b15f00 (4.63:1 on white) and the strong primary is #8d4b00
+   (6.71:1), because #d97706 at 3.18:1 did not pass AA for text at all.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root{
+  font-family:'Plus Jakarta Sans',system-ui,sans-serif;
+  color:#111c2d;
+  background:#f8f9fc;
+  font-synthesis:none;
+
+  /* Brand — unchanged. */
+  --primary:#b15f00;
+  --primary-strong:#8d4b00;
+  --primary-deep:#6e3900;
+  --primary-soft:#ffdcc3;
+  --navy:#0f172a;
+  --navy-2:#263143;
+  --green:#006948;
+  --green-soft:#e5f6ee;
+  --red:#ba1a1a;
+  --red-soft:#ffdad6;
+
+  /* Surfaces. Three, and only three: the page, a raised thing on it, and a
+     grouped area inside one. A fourth would be a fourth shadow to invent. */
+  --surface:#f8f9fc;
+  --surface-raised:#fff;
+  --surface-soft:#f1f4fa;
+  --surface-mid:#e7edf8;
+
+  /* Lines. `--border-soft` is the default and does most of the work; a
+     stronger line is for a control that must read as an edge, never for
+     decoration. */
+  --border-soft:#e6eaf3;
+  --border-strong:#d3dae8;
+
+  /* Text. `--text-muted` is 7.4:1 on the page surface, so it is a colour for
+     secondary information, not a licence to make things faint. */
+  --text:#111c2d;
+  --text-muted:#475569;
+  --text-on-brand:#fff;
+
+  /* Geometry. */
+  --radius-card:20px;
+  --radius-control:14px;
+  --radius-block:16px;
+  --radius-pill:999px;
+
+  /* Depth. One soft card shadow and one raised shadow for things that float.
+     A card gets a line or a shadow, never both at full strength. */
+  --shadow-card:0 1px 2px rgba(15,23,42,.03),0 10px 26px -18px rgba(15,23,42,.16);
+  --shadow-raised:0 18px 48px -18px rgba(15,23,42,.24);
+  --shadow-nav:0 -6px 22px -12px rgba(15,23,42,.14);
+
+  /* Rhythm. Sections breathe by the same amount everywhere, so the page reads
+     as one document rather than a stack of decisions. */
+  --gutter:20px;
+  --section-gap:clamp(40px,6vw,76px);
+  --block-gap:16px;
+  --measure:62ch;
+
+  /* Motion. Short, ease-out, and never on a property that moves layout. */
+  --ease:cubic-bezier(.2,.7,.3,1);
+  --dur-fast:140ms;
+  --dur:200ms;
+  --dur-slow:240ms;
+
+  /* Compatibility aliases. Screens across four workspaces still ask for these
+     names; they resolve to the tokens above so there is one value to change. */
+  --muted:var(--text-muted);
+  --line:var(--border-soft);
+  --card:var(--surface-raised);
+  --soft:var(--surface-soft);
+  --soft-2:var(--surface-mid);
+  --radius:var(--radius-card);
+  --shadow:var(--shadow-raised);
+}
+
+*{box-sizing:border-box}
+html,body,#root{margin:0;min-height:100%;background:var(--surface)}
+body{min-width:320px;overflow-wrap:break-word}
+html{scroll-behavior:smooth}
+body{overscroll-behavior-y:none}
+button,a,input,select,textarea{touch-action:manipulation}
+/* Buttons do not inherit font-family. Several were therefore rendering in
+   Arial beside 200 elements in Plus Jakarta Sans. Fixed at the element rather
+   than at each class, so the next button added is correct by default. */
+button,input,select,textarea{font-family:inherit}
+
+/* ── Typography ────────────────────────────────────────────────────────────
+   Four levels, and a section is not allowed all four at once. The old product
+   put an eyebrow, a title, a subtitle and a helper line above almost every
+   block; the reader had to cross four lines of chrome to reach one sentence
+   of content. */
+h1,h2,h3,h4,p,figure{margin:0}
+h1{font-size:clamp(30px,5.2vw,54px);line-height:1.06;letter-spacing:-.035em;font-weight:800}
+h2{font-size:clamp(21px,2.4vw,28px);line-height:1.2;letter-spacing:-.025em;font-weight:800}
+h3{font-size:16px;line-height:1.35;letter-spacing:-.01em;font-weight:800}
+p{line-height:1.6}
+a{color:var(--primary-strong)}
+.lead{font-size:clamp(15px,1.6vw,17px);line-height:1.6;color:var(--text-muted);max-width:var(--measure)}
+.eyebrow{font-size:11.5px;text-transform:uppercase;letter-spacing:.1em;font-weight:800;color:var(--primary-strong)}
+.muted{color:var(--text-muted)}
+.small{font-size:12.5px;line-height:1.5}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.center{text-align:center}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* ── Layout ────────────────────────────────────────────────────────────────
+   One container width for the whole product, and one vertical rhythm. */
+.lr-app{min-height:100vh;display:flex;flex-direction:column;background:var(--surface)}
+.lr-main{
+  width:100%;max-width:1180px;margin:0 auto;
+  padding:var(--block-gap) max(var(--gutter),env(safe-area-inset-right)) max(var(--block-gap),env(safe-area-inset-bottom)) max(var(--gutter),env(safe-area-inset-left));
+  display:flex;flex-direction:column;gap:var(--block-gap);flex:1;
+}
+/* The public pages carry full-width bands — a hero, a photographic section —
+   so the container has to stop clipping them. */
+.lr-main.is-public{padding-inline:0;max-width:none;gap:0}
+.lr-main.is-public>*{width:100%}
+/* A fixed task bar covers the bottom of the screen, so the page has to end
+   above it. Without this the last control on a long crew screen — the
+   "Autre : décrire" incident tile, for one — sits underneath the navigation
+   and cannot be tapped at all, which is a bug the field test caught and the
+   browser suite now catches too. */
+.lr-app[data-nav="bottom"] .lr-main{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
+@media(min-width:720px){.lr-app[data-nav="bottom"] .lr-main{padding-bottom:calc(110px + env(safe-area-inset-bottom))}}
+@media(min-width:980px){.lr-app[data-nav="bottom"] .lr-main{padding-bottom:max(var(--block-gap),env(safe-area-inset-bottom))}}
+.lr-section{
+  width:100%;max-width:1180px;margin:0 auto;
+  padding:var(--section-gap) max(var(--gutter),env(safe-area-inset-right)) 0 max(var(--gutter),env(safe-area-inset-left));
+}
+.lr-section:last-child{padding-bottom:var(--section-gap)}
+.section-head{display:flex;flex-direction:column;gap:8px;margin-bottom:26px;max-width:var(--measure)}
+.section-head p{color:var(--text-muted)}
+.stack{display:flex;flex-direction:column;gap:12px}
+.grid{display:grid;gap:12px}
+.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.row{display:flex;align-items:center;gap:10px}
+.between{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.wrap{flex-wrap:wrap}
+.grow{flex:1;min-width:0}
+.end{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.center-page{display:flex;flex-direction:column;justify-content:center;min-height:60vh}
+.cards-grid{display:grid;gap:14px}
+
+/* ── Shell: header ─────────────────────────────────────────────────────────
+   Two headers, one component. A passenger meets a travel product: the brand,
+   four destinations, an account button. A driver or an operator meets an
+   instrument: the workspace, the connection, the notification bell. Neither
+   shows the other's furniture. */
+.lr-header{
+  position:sticky;top:0;z-index:40;
+  background:rgba(255,255,255,.86);
+  backdrop-filter:blur(20px) saturate(1.4);
+  border-bottom:1px solid var(--border-soft);
+}
+@media(display-mode:standalone){.lr-header{padding-top:env(safe-area-inset-top)}}
+.lr-header-main{
+  min-height:72px;max-width:1180px;margin:auto;
+  padding:8px max(var(--gutter),env(safe-area-inset-right)) 8px max(var(--gutter),env(safe-area-inset-left));
+  display:flex;align-items:center;gap:16px;
+}
+.lr-brand-wrap{display:flex;align-items:center;gap:10px;min-width:0}
+.lr-brand-btn{border:0;background:transparent;padding:0;cursor:pointer;display:flex;align-items:center;border-radius:12px}
+.lr-logo{width:150px;height:auto;flex:none}
+.lr-page-title{display:none;flex-direction:column;min-width:0}
+.lr-page-title strong{font-size:14px;font-weight:800;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lr-page-title span{font-size:10.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em}
+@media(min-width:720px){.lr-page-title{display:flex}.lr-page-title strong{font-size:14px}}
+
+/* The public navigation row. Links, not buttons: they are destinations, and
+   they must survive being opened in a new tab. */
+.lr-nav{display:none;flex:1;margin-left:8px}
+.lr-nav ul{list-style:none;margin:0;padding:0;display:flex;align-items:center;gap:2px}
+.lr-nav a{
+  display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border-radius:var(--radius-pill);
+  font-size:14px;font-weight:700;color:var(--text);text-decoration:none;
+  transition:background var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease)
+}
+.lr-nav a:hover{background:var(--surface-soft)}
+.lr-nav a[aria-current="page"]{color:var(--primary-strong);background:var(--primary-soft)}
+@media(min-width:900px){.lr-nav{display:block}}
+
+.lr-header-actions{display:flex;align-items:center;gap:6px;margin-left:auto;min-width:0}
+.lr-role-strip{
+  max-width:1180px;margin:auto;padding:0 max(var(--gutter),env(safe-area-inset-right)) 9px max(var(--gutter),env(safe-area-inset-left));
+  display:flex;align-items:center;gap:8px;
+}
+.lr-role-strip span{
+  display:inline-flex;align-items:center;min-height:24px;padding:3px 10px;border-radius:var(--radius-pill);
+  background:var(--primary-soft);color:var(--primary-deep);font-size:11.5px;font-weight:800;
+  text-transform:uppercase;letter-spacing:.07em;
+}
+.lr-role-strip small{font-size:11.5px;color:var(--text-muted);font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A phone header has 390px and five things to fit. Everything here is a
+   shrinking rule: the logo gets smaller, the connection pill loses its word
+   and keeps its icon, and the workspace switcher truncates rather than
+   pushing the account button off the screen. Without these the row is ~30px
+   wider than the viewport, which is real horizontal scroll on every
+   operational screen. */
+@media(max-width:719px){
+  .lr-header-main{padding-inline:14px;gap:10px}
+  .lr-logo{width:122px}
+  .lr-header-actions{gap:5px;min-width:0}
+  .lr-header-actions>.badge{max-width:40px;overflow:hidden;padding-inline:8px;font-size:0}
+  .lr-header-actions>.badge svg{margin:0}
+  .workspace-switch{max-width:136px}
+  .lr-role-strip{padding-inline:14px}
+}
+/* Exactly one "what page am I on" is on screen at every width. Below 720px the
+   page title is hidden, so the strip carries the name; above it the title is
+   two elements away and the strip drops the duplicate. */
+@media(min-width:720px){.lr-role-strip small{display:none}}
+
+/* ── Shell: menu button and drawer ─────────────────────────────────────────
+   The phone's way into everything that is not one of the crowded-in header
+   destinations. A modal dialog with a real focus trap, because a menu that
+   leaves focus behind it is a menu a keyboard user cannot get out of. */
+.lr-menu-btn{
+  width:44px;height:44px;border:1px solid var(--border-soft);border-radius:var(--radius-control);
+  background:var(--surface-raised);color:var(--text);display:grid;place-items:center;cursor:pointer;
+}
+.lr-menu-btn:hover{background:var(--surface-soft)}
+@media(min-width:900px){.lr-menu-btn{display:none}}
+
+.lr-drawer-scrim{position:fixed;inset:0;z-index:90;background:rgba(15,23,42,.45);animation:lr-fade var(--dur) var(--ease) both}
+.lr-drawer{
+  position:fixed;z-index:91;top:0;right:0;bottom:0;width:min(380px,88vw);
+  background:var(--surface-raised);box-shadow:var(--shadow-raised);
+  display:flex;flex-direction:column;
+  padding:max(14px,env(safe-area-inset-top)) 0 max(14px,env(safe-area-inset-bottom));
+  animation:lr-drawer-in var(--dur-slow) var(--ease) both;
+}
+@keyframes lr-drawer-in{from{transform:translateX(16px);opacity:0}to{transform:none;opacity:1}}
+@keyframes lr-fade{from{opacity:0}to{opacity:1}}
+.lr-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 18px 14px}
+.lr-drawer-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted)}
+.lr-drawer nav{overflow-y:auto;padding:0 12px 12px;flex:1}
+.lr-drawer ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.lr-drawer a,.lr-drawer button.lr-drawer-item{
+  display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:10px 14px;
+  border:0;border-radius:var(--radius-control);background:transparent;color:var(--text);
+  font:inherit;font-size:15px;font-weight:700;text-align:left;text-decoration:none;cursor:pointer;
+}
+.lr-drawer a:hover,.lr-drawer button.lr-drawer-item:hover{background:var(--surface-soft)}
+.lr-drawer a[aria-current="page"]{background:var(--primary-soft);color:var(--primary-deep)}
+.lr-drawer a svg,.lr-drawer button.lr-drawer-item svg{color:var(--text-muted);flex:none}
+.lr-drawer a[aria-current="page"] svg{color:var(--primary-strong)}
+.lr-drawer-foot{padding:12px 18px 4px;border-top:1px solid var(--border-soft);display:flex;flex-direction:column;gap:10px}
+
+/* ── Shell: bottom navigation ───────────────────────────────────────────────
+   Operational workspaces keep it: on a moving vehicle it is the fastest way
+   between four tasks a driver repeats all day. The passenger surface does not
+   have it any more — its destinations live in the header and the drawer, and
+   a persistent bar under a travel page is the single largest piece of clutter
+   the redesign removed. */
+.lr-bottom-nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:50;
+  display:flex;justify-content:flex-start;overflow-x:auto;
+  background:rgba(255,255,255,.96);backdrop-filter:blur(18px) saturate(1.3);
+  border-top:1px solid var(--border-soft);box-shadow:var(--shadow-nav);
+  padding-bottom:max(6px,env(safe-area-inset-bottom));
+}
+.lr-bottom-nav button{
+  height:66px;min-width:76px;max-width:150px;flex:1 0 76px;white-space:nowrap;
+  border:0;background:transparent;color:var(--text-muted);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  font:inherit;font-size:10.5px;font-weight:700;cursor:pointer;position:relative;
+  transition:color var(--dur-fast) var(--ease)
+}
+.lr-bottom-nav button:active{transform:scale(.97)}
+.lr-bottom-nav button.active{color:var(--primary-strong)}
+.lr-bottom-nav button.active:before{content:'';position:absolute;top:4px;width:24px;height:3px;border-radius:var(--radius-pill);background:var(--primary)}
+@media(min-width:720px){
+  .lr-bottom-nav{left:50%;right:auto;transform:translateX(-50%);width:min(760px,calc(100% - 24px));bottom:14px;border:1px solid var(--border-soft);border-radius:22px;overflow:hidden}
+}
+/* On a wide screen the operational task bar is a tab row under the header,
+   not a floating bar at the bottom of the window. It is moved in DOM order
+   rather than in position, so it scrolls away with the page instead of
+   hovering over the content it belongs to — and it stops competing with the
+   assistant button for the same corner. */
+@media(min-width:980px){
+  .lr-header{order:0}
+  .lr-bottom-nav{order:1;position:static;left:auto;right:auto;bottom:auto;transform:none;
+    width:100%;max-width:1180px;margin:12px auto 0;border:1px solid var(--border-soft);
+    border-radius:var(--radius-card);box-shadow:none;background:var(--surface-raised);overflow:hidden}
+  .lr-main{order:2}
+  .site-footer{order:3}
+  .lr-bottom-nav button{height:54px;flex-direction:row;font-size:12.5px;max-width:none}
+  .lr-bottom-nav button.active:before{top:auto;bottom:0;width:100%;border-radius:0}
+  .lr-bottom-nav button.active{background:var(--primary-soft)}
+}
+
+/* ── Cards ─────────────────────────────────────────────────────────────────
+   A card is a raised surface, so it gets one line and the softest shadow that
+   still separates it. The old layer gave every card a 1px border AND a
+   coloured drop shadow AND a hover lift; three signals for one edge. */
+.card{
+  background:var(--surface-raised);border:1px solid var(--border-soft);border-radius:var(--radius-card);
+  padding:18px;box-shadow:var(--shadow-card);
+}
+.card-dark{background:var(--navy-2);border-color:transparent;color:#fff}
+.card-dark .muted,.card-dark .small{color:rgba(255,255,255,.78)}
+.card-primary{background:linear-gradient(140deg,var(--primary-strong),var(--primary-deep));border-color:transparent;color:#fff}
+.card-primary .muted,.card-primary .small{color:rgba(255,255,255,.82)}
+.card-success{background:var(--green-soft);border-color:#c9f0df}
+.card-flat{box-shadow:none}
+.notice{background:var(--green-soft);color:#065f46;border:1px solid rgba(0,105,72,.12);border-radius:var(--radius-control);padding:11px 13px;font-size:12.5px;font-weight:700}
+.test-mode-banner{background:var(--red-soft);color:#93000a;border:1px solid #ffd5cf;font-weight:700}
+.danger-box{background:#fff5f4;border:1px solid #ffd5cf;border-radius:var(--radius-block);padding:14px}
+.summary{background:var(--surface-soft);border-radius:var(--radius-block);padding:14px;display:flex;flex-direction:column;gap:2px}
+.summary .row{display:flex;justify-content:space-between;gap:12px;font-size:13px;padding:9px 0;border-bottom:1px solid var(--border-soft)}
+.summary .row:last-child{border-bottom:0}
+.summary .row span:first-child{color:var(--text-muted);font-weight:700}
+.summary .row span:last-child{font-weight:700;text-align:right}
+.payment-box,.qr-box{background:var(--surface-soft);border-radius:var(--radius-block);padding:14px}
+
+.section-title{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.section-title>div{display:flex;align-items:center;gap:9px;min-width:0}
+.section-title h2{font-size:19px;letter-spacing:-.02em}
+.service-chip{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:var(--radius-control);background:var(--surface-soft);font-size:12px;font-weight:700;min-height:42px}
+
+/* ── Badges ────────────────────────────────────────────────────────────────
+   Status, not decoration. A badge carries a word, never colour alone. */
+.badge{display:inline-flex;align-items:center;gap:5px;border-radius:var(--radius-pill);padding:5px 10px;font-size:11px;font-weight:800;white-space:nowrap;min-height:26px}
+.badge-success{background:var(--green-soft);color:#047857}
+.badge-warning{background:var(--primary-soft);color:var(--primary-deep)}
+.badge-danger{background:var(--red-soft);color:#93000a}
+.badge-neutral{background:var(--surface-mid);color:var(--text-muted)}
+
+/* ── Buttons ───────────────────────────────────────────────────────────────
+   48px tall. The 44px floor is a floor, and this is a product used one-handed
+   at a bus station. */
+.btn{
+  border:0;border-radius:var(--radius-control);padding:12px 18px;min-height:48px;
+  font:inherit;font-size:14px;font-weight:800;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  transition:background var(--dur-fast) var(--ease),transform var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease)
+}
+.btn:active:not(:disabled){transform:scale(.985)}
+.btn-primary{background:var(--primary-strong);color:var(--text-on-brand)}
+.btn-primary:hover:not(:disabled){background:#7d4300}
+.btn-dark{background:var(--navy);color:#fff}
+.btn-soft{background:var(--surface-raised);color:var(--text);border:1px solid var(--border-strong)}
+.btn-soft:hover:not(:disabled){background:var(--surface-soft)}
+.btn-danger{background:var(--red);color:#fff}
+.btn-block{width:100%}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+.control{
+  border:1px solid var(--border-soft);background:var(--surface-raised);border-radius:var(--radius-control);
+  padding:11px 13px;min-height:48px;font:inherit;font-size:13.5px;font-weight:700;color:var(--text);cursor:pointer;
+  display:inline-flex;align-items:center;gap:7px;
+}
+.control:hover{border-color:var(--border-strong)}
+/* White on --primary-soft was 1.1:1: an invisible label on the one chip that
+   says which filter is active. The selected chip is filled instead. */
+.control.active{background:var(--primary-strong);border-color:transparent;color:#fff}
+button:disabled{opacity:.5;cursor:not-allowed}
+
+.icon-btn{
+  width:44px;height:44px;border:1px solid var(--border-soft);border-radius:var(--radius-control);
+  background:var(--surface-raised);color:var(--text);display:grid;place-items:center;cursor:pointer;position:relative;
+}
+.icon-btn:disabled{opacity:1;cursor:default}
+.icon-badge{
+  position:absolute;top:3px;right:3px;min-width:16px;height:16px;padding:0 4px;border-radius:var(--radius-pill);
+  background:var(--red);color:#fff;font-size:9px;font-weight:800;display:grid;place-items:center;
+}
+.avatar-btn{border:0;background:var(--surface-mid);border-radius:50%;width:44px;height:44px;display:grid;place-items:center;color:var(--primary-strong);cursor:pointer;padding:0;position:relative}
+.avatar{background:var(--navy);color:#fff;border-radius:50%;width:44px;height:44px;display:grid;place-items:center;font-size:13px;font-weight:700;letter-spacing:.02em}
+.account-menu-wrap{position:relative}
+.account-menu{
+  position:absolute;right:0;top:52px;z-index:60;background:var(--surface-raised);border:1px solid var(--border-soft);
+  border-radius:var(--radius-block);box-shadow:var(--shadow-raised);min-width:232px;display:flex;flex-direction:column;padding:6px;
+  animation:lr-pop var(--dur-fast) var(--ease) both;
+}
+@keyframes lr-pop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.account-menu button{display:flex;gap:10px;align-items:center;background:none;border:0;padding:11px 12px;border-radius:10px;min-height:44px;font:inherit;font-size:14px;font-weight:600;text-align:left;cursor:pointer;color:var(--text)}
+.account-menu button:hover{background:var(--surface-soft)}
+
+.workspace-switch{
+  display:flex;align-items:center;gap:7px;border:1px solid var(--border-soft);border-radius:var(--radius-pill);
+  padding:8px 13px;min-height:44px;background:var(--surface-raised);color:var(--text);font:inherit;font-size:12px;font-weight:800;cursor:pointer;
+  min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.workspace-switch svg{flex:none}
+.workspace-menu{display:flex;flex-direction:column;gap:6px;background:var(--surface-raised);padding:8px;border-radius:var(--radius-block);border:1px solid var(--border-soft);box-shadow:var(--shadow-raised)}
+.workspace-menu button{display:flex;flex-direction:column;gap:2px;text-align:left;border:0;border-radius:12px;padding:11px 12px;min-height:52px;background:transparent;font:inherit;font-size:13px;font-weight:700;color:var(--text);cursor:pointer}
+.workspace-menu button:hover,.workspace-menu button.active{background:var(--primary-soft)}
+.workspace-menu small{display:block;font-weight:600;color:var(--text-muted)}
+
+/* ── Forms ─────────────────────────────────────────────────────────────────
+   A label, a control, and — only when there is something to say — one line
+   under it. Field labels already explain the field; the redesign deleted the
+   helper sentence that repeated them. */
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>span:first-child,.field>label:first-child{font-size:11.5px;font-weight:800;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
+.field input,.field select,.field textarea,
+input.control,select.control,textarea.control{
+  font:inherit;font-size:14px;padding:11px 13px;border:1px solid var(--border-soft);
+  border-radius:var(--radius-control);background:var(--surface-raised);color:var(--text);min-height:48px;width:100%;max-width:100%;
+}
+.field input:focus-visible,.field select:focus-visible,.field textarea:focus-visible,
+input.control:focus-visible,select.control:focus-visible,textarea.control:focus-visible{
+  border-color:var(--primary);outline:3px solid rgba(177,95,0,.16);outline-offset:0
+}
+label{display:block}
+summary{cursor:pointer;min-height:44px;padding-block:10px;font-weight:700}
+
+/* ── Stats ─────────────────────────────────────────────────────────────────
+   Operational dashboards. Denser than the passenger surface on purpose, but
+   still one number per tile. */
+.stats-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.stat-card{display:flex;flex-direction:column;gap:6px;min-height:112px}
+.stat-card>span{font-size:11.5px;color:var(--text-muted);font-weight:700}
+.stat-card>strong{font-size:24px;letter-spacing:-.03em}
+.stat-card>small{font-size:11.5px;color:var(--text-muted)}
+.stat-icon{width:32px;height:32px;border-radius:11px;display:grid;place-items:center;background:var(--surface-mid);color:var(--navy)}
+.stat-primary{background:var(--primary-soft);color:var(--primary-strong)}
+.stat-success{background:var(--green-soft);color:var(--green)}
+.kpi-scroll{display:flex;gap:10px;overflow:auto;padding-bottom:2px}
+.kpi-scroll .stat-card{min-width:164px}
+
+/* ── Empty states ──────────────────────────────────────────────────────────
+   A dashed edge, so an empty state never reads as a broken card. */
+.empty{text-align:center;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;padding:34px 20px;border-style:dashed;background:rgba(255,255,255,.7);box-shadow:none}
+.empty-icon{width:52px;height:52px;border-radius:var(--radius-block);background:var(--surface-soft);display:grid;place-items:center;color:var(--primary-strong)}
+.empty p{font-size:13px;color:var(--text-muted);max-width:380px}
+.empty-inline{text-align:left}
+.empty-illustration{width:100%;max-width:320px;height:auto;display:block;margin:0 auto 2px;animation:lr-rise .32s var(--ease) both}
+@media(max-width:480px){.empty-illustration{max-width:250px}}
+
+/* ── Loading ───────────────────────────────────────────────────────────────
+   Skeletons show the shape of the answer and never invent content. */
+.skeleton{display:flex;flex-direction:column;gap:9px}
+.skeleton-line{height:12px;border-radius:var(--radius-pill);background:linear-gradient(90deg,var(--surface-mid) 25%,#dde5f4 37%,var(--surface-mid) 63%);background-size:400% 100%;animation:skeleton 1.4s ease infinite}
+@keyframes skeleton{0%{background-position:100% 50%}100%{background-position:0 50%}}
 
 /* ── Accessibility ────────────────────────────────────────────────────────
-   A visible focus ring on every interactive element, and a skip target for
-   keyboard users. Nothing relies on colour alone to convey state. */
+   A visible ring wherever focus lands, on every interactive element, and a
+   skip target ahead of the shell. Nothing conveys state by colour alone. */
 :where(button,a,input,select,textarea,[tabindex]):focus-visible{outline:3px solid var(--primary-strong);outline-offset:2px;border-radius:10px}
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
-.skip-link{position:absolute;left:-9999px;top:0;z-index:100;background:var(--navy);color:#fff;padding:10px 14px;border-radius:0 0 12px 0;font-size:12px;font-weight:800}
+.skip-link{position:absolute;left:-9999px;top:0;z-index:100;background:var(--navy);color:#fff;padding:11px 15px;border-radius:0 0 12px 0;font-size:12.5px;font-weight:800}
 .skip-link:focus{left:0}
-.lr-brand-btn{border:0;background:transparent;padding:0;cursor:pointer;display:flex;align-items:center;min-height:auto}
-/* Comfortable touch targets for one-handed field use. */
-.btn,.control,.icon-btn{min-height:44px}
-.lr-bottom-nav button{min-height:56px}
 
-/* ── Loading ──────────────────────────────────────────────────────────────
-   Skeletons show the shape of the answer. They never show invented content. */
-.skeleton{display:flex;flex-direction:column;gap:9px}
-.skeleton-line{height:12px;border-radius:99px;background:linear-gradient(90deg,#eef2f7 25%,#e2e8f2 37%,#eef2f7 63%);background-size:400% 100%;animation:skeleton 1.4s ease infinite}
-@keyframes skeleton{0%{background-position:100% 50%}100%{background-position:0 50%}}
-@media(prefers-reduced-motion:reduce){.skeleton-line{animation:none}*{scroll-behavior:auto!important}}
-.empty-inline{text-align:left}
+/* ═══════════════════════════════════════════════════════════════════════════
+   PUBLIC SURFACE — the travelling product
+   ═══════════════════════════════════════════════════════════════════════════ */
 
-/* ── Trip search ──────────────────────────────────────────────────────────
-   The hero task: where are you going, and when. */
-.trip-search{display:grid;gap:10px}
-.trip-search .field{display:flex;flex-direction:column;gap:4px}
-.trip-search label,.field>span{font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
-.trip-endpoints{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:end}
-.swap-btn{width:44px;height:44px;border:1px solid var(--line);border-radius:50%;background:#fff;color:var(--navy);display:grid;place-items:center;cursor:pointer;align-self:end;margin-bottom:1px}
-.swap-btn:hover{background:var(--soft)}
-@media(max-width:560px){.trip-endpoints{grid-template-columns:1fr;gap:6px}.swap-btn{justify-self:end;margin:-4px 0}}
+/* ── Hero ──────────────────────────────────────────────────────────────────
+   One photograph, one sentence, one field group. The image carries the mood;
+   no gradient, badge, statistic or second CTA is laid on top of it.
 
-/* ── Trip result card ─────────────────────────────────────────────────────
-   Times first, then places, then price. No plates, no internal identifiers. */
-.trip-card{display:flex;flex-direction:column;gap:12px}
-.trip-times{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.trip-times strong{font-size:22px;letter-spacing:-.5px}
-.trip-times .arrow{color:var(--muted)}
-.trip-duration{font-size:11px;font-weight:800;color:var(--muted);background:var(--soft);border-radius:99px;padding:4px 9px}
+   Responsive images are delivered as <picture> with AVIF and WebP sources and
+   one JPEG fallback. `display:contents` takes the wrapper out of the box tree
+   so every existing `… img` rule — and object-fit — applies to the photograph
+   itself rather than to an inline-level element around it. */
+picture{display:contents}
+.hero-media{position:relative;display:flex;align-items:flex-end;overflow:hidden;background:var(--navy-2);
+  height:clamp(330px,62vw,430px)}
+.hero-media img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 42%}
+/* A single scrim, left-weighted, so the copy holds its contrast over whatever
+   the photograph does at that point. White on the darkest third of the scrim
+   measures 12.4:1 and on the lightest 5.2:1 — both clear of AA at every size
+   the hero uses. */
+.hero-media:after{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(178deg,rgba(10,17,31,.5) 0%,rgba(10,17,31,.66) 52%,rgba(10,17,31,.88) 100%);
+}
+.hero-inner{
+  position:relative;z-index:2;width:100%;max-width:1180px;margin:0 auto;
+  padding:24px max(var(--gutter),env(safe-area-inset-right)) 30px max(var(--gutter),env(safe-area-inset-left));
+}
+.hero-copy{display:flex;flex-direction:column;gap:13px;max-width:620px}
+.hero-copy .eyebrow{color:#ffd0a6}
+.hero-copy h1{color:#fff;text-wrap:balance}
+.hero-copy p{color:rgba(255,255,255,.9);font-size:clamp(15px,1.7vw,17px);max-width:48ch;line-height:1.55}
+@media(min-width:720px){
+  /* Tall enough to be worth the bytes, short enough that the search panel and
+     the first service card are still within one scroll on a laptop. */
+  .hero-media{height:clamp(420px,52vh,540px);align-items:center}
+  .hero-copy{gap:16px}
+  .hero-media:after{background:linear-gradient(96deg,rgba(10,17,31,.85) 0%,rgba(10,17,31,.66) 44%,rgba(10,17,31,.2) 74%,rgba(10,17,31,.06) 100%)}
+}
+/* The search panel overlaps the lower part of the photograph on a wide screen,
+   which is what ties the two surfaces together. On a phone it simply follows:
+   overlapping there would push the date field under the fold. */
+.hero-search{padding-top:0;position:relative;z-index:5}
+@media(min-width:720px){.hero-search{margin-top:-46px}}
+
+/* ── Search panel ──────────────────────────────────────────────────────────
+   The hero task, in one container. Horizontal on a wide screen, a clean
+   stack on a phone — never a cramped two-column pair of pickers. */
+.search-panel{
+  background:var(--surface-raised);border:1px solid var(--border-soft);border-radius:var(--radius-card);
+  padding:18px;box-shadow:var(--shadow-raised);display:flex;flex-direction:column;gap:14px;
+}
+.search-panel h2{font-size:clamp(18px,2vw,22px);letter-spacing:-.02em}
+.search-panel .search-hint{font-size:12.5px;color:var(--text-muted)}
+.trip-search{display:flex;flex-direction:column;gap:14px}
+.trip-endpoints{display:grid;grid-template-columns:minmax(0,1fr) 48px minmax(0,1fr);gap:10px;align-items:end}
+.trip-endpoints .endpoint-cell{display:flex;flex-direction:column;gap:8px;min-width:0}
+.swap-btn{
+  width:48px;height:48px;border:1px solid var(--border-strong);border-radius:50%;background:var(--surface-raised);
+  color:var(--primary-strong);display:grid;place-items:center;cursor:pointer;align-self:end;margin-bottom:0;
+}
+.swap-btn:hover:not(:disabled){background:var(--surface-soft)}
+.swap-btn:active:not(:disabled){transform:rotate(180deg)}
+/* Below 640px the two pickers stack: side by side they leave ~150px each,
+   which is shorter than "Abomey-Calavi" and produces a truncated label on the
+   one field the whole task depends on. */
+@media(max-width:639px){
+  .trip-endpoints{grid-template-columns:1fr;gap:10px}
+  .swap-btn{justify-self:end;margin:-2px 0}
+}
+.search-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.search-note{font-size:12px;color:var(--text-muted)}
+/* The three cells of the search — where from and to, when, and the button —
+   are one row only where there is room for one row. Below that they stack,
+   which is the honest layout for a 390px screen. */
+.trip-row{display:flex;flex-direction:column;gap:14px}
+.search-cta{width:100%}
+@media(min-width:900px){
+  .search-panel{padding:22px 24px}
+  .trip-search .trip-row{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(150px,.85fr) auto;gap:12px;align-items:end}
+  .search-cta{width:auto;align-self:end;white-space:nowrap}
+}
+
+/* Place autocomplete. */
+.place-combobox{position:relative;min-width:0;display:flex;flex-direction:column;gap:6px}
+.combobox-control{position:relative;display:flex;flex-direction:column;gap:6px}
+.combobox-chip{
+  background:var(--surface-raised);border:1px solid var(--border-strong);border-radius:var(--radius-control);
+  padding:11px 13px;min-height:48px;font:inherit;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;
+  display:inline-flex;align-items:center;gap:8px;justify-content:space-between;width:100%;
+}
+.combobox-chip:hover{border-color:var(--primary)}
+.combobox-list{
+  position:absolute;z-index:80;top:calc(100% + 6px);left:0;right:0;max-height:248px;overflow-y:auto;
+  background:var(--surface-raised);border:1px solid var(--border-soft);border-radius:var(--radius-block);
+  box-shadow:var(--shadow-raised);list-style:none;margin:0;padding:5px;
+}
+.combobox-list li{padding:12px 13px;min-height:44px;border-radius:10px;font-size:14px;cursor:pointer}
+.combobox-list li:hover{background:var(--surface-soft)}
+.combobox-list li.highlight{background:var(--primary-soft);color:var(--primary-deep)}
+.combobox-list li[aria-selected="true"]{background:var(--primary-soft)}
+
+/* Frequent corridors: one tap instead of two pickers. Real geography, so the
+   label is a route rather than a claim about a timetable. */
+.corridor-pills{display:flex;flex-direction:column;gap:9px}
+.corridor-pill-row{display:flex;flex-wrap:wrap;gap:8px}
+.corridor-pill{
+  border:1px solid var(--border-soft);background:var(--surface-raised);color:var(--text);border-radius:var(--radius-pill);
+  padding:9px 14px;min-height:44px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;
+  display:inline-flex;align-items:center;gap:7px;
+  transition:border-color var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease),background var(--dur-fast) var(--ease)
+}
+.corridor-pill:hover{border-color:var(--primary);background:var(--primary-soft);color:var(--primary-deep)}
+.corridor-pill svg{color:var(--primary)}
+/* Grid cells are as wide as the column; the pill inside is as wide as its
+   text. A corridor chip stretched to 380px reads as a form field. */
+.corridor-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;justify-items:start}
+
+/* ── Service cards ─────────────────────────────────────────────────────────
+   Image, title, one sentence, one action. No badges, no statistics, no second
+   paragraph: the point of these is to be a picture with a door in it. */
+.service-grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(268px,1fr))}
+.service-card{
+  display:flex;flex-direction:column;background:var(--surface-raised);border:1px solid var(--border-soft);
+  border-radius:var(--radius-card);overflow:hidden;box-shadow:var(--shadow-card);
+  transition:transform var(--dur) var(--ease),box-shadow var(--dur) var(--ease),border-color var(--dur) var(--ease)
+}
+.service-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-raised);border-color:var(--border-strong)}
+.service-card-media{position:relative;aspect-ratio:16/10;overflow:hidden;background:var(--surface-mid)}
+.service-card-media img{display:block;width:100%;height:100%;object-fit:cover;transition:transform var(--dur-slow) var(--ease)}
+.service-card:hover .service-card-media img{transform:scale(1.03)}
+.service-card-body{display:flex;flex-direction:column;gap:8px;padding:20px;flex:1}
+.service-card-body h3{font-size:19px;letter-spacing:-.02em}
+.service-card-body p{font-size:14px;color:var(--text-muted);line-height:1.55;flex:1}
+.service-card-link{
+  display:inline-flex;align-items:center;gap:8px;min-height:44px;margin-top:4px;
+  font-size:14px;font-weight:800;color:var(--primary-strong);text-decoration:none;background:none;border:0;padding:0;font-family:inherit;cursor:pointer
+}
+.service-card-link:hover{color:var(--primary-deep)}
+.service-card-link svg{transition:transform var(--dur-fast) var(--ease)}
+.service-card:hover .service-card-link svg{transform:translateX(3px)}
+
+/* ── How it works ──────────────────────────────────────────────────────────
+   Four steps, no photographs, no card around each one. A numbered row on a
+   soft band, which is enough structure for four short sentences. */
+.steps-band{background:var(--surface-soft);border-radius:var(--radius-card);padding:clamp(24px,4vw,44px)}
+.how-steps{display:grid;gap:26px 20px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));counter-reset:how}
+.how-step{display:flex;flex-direction:column;gap:8px}
+.how-step .how-num{
+  width:36px;height:36px;border-radius:var(--radius-pill);background:var(--surface-raised);color:var(--primary-strong);
+  display:grid;place-items:center;font-size:14px;font-weight:800;border:1px solid var(--border-soft)
+}
+.how-step strong{font-size:16px;letter-spacing:-.01em}
+.how-step p{font-size:13.5px;color:var(--text-muted);line-height:1.55}
+
+/* ── Feature band (live tracking, professional) ────────────────────────────
+   image | copy, or copy | image. One photograph per band, and never the same
+   photograph as a service card on the same page. */
+.feature-band{display:grid;gap:0;grid-template-columns:1fr;background:var(--surface-raised);border:1px solid var(--border-soft);border-radius:var(--radius-card);overflow:hidden;box-shadow:var(--shadow-card)}
+.feature-band-media{position:relative;min-height:260px;background:var(--surface-mid)}
+.feature-band-media img{display:block;width:100%;height:100%;object-fit:cover;min-height:260px}
+.feature-band-copy{display:flex;flex-direction:column;gap:14px;padding:clamp(24px,4vw,44px);justify-content:center}
+.feature-band-copy p{color:var(--text-muted);font-size:15px;max-width:48ch}
+@media(min-width:860px){
+  .feature-band{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .feature-band.media-right .feature-band-media{order:2}
+  .feature-band-media,.feature-band-media img{min-height:380px}
+}
+.feature-band.is-dark{background:var(--navy-2);border-color:transparent;color:#fff}
+.feature-band.is-dark .feature-band-copy p{color:rgba(255,255,255,.8)}
+
+/* ── Public entry bands for parcels and corridors ─────────────────────────── */
+.page-head{display:flex;flex-direction:column;gap:12px;max-width:var(--measure)}
+.page-head h1{font-size:clamp(27px,3.6vw,40px)}
+.page-head p{color:var(--text-muted);font-size:15px}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SEARCH RESULTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+.search-summary h2{font-size:20px;letter-spacing:-.02em}
+.results-summary{padding-bottom:14px}
+.filter-chips{display:flex;gap:8px;flex-wrap:wrap}
+/* Two rows, not four: how the list is ordered, then what is in it. The count
+   belongs to the chips it describes rather than floating on a line of its own. */
+.results-controls{display:flex;flex-direction:column;gap:12px;align-items:stretch}
+.results-sort{flex-direction:row;align-items:center;gap:10px}
+.results-sort .control{width:auto;min-width:170px;flex:0 1 auto}
+.results-filters{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center}
+.results-count{margin-left:auto}
+@media(max-width:640px){.results-count{margin-left:0;width:100%}}
+.chip{
+  border:1px solid var(--border-soft);background:var(--surface-raised);border-radius:var(--radius-pill);
+  padding:8px 13px;min-height:44px;font:inherit;font-size:12.5px;font-weight:700;color:var(--text-muted);cursor:pointer;
+  display:inline-flex;align-items:center;gap:7px;
+}
+.chip.active{background:var(--primary-soft);color:var(--primary-deep);border-color:var(--primary)}
+.list-map-toggle{display:flex;gap:8px}
+.journey-results-grid{display:grid;grid-template-columns:1fr;gap:16px}
+.journey-map-col{display:none}
+
+/* The offer card: times first, then the two places, then the fare. One
+   prominent action. Everything else — operator, vehicle, reputation — is
+   quieter than the three facts a passenger is actually comparing. */
+.offer-card{display:flex;flex-direction:column;gap:14px;min-width:0;cursor:pointer;padding:18px;
+  transition:transform var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease)}
+.offer-card:hover,.offer-card.selected{transform:translateY(-1px);border-color:rgba(177,95,0,.4);box-shadow:var(--shadow-raised)}
+.offer-card.compact{padding:14px}
+.offer-head{align-items:flex-start}
+.offer-head-end{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.offer-operator{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-muted);flex-wrap:wrap}
+.offer-operator strong{color:var(--text);font-size:13px;font-weight:800}
+.offer-journey{display:flex;flex-direction:column;gap:8px;background:var(--surface-soft);border-radius:var(--radius-block);padding:14px}
+.offer-line{display:grid;grid-template-columns:12px 1fr;gap:10px;align-items:start}
+.offer-line strong{font-size:14px}
+.offer-line .small{margin-left:8px}
+.offer-dot{width:10px;height:10px;border-radius:50%;background:var(--primary);margin-top:5px}
+.offer-dot.start{background:var(--green)}
+.offer-dot.end{background:var(--navy)}
+.offer-rail{width:2px;height:10px;background:var(--border-strong);margin:0 4px;border-radius:var(--radius-pill)}
+.trip-times{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.trip-times strong{font-size:22px;letter-spacing:-.025em}
+.trip-times .arrow{color:var(--text-muted)}
+.trip-duration{font-size:11.5px;font-weight:700;color:var(--text-muted);background:var(--surface-soft);border-radius:var(--radius-pill);padding:4px 9px}
 .trip-leg{display:grid;grid-template-columns:14px 1fr;gap:10px;align-items:start}
 .trip-dot{width:10px;height:10px;border-radius:50%;background:var(--primary);margin-top:5px}
 .trip-dot.end{background:var(--navy)}
-.trip-rail{width:2px;background:#d7deea;margin:0 auto;height:100%;min-height:14px}
-.trip-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:12px}
-.trip-price{font-size:21px;font-weight:800;color:var(--primary-strong);line-height:1}
-
-/* ── Step flow (booking, shipment) ───────────────────────────────────────── */
-.steps{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;font-weight:800}
-.steps .step{display:flex;align-items:center;gap:6px;color:var(--muted)}
-.steps .step .num{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--soft);color:var(--muted);font-size:10px}
-.steps .step.active{color:var(--navy)}.steps .step.active .num{background:var(--primary-strong);color:#fff}
-.steps .step.done{color:var(--green)}.steps .step.done .num{background:var(--green-soft);color:var(--green)}
-/* --primary-strong, not --primary: white on var(--primary) is 3.18:1 and the step
-   number is 10px, so it needed 4.5:1. var(--primary-strong) gives 4.77:1 and is the token
-   every other white-on-amber surface already uses. The separator was #cbd5e1
-   at 1.48:1 — present in the DOM, invisible on screen, which is the worst of
-   both. */
-.steps .sep{color:var(--muted)}
-
-/* ── Summary rail kept visible through a flow ─────────────────────────────── */
-.summary{background:var(--soft);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:6px}
-.summary .row{display:flex;justify-content:space-between;gap:12px;font-size:12px}
-.summary .row span:first-child{color:var(--muted);font-weight:700}
-.summary .row span:last-child{font-weight:700;text-align:right}
-
-/* ── Ticket ───────────────────────────────────────────────────────────────
-   The QR is the point of the screen: it leads, it is not hidden behind a tap. */
-.ticket-qr{display:grid;place-items:center;gap:10px;background:#fff;border-radius:16px;padding:16px;border:1px solid var(--line)}
-.ticket-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;font-weight:800;letter-spacing:1px}
-.ticket-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
-.ticket-grid>div>span{display:block;font-size:10.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
-.ticket-grid>div>strong{font-size:14px}
-
-/* ── Operational hero for crew ────────────────────────────────────────────
-   Big, glanceable, low-density: readable at a stop, one-handed. */
-.duty{display:flex;flex-direction:column;gap:12px}
-.duty-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.duty-time{font-size:30px;font-weight:800;letter-spacing:-1px;line-height:1}
-.duty-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-.duty-metric{background:rgba(255,255,255,.12);border-radius:13px;padding:10px;text-align:center}
-.duty-metric strong{display:block;font-size:19px;line-height:1.2}
-.duty-metric span{font-size:10px;font-weight:700;opacity:.85}
-.big-actions{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
-.big-actions .btn{min-height:62px;font-size:14px}
-
-/* ── Setup checklist ──────────────────────────────────────────────────────── */
-.checklist{display:flex;flex-direction:column;gap:8px}
-.checklist button{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left;border:1px solid var(--line);border-radius:13px;padding:12px;background:#fff;font:inherit;font-size:12.5px;font-weight:700;color:var(--navy);cursor:pointer}
-.checklist button.done{background:var(--green-soft);border-color:#c9f0df;color:#065f46}
-.checklist button:disabled{cursor:default}
-.checklist .idx{width:24px;height:24px;border-radius:50%;background:var(--soft);display:grid;place-items:center;font-size:11px;font-weight:800;flex:0 0 auto}
-.checklist button.done .idx{background:#fff;color:var(--green)}
-
-/* ── Safe areas / standalone PWA ──────────────────────────────────────────── */
-.lr-main{padding-left:max(18px,env(safe-area-inset-left));padding-right:max(18px,env(safe-area-inset-right))}
-@media(display-mode:standalone){.lr-header{padding-top:env(safe-area-inset-top)}}
-
-/* Keep real stop names and ticket identifiers inside narrow mobile layouts. */
-.search-panel{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
-.search-place,.manifest-row>div{min-width:0}
-.search-place select,input.control,textarea.control{width:100%;max-width:100%;box-sizing:border-box}
-.search-place select{text-overflow:ellipsis}
-.manifest-row{grid-template-columns:48px minmax(0,1fr) auto;overflow-wrap:anywhere}
-.ticket-body{overflow-wrap:anywhere}
-button:disabled{opacity:.55;cursor:not-allowed}
-
-/* ── Transport map ────────────────────────────────────────────────────────
-   Leaflet supplies its own stylesheet; these rules only fit it into the
-   LeRoutier surface and style the vehicle marker. */
-.lr-map{border-radius:16px;overflow:hidden;border:1px solid var(--line);background:var(--soft)}
-.lr-map .leaflet-container{font:inherit;background:var(--soft)}
+.trip-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-top:1px solid var(--border-soft);padding-top:14px}
+.trip-price{font-size:24px;font-weight:800;color:var(--primary-strong);line-height:1;letter-spacing:-.02em}
+.trip-card{display:flex;flex-direction:column;gap:12px}
+.offer-pager{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.offer-pager-dot{width:32px;height:32px;border-radius:50%;border:10px solid var(--border-soft);background:var(--surface-raised);background-clip:padding-box;cursor:pointer;padding:0}
+.offer-pager-dot.active{background:var(--primary);border-color:var(--primary)}
+.map-preview{position:relative}
+.map-preview .lr-map{border-radius:var(--radius-card);overflow:hidden}
+.map-preview-btn{position:absolute;right:10px;top:10px;z-index:500;box-shadow:var(--shadow-card)}
+.map-full{position:relative}
+.lr-map{border-radius:var(--radius-block);overflow:hidden;border:1px solid var(--border-soft);background:var(--surface-soft)}
+.lr-map .leaflet-container{font:inherit;background:var(--surface-soft)}
 .lr-map .leaflet-control-attribution{font-size:10px;background:rgba(255,255,255,.85)}
 .lr-vehicle-marker span{display:block;width:22px;height:22px;border-radius:50%;background:var(--primary);border:3px solid #fff;box-shadow:0 2px 8px rgba(15,23,42,.35)}
-.journey-step.active{background:var(--primary-soft);border-color:#ffdfba}
+.map-placeholder{height:190px;border-radius:var(--radius-block);background:linear-gradient(135deg,#dbeafe,#dcfce7);position:relative;overflow:hidden}
+.map-pin{position:absolute;left:58%;top:43%;width:18px;height:18px;border-radius:50% 50% 50% 0;background:var(--primary);transform:rotate(-45deg);box-shadow:0 4px 10px rgba(0,0,0,.18)}
+.map-pin:after{content:'';position:absolute;width:7px;height:7px;border-radius:50%;background:#fff;left:5px;top:5px}
 
-/* ── About page ─────────────────────────────────────────────────────────── */
-.about-hero{width:100%;height:auto;border-radius:16px;display:block}
-.about-section{min-width:0;overflow-wrap:anywhere}
-.about-section ul{padding-left:1.25rem;margin:0;display:flex;flex-direction:column;gap:6px}
-.about-section li{min-width:0}
-
-/* ── Assistant ────────────────────────────────────────────────────────────
-   Opened from the footer "Assistant" link; no floating element, so the
-   mobile navigation is never covered. */
-.footer-link{background:none;border:none;padding:0;margin:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer}
-.footer-link:hover{opacity:.75}
-.assistant-panel{position:fixed;right:max(12px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));
-  z-index:70;width:min(380px,calc(100vw - 24px));max-height:min(560px,calc(100vh - 24px));
-  background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 16px 48px rgba(15,23,42,.28);
-  display:flex;flex-direction:column;overflow:hidden}
-.assistant-panel header{padding:12px 14px;border-bottom:1px solid var(--line)}
-.assistant-panel h2{font-size:15px;margin:0}
-.assistant-thread{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
-.assistant-msg{max-width:85%;padding:9px 12px;border-radius:14px;background:var(--soft);font-size:14px;line-height:1.45}
-.assistant-msg.user{align-self:flex-end;background:var(--primary);color:#fff}
-.assistant-msg .small{margin-bottom:3px;display:block}
-.assistant-msg p{margin:0}
-.assistant-chips{display:flex;flex-wrap:wrap;gap:8px}
-.assistant-chips .chip{background:var(--primary-soft);border:1px solid var(--line);border-radius:999px;padding:6px 12px;
-  font-size:13px;color:var(--text);cursor:pointer}
-.assistant-chips .chip:hover{border-color:var(--primary)}
-.assistant-input{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line)}
-.assistant-input .control{flex:1}
-@media(max-width:640px){.assistant-panel{right:10px;left:10px;width:auto;bottom:10px}}
-
-/* ── Account avatar & menu ─────────────────────────────────────────────── */
-.avatar-btn{border:none;background:var(--primary-soft);border-radius:50%;width:34px;height:34px;
-  display:grid;place-items:center;color:var(--primary);cursor:pointer}
-.avatar{background:#9a3412;color:#fff;border-radius:50%;width:34px;height:34px;display:grid;
-  place-items:center;font-size:13px;font-weight:700;letter-spacing:.02em}
-.account-menu-wrap{position:relative}
-.account-menu{position:absolute;right:0;top:42px;z-index:60;background:var(--surface);border:1px solid var(--line);
-  border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,.25);min-width:220px;display:flex;flex-direction:column;padding:6px}
-.account-menu button{display:flex;gap:8px;align-items:center;background:none;border:none;padding:9px 12px;border-radius:8px;
-  font-size:14px;text-align:left;cursor:pointer;color:var(--text)}
-.account-menu button:hover{background:var(--soft)}
-
-/* ── Place autocomplete combobox ───────────────────────────────────────── */
-.endpoint-cell{display:flex;flex-direction:column;gap:8px;min-width:0}
-.place-combobox{position:relative;min-width:0;display:flex;flex-direction:column;gap:4px}
-.combobox-control{display:flex;flex-direction:column;gap:4px}
-.combobox-chip{background:var(--primary-soft);border:1px solid var(--line);border-radius:999px;padding:8px 14px;
-  font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;justify-content:space-between}
-.combobox-chip:hover{border-color:var(--primary)}
-.combobox-list{position:absolute;z-index:50;top:calc(100% + 4px);left:0;right:0;max-height:230px;overflow-y:auto;
-  background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,.25);
-  list-style:none;margin:0;padding:4px}
-.combobox-list li{padding:9px 12px;border-radius:8px;font-size:14px;cursor:pointer}
-.combobox-list li:hover{background:var(--soft)}
-.combobox-list li.highlight{background:var(--soft)}
-.combobox-list li[aria-selected="true"]{background:var(--primary-soft)}
-
-/* ── Journey results: offers + map ─────────────────────────────────────── */
-.journey-results-grid{display:grid;grid-template-columns:1fr;gap:16px}
-.journey-map-col{display:none}
-.results-summary{padding-bottom:12px}
-.search-summary h2{font-size:20px}
-.filter-chips{display:flex;gap:8px;flex-wrap:wrap}
-.chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 12px;font:inherit;font-size:12px;
-  font-weight:700;color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
-.chip.active{background:var(--primary-soft);color:var(--primary-strong);border-color:var(--primary)}
-.list-map-toggle{display:flex;gap:8px}
-.offer-card{cursor:pointer;transition:box-shadow .15s ease,border-color .15s ease}
-.offer-card:hover,.offer-card.selected{border-color:var(--primary);box-shadow:0 10px 28px rgba(217,119,6,.14)}
-.offer-card.compact{padding:12px}
-.offer-head-end{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
-.offer-operator{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);flex-wrap:wrap}
-.offer-operator strong{color:var(--navy);font-size:13px}
-.offer-journey{display:flex;flex-direction:column;gap:6px;background:var(--soft);border-radius:13px;padding:12px}
-.offer-line{display:grid;grid-template-columns:12px 1fr;gap:10px;align-items:start}
-.offer-line .small{margin-left:8px}
-.offer-dot{width:10px;height:10px;border-radius:50%;background:var(--primary);margin-top:4px}
-.offer-dot.start{background:var(--green)}
-.offer-dot.end{background:var(--navy)}
-.offer-rail{width:2px;height:8px;background:#d7deea;margin:0 4px}
-.map-preview{position:relative}
-.map-preview .lr-map{border-radius:var(--radius);overflow:hidden}
-.map-preview-btn{position:absolute;right:10px;top:10px;z-index:500;box-shadow:var(--shadow)}
-.map-full{position:relative}
-.offer-pager{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
-.offer-pager-dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--line);background:#fff;cursor:pointer;padding:0}
-.offer-pager-dot.active{background:var(--primary);border-color:var(--primary)}
-.test-mode-banner{background:var(--red-soft);color:#93000a;border:1px solid #ffd5cf;font-weight:700}
-
-/* Offer details: a full-screen drawer on mobile, centred panel on desktop. */
-.offer-details{position:fixed;inset:0;z-index:80;background:var(--surface);padding:18px;overflow-y:auto}
-.offer-details-test{display:flex;align-items:center;gap:10px;background:var(--red-soft);border-radius:12px;padding:10px 12px}
-.journey-steps{display:flex;flex-direction:column;gap:8px}
-.journey-step{display:flex;align-items:center;gap:12px;padding:9px 12px;background:var(--soft);border-radius:11px}
-.journey-step strong.small{min-width:44px;color:var(--primary-strong)}
-
-/* Checkout */
-.checkout-summary h2{font-size:18px}
-.checkout-total{border-top:1px solid var(--line);padding-top:10px;font-weight:800;font-size:15px}
-
-@media(min-width:980px){
-  .journey-results-grid{grid-template-columns:1fr 420px;align-items:start}
-  .journey-map-col{display:block;position:sticky;top:96px}
-  .offer-details{inset:10% 20%;border-radius:var(--radius);box-shadow:var(--shadow);padding:24px}
-}
-
-.offer-card{display:flex;flex-direction:column;gap:12px;min-width:0}
-.demo-profiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
-.demo-profiles .btn{justify-content:flex-start;text-align:left;min-height:48px}
-.lr-bottom-nav{justify-content:safe center;overflow-x:auto}
-summary{cursor:pointer;min-height:44px;padding-block:10px}
-.avatar-btn,.avatar{width:44px;height:44px}
-.icon-btn,.chip,.combobox-chip,.account-menu button,.workspace-menu button{min-height:44px}
-.offer-pager-dot{width:32px;height:32px;border-width:10px;background-clip:padding-box}
-.qr-video[hidden]{display:none}
-.qr-video{width:100%;max-height:55dvh;object-fit:cover;border-radius:16px}
-.manifest-row>div{min-width:0;overflow-wrap:anywhere}
-@media(max-width:640px){.workspace-switch{max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lr-header-main{gap:8px}.big-actions{grid-template-columns:1fr}.controls>.btn{min-height:48px}}
-@media(max-width:640px){.lr-header-actions>.badge{display:none}.lr-logo{width:100px}.lr-brand-wrap{flex-shrink:0}.lr-header-actions{min-width:0;gap:6px}.workspace-switch{max-width:120px;min-height:44px}.lr-header-main{padding-inline:12px}}
-.offer-details{border:0;width:100%;max-width:none;max-height:100%;margin:0;color:var(--navy)}
+/* Offer details: a full-screen sheet on a phone, a centred panel on a
+   desktop. Native <dialog>, so focus trapping and Escape come from the
+   platform rather than from a hand-written listener. */
+.offer-details{border:0;width:100%;max-width:none;max-height:100%;margin:0;padding:18px;color:var(--text);background:var(--surface)}
 .offer-details[open]{display:flex;flex-direction:column;gap:16px}
 .offer-details::backdrop{background:rgba(15,23,42,.5)}
-@media(min-width:980px){.journey-results-grid{grid-template-columns:minmax(0,1fr) minmax(280px,40%)}.map-preview,.list-map-toggle{display:none}.offer-details{width:60%;height:80%}}
-/* Documents live in a native modal: focus stays inside, Escape closes it,
-   and printing isolates the selected document from every workspace. */
-.document-dialog{width:min(900px,calc(100% - 20px));max-height:94dvh;padding:0;border:1px solid var(--line);border-radius:18px;color:var(--navy);background:var(--surface)}
+.offer-details-head{position:sticky;top:0;z-index:3;background:rgba(255,255,255,.96);padding-bottom:10px}
+.offer-details-test{display:flex;align-items:center;gap:10px;background:var(--red-soft);border-radius:var(--radius-control);padding:10px 12px}
+.journey-steps{display:flex;flex-direction:column;gap:8px}
+.journey-step{display:flex;align-items:center;gap:12px;padding:11px 13px;background:var(--surface-soft);border-radius:12px}
+.journey-step strong.small{min-width:46px;color:var(--primary-strong)}
+.journey-step.active{background:var(--primary-soft)}
+.journey-step.advice{background:#fff5e8}
+.journey-step.done{background:var(--green-soft)}
+.journey-step.cancelled{background:var(--surface-soft);color:var(--text-muted)}
+.journey-step svg{flex:none}
+@media(min-width:980px){
+  .journey-results-grid{grid-template-columns:minmax(0,1fr) minmax(300px,38%);align-items:start}
+  .journey-map-col{display:block;position:sticky;top:96px}
+  .offer-details{width:60%;height:80%;margin:auto;border-radius:var(--radius-card);box-shadow:var(--shadow-raised);padding:24px}
+}
+/* The results bar is sticky on a wide screen, so anything scrolled to the top
+   comes to rest under it — including a Choisir button, which then cannot be
+   tapped. scroll-margin parks each card below it. */
+.offer-card,.offer-card .controls{scroll-margin-top:128px;scroll-margin-bottom:104px}
+@media(min-width:980px){.results-summary{position:sticky;top:88px;z-index:8;background:rgba(248,249,252,.95);backdrop-filter:blur(14px)}}
+@media(max-width:979px){
+  /* No sticky bar on a phone: an offer card is taller than the band left
+     between a sticky header and the bottom of the screen, so the action could
+     come to rest under one of them and simply not be tappable. */
+  .results-summary{position:static}
+  .offer-card,.offer-card .controls{scroll-margin-top:96px;scroll-margin-bottom:104px}
+  .offer-card .controls{width:100%}
+  .offer-card .controls .btn{flex:1}
+  .trip-foot{flex-direction:column;align-items:stretch;gap:12px}
+  .trip-price{align-self:flex-end}
+}
+
+/* ── Tickets, QR, journey timeline ─────────────────────────────────────────
+   The QR is the point of the ticket screen: it leads, it is not behind a tap. */
+.ticket{overflow:hidden;padding:0;border-radius:var(--radius-card)}
+.ticket-head{background:linear-gradient(120deg,var(--primary-strong),var(--primary-deep));color:#fff;padding:20px}
+.ticket-head .small,.ticket-head .muted{color:rgba(255,255,255,.85)}
+.ticket-body{padding:20px;overflow-wrap:anywhere}
+.ticket-qr{display:grid;place-items:center;gap:12px;background:var(--surface-raised);border-radius:var(--radius-block);padding:18px;border:1px solid var(--border-soft)}
+.ticket-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;font-weight:800;letter-spacing:1px}
+.ticket-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:12px}
+.ticket-grid>div>span{display:block;font-size:10.5px;font-weight:800;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
+.ticket-grid>div>strong{font-size:14.5px}
+.qr{width:170px;height:170px;margin:4px auto;background:repeating-conic-gradient(#111 0 25%,#fff 0 50%) 50%/18px 18px;border:14px solid #fff;outline:1px solid var(--border-soft)}
+.qr-canvas{display:grid;place-items:center;background:#fff;border-radius:var(--radius-block);padding:12px;border:1px solid var(--border-soft)}
+.qr-video{width:100%;max-height:55dvh;object-fit:cover;border-radius:var(--radius-block);background:#111}
+.qr-video[hidden]{display:none}
+.timeline{position:relative;padding-left:26px;display:flex;flex-direction:column;gap:20px}
+.timeline:before{content:'';position:absolute;left:8px;top:8px;bottom:8px;width:3px;border-radius:var(--radius-pill);background:linear-gradient(var(--green) 0 38%,var(--border-strong) 38% 100%)}
+.stop{position:relative}
+.stop:before{content:'';position:absolute;left:-24px;top:4px;width:12px;height:12px;border-radius:50%;background:#94a3b8;box-shadow:0 0 0 4px var(--surface-raised)}
+.stop.done:before{background:var(--green)}
+.stop.active:before{background:var(--primary);box-shadow:0 0 0 5px var(--primary-soft)}
+.progress{height:8px;background:var(--surface-mid);border-radius:var(--radius-pill);overflow:hidden}
+.progress>span{height:100%;display:block;background:var(--primary);border-radius:var(--radius-pill)}
+.note-row{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start;padding:13px;border-radius:var(--radius-control);background:var(--surface-raised);border:1px solid var(--border-soft);width:100%;text-align:left;font:inherit;cursor:pointer}
+.note-row.unread{border-color:var(--primary);background:var(--primary-soft)}
+.note-row.urgent{border-color:#ffb4a8}
+.profile-block{display:flex;align-items:center;gap:14px}
+.profile-avatar{width:66px;height:66px;border-radius:50%;background:linear-gradient(140deg,var(--primary-strong),var(--primary-deep));display:grid;place-items:center;font-weight:800;color:#fff;font-size:19px;flex:none}
+.wallet{background:linear-gradient(140deg,var(--navy),var(--navy-2));color:#fff;border-color:transparent}
+.track{height:3px;background:var(--border-strong);border-radius:var(--radius-pill);position:relative;margin:6px 0}
+.track:before,.track:after{content:'';position:absolute;top:50%;transform:translateY(-50%);width:9px;height:9px;border-radius:50%;background:var(--primary)}
+.track:before{left:0}.track:after{right:0}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PARCELS — the same system, one photograph at the entrance only
+   ═══════════════════════════════════════════════════════════════════════════ */
+.parcel-stitch-shell{display:flex;flex-direction:column;gap:clamp(26px,3.6vw,44px);max-width:1000px;margin:0 auto;width:100%}
+.parcel-hero{display:grid;grid-template-columns:1fr;gap:0;background:var(--surface-raised);border:1px solid var(--border-soft);border-radius:var(--radius-card);overflow:hidden;box-shadow:var(--shadow-card)}
+.parcel-hero-copy{display:flex;flex-direction:column;gap:12px;padding:clamp(24px,4vw,40px);justify-content:center}
+.parcel-hero-copy h1{font-size:clamp(26px,3.4vw,38px)}
+.parcel-hero-copy p{color:var(--text-muted);font-size:15px;max-width:48ch}
+.parcel-kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.09em;color:var(--green)}
+.parcel-live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(0,105,72,.14)}
+.parcel-hero-media{position:relative;min-height:250px;background:var(--surface-mid)}
+.parcel-hero-media img{display:block;width:100%;height:100%;object-fit:cover;min-height:250px}
+@media(min-width:820px){.parcel-hero{grid-template-columns:minmax(0,1.05fr) minmax(0,1fr)}.parcel-hero-media img{min-height:340px}}
+.parcel-mode-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:5px;border-radius:var(--radius-pill);background:var(--surface-soft);max-width:460px}
+.parcel-mode-tabs button{border:0;background:transparent;color:var(--text-muted);min-height:44px;border-radius:var(--radius-pill);display:flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer}
+.parcel-mode-tabs button.active{background:var(--surface-raised);color:var(--primary-strong);box-shadow:var(--shadow-card)}
+.parcel-assurances{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.parcel-assurance{display:flex;gap:11px;align-items:flex-start;background:var(--surface-raised);border:1px solid var(--border-soft);border-radius:var(--radius-block);padding:15px}
+.parcel-assurance-icon{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex:none;background:var(--primary-soft);color:var(--primary-strong)}
+.parcel-assurance strong{display:block;font-size:13.5px;margin-bottom:3px}
+.parcel-assurance span:not(.parcel-assurance-icon){display:block;font-size:12.5px;line-height:1.45;color:var(--text-muted)}
+.parcel-task-surface{display:flex;flex-direction:column;gap:var(--block-gap)}
+@media(max-width:820px){.parcel-assurances{grid-template-columns:1fr}}
+
+/* ── Operator trust, reputation, vehicle identity ─────────────────────────── */
+.independent-trust{display:flex;gap:12px;align-items:center;padding:13px;border:1px solid var(--border-soft);border-radius:var(--radius-block);background:var(--surface-raised)}
+.independent-trust.compact{padding:10px}
+.driver-photo{width:64px;height:64px;border-radius:var(--radius-block);object-fit:cover;flex:0 0 64px;background:var(--surface-soft)}
+.driver-photo.placeholder{display:grid;place-items:center;color:var(--text-muted)}
+.driver-trust-copy{display:grid;gap:4px;min-width:0;flex:1}
+.vehicle-identity{display:flex;align-items:center;gap:6px;font-size:13.5px;line-height:1.3}
+.vehicle-registration{font-size:14px;letter-spacing:.04em;overflow-wrap:anywhere}
+.independent-detail{margin-top:10px}
+.vehicle-photo{width:100%;max-height:260px;object-fit:cover;border-radius:var(--radius-block);border:1px solid var(--border-soft)}
+.offer-operator-block{display:flex;flex-direction:column;gap:4px}
+.offer-operator-block .vehicle-identity{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.offer-trust{gap:8px;margin-top:2px}
+.offer-rating{display:inline-flex;align-items:center;gap:5px;color:var(--primary-strong);font-size:12.5px}
+.offer-rating strong{font-size:14px}
+.offer-amenities{display:flex;flex-wrap:wrap;gap:5px}
+.amenity-tag{border:1px solid var(--border-soft);border-radius:7px;padding:3px 7px;font-size:11px;font-weight:700;color:var(--text-muted);background:var(--surface-raised)}
+.amenity-tag.more{border-style:dashed}
+@media(max-width:540px){.independent-trust{align-items:flex-start}.driver-photo{width:56px;height:56px;flex-basis:56px}.vehicle-registration{font-size:13px}}
+
+/* The insurance add-on. Deliberately quieter than the fare it sits beside: an
+   option that shouts louder than the thing being bought is an upsell. */
+.insurance-offer{border-style:dashed}
+.insurance-options{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.insurance-option{display:flex;flex-direction:column;gap:6px;text-align:left;cursor:pointer;border:1px solid var(--border-soft);border-radius:var(--radius-block);padding:14px;background:var(--surface-raised);font:inherit;color:var(--text)}
+.insurance-option:disabled{opacity:.6;cursor:default}
+.insurance-option.chosen{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-soft)}
+.insurance-option-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.insurance-option small{font-size:11.5px;line-height:1.45;color:var(--text-muted)}
+.insurance-premium{font-weight:800;color:var(--primary-strong);white-space:nowrap}
+.referral-block{margin:0;padding:13px;border-radius:var(--radius-control);background:var(--surface-soft);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;white-space:pre-wrap;word-break:break-word}
+
+/* Checkout. */
+.checkout-summary h2{font-size:18px}
+.checkout-total{border-top:1px solid var(--border-soft);padding-top:12px;font-weight:800;font-size:16px}
+.steps{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11.5px;font-weight:800}
+.steps .step{display:flex;align-items:center;gap:6px;color:var(--text-muted)}
+.steps .step .num{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--surface-soft);color:var(--text-muted);font-size:10.5px}
+.steps .step.active{color:var(--text)}
+/* White on the primary needs 4.5:1 at this size; --primary is 3.18:1. */
+.steps .step.active .num{background:var(--primary-strong);color:#fff}
+.steps .step.done{color:var(--green)}
+.steps .step.done .num{background:var(--green-soft);color:var(--green)}
+.steps .sep{color:var(--text-muted)}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OPERATIONAL SURFACES — driver, convoyeur, operator, platform ops
+
+   Denser than the passenger surface on purpose, and calmer than it was: the
+   information stays, the decoration goes. No photographs anywhere here.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The duty card: what a driver reads at a stop, one-handed, in sunlight. */
+.duty{display:flex;flex-direction:column;gap:14px;border-radius:var(--radius-card);padding:22px;position:relative;overflow:hidden}
+.duty-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;position:relative;z-index:1}
+.duty-time{font-size:clamp(30px,5vw,38px);font-weight:800;letter-spacing:-.04em;line-height:1;margin:6px 0}
+.duty-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:14px 0 6px;position:relative;z-index:1}
+.duty-metric{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.1);border-radius:var(--radius-control);padding:11px;text-align:center;display:flex;flex-direction:column;gap:2px}
+.duty-metric strong{display:block;font-size:20px;line-height:1.2}
+.duty-metric span{font-size:10.5px;font-weight:700;color:rgba(255,255,255,.8)}
+.big-actions{display:grid;gap:10px;grid-template-columns:2fr 1fr 1fr;position:relative;z-index:1}
+.big-actions .btn{min-height:60px;font-size:14.5px;border-radius:16px}
+@media(max-width:719px){
+  .big-actions{grid-template-columns:1fr 1fr}
+  .big-actions .btn:first-child{grid-column:1/-1}
+  .controls>.btn{min-height:48px}
+}
+
+/* The scanner. APPROVED — visually unchanged, and deliberately so: a driver
+   pointed a phone at a ticket and it worked, and a redesign is not a reason to
+   move a control somebody has already learned at a station. The tokens around
+   it moved; this block did not. */
+.scanner{min-height:220px;background:linear-gradient(145deg,var(--primary-strong),var(--primary-deep));color:#fff;display:flex;flex-direction:column;gap:12px;border-radius:24px;padding:20px}
+.viewfinder{width:min(48vw,178px);height:min(48vw,178px);border:3px solid rgba(255,255,255,.9);border-radius:22px;margin:auto;display:grid;place-items:center;background:rgba(15,23,42,.18);box-shadow:0 0 0 999px rgba(17,28,45,.13)}
+
+/* Lists a crew works down: passengers, cargo, seats. One row, one job. */
+.manifest-row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:12px;align-items:center;padding:13px;min-height:72px;border-radius:var(--radius-block);background:var(--surface-raised);border:1px solid var(--border-soft);overflow-wrap:anywhere}
+.manifest-row>div{min-width:0}
+.seat{width:48px;height:48px;border-radius:12px;background:var(--surface-soft);display:flex;flex-direction:column;align-items:center;justify-content:center}
+.seat small{font-size:9px;color:var(--text-muted)}
+.seat strong{color:var(--primary-strong)}
+.seat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:8px}
+.seat-grid .seat{width:auto;min-height:46px;border:1px solid var(--border-soft);background:var(--surface-raised);color:var(--text);font:inherit;font-size:13px;font-weight:800;cursor:pointer}
+.seat-grid .seat:hover:not(:disabled){border-color:var(--primary)}
+.seat-grid .seat.chosen{background:var(--primary-strong);border-color:var(--primary-strong);color:#fff}
+.seat-grid .seat.freed:not(.chosen):not(.taken){border-style:dashed;border-color:var(--primary);color:var(--primary-strong)}
+.seat-grid .seat.taken:disabled,.seat-grid .seat:disabled{background:var(--surface-soft);color:#98a2b3;cursor:not-allowed;border-color:transparent}
+
+/* Setup checklists: a console that is not yet ready says what is missing. */
+.checklist{display:flex;flex-direction:column;gap:8px}
+.checklist button{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left;border:1px solid var(--border-soft);border-radius:var(--radius-control);padding:13px;background:var(--surface-raised);font:inherit;font-size:13px;font-weight:700;color:var(--text);cursor:pointer;min-height:48px}
+.checklist button.done{background:var(--green-soft);border-color:#c9f0df;color:#065f46}
+.checklist button:disabled{cursor:default}
+.checklist .idx{width:26px;height:26px;border-radius:50%;background:var(--surface-soft);display:grid;place-items:center;font-size:11px;font-weight:800;flex:0 0 auto}
+.checklist button.done .idx{background:#fff;color:var(--green)}
+
+/* Incident reporting from the road. Tiles are large: operated with a thumb,
+   possibly in sunlight, by someone who has just stopped. Severity is carried
+   by colour AND by the label, never by colour alone. */
+.incident-open{width:100%;min-height:54px;font-size:14px}
+.incident-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.incident-tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:96px;padding:12px 10px;border-radius:var(--radius-block);border:1px solid var(--border-soft);background:var(--surface-raised);color:var(--text);font:inherit;font-size:12.5px;font-weight:700;text-align:center;cursor:pointer}
+.incident-tile:active{transform:scale(.98)}
+.incident-icon{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:#fff}
+.incident-tile.sev-high .incident-icon{background:var(--red)}
+.incident-tile.sev-medium .incident-icon{background:var(--primary-strong)}
+.incident-tile.sev-low .incident-icon{background:var(--navy-2)}
+@media(min-width:720px){.incident-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.incident-sheet{display:flex;flex-direction:column;gap:14px}
+
+/* Consoles: a table is a table. The redesign removed the card-per-row
+   treatment where a list of twelve identical rows became twelve shadows. */
+.console-table{width:100%;border-collapse:collapse;font-size:13px}
+.console-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);padding:10px 12px;border-bottom:1px solid var(--border-soft);font-weight:800}
+.console-table td{padding:12px;border-bottom:1px solid var(--border-soft);vertical-align:middle}
+.console-table tr:last-child td{border-bottom:0}
+
+/* ── Documents ─────────────────────────────────────────────────────────────
+   Live in a native modal: focus stays inside, Escape closes it, and printing
+   isolates the selected document from every workspace. */
+.document-dialog{width:min(900px,calc(100% - 20px));max-height:94dvh;padding:0;border:1px solid var(--border-soft);border-radius:var(--radius-card);color:var(--text);background:var(--surface)}
 .document-dialog::backdrop{background:rgba(15,23,42,.65)}
-.document-toolbar{position:sticky;top:0;z-index:2;background:var(--surface);padding:16px;border-bottom:1px solid var(--line)}
+.document-toolbar{position:sticky;top:0;z-index:2;background:var(--surface);padding:16px;border-bottom:1px solid var(--border-soft)}
 .document-toolbar .btn{min-height:44px}
-.lr-document{margin:20px;background:white;padding:32px;border:1px solid var(--line);line-height:1.55;overflow-wrap:anywhere}
+.lr-document{margin:20px;background:#fff;padding:32px;border:1px solid var(--border-soft);line-height:1.55;overflow-wrap:anywhere}
 .document-brand{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid var(--primary);padding-bottom:14px;gap:12px}
-.document-brand svg{width:175px;max-width:65%;height:auto}.document-brand span{font-size:12px}
-.document-heading{padding:22px 0}.document-heading h1{font-size:clamp(23px,4vw,34px);margin:8px 0}.document-heading>strong{color:var(--primary-strong)}
-.document-reference{background:#f1f5f9;padding:12px 16px;display:flex;flex-direction:column;gap:5px;font-size:12px}.document-reference strong{font-family:ui-monospace,monospace;font-size:15px;letter-spacing:.03em}
+.document-brand svg{width:175px;max-width:65%;height:auto}
+.document-brand span{font-size:12px}
+.document-heading{padding:22px 0}
+.document-heading h1{font-size:clamp(23px,4vw,34px);margin:8px 0}
+.document-heading>strong{color:var(--primary-strong)}
+.document-reference{background:var(--surface-soft);padding:12px 16px;display:flex;flex-direction:column;gap:5px;font-size:12px}
+.document-reference strong{font-family:ui-monospace,monospace;font-size:15px;letter-spacing:.03em}
 .document-test{background:#fff1dc;padding:10px;margin-top:12px;font-size:11px;font-weight:800}
-.document-qr{padding:22px 0;background:white;color:#0f172a}.document-qr svg{max-width:100%;height:auto}.document-qr span{font-size:12px}
-.document-sections{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:20px}.document-sections section:last-child{grid-column:1/-1}
-.document-sections h2,.document-instructions h2{font-size:15px;border-bottom:1px solid var(--line);padding-bottom:9px}
-.document-sections dl{margin:12px 0}.document-sections dl>div{padding:5px 0;break-inside:avoid}.document-sections dt{color:#475569;font-size:11px}.document-sections dd{margin:2px 0 0;font-size:13px;font-weight:600}
-.document-sticker{min-height:95px;border:1px dashed #94a3b8;padding:12px;text-align:center;font-size:11px;color:#475569;margin:16px 0}
-.document-instructions{margin-top:20px}.document-instructions ul{padding-left:18px;font-size:12px}.document-instructions li{margin:8px 0}.lr-document footer{font-size:11px;border-top:1px solid var(--line);padding-top:15px;margin-top:20px}
+.document-qr{padding:22px 0;background:#fff;color:var(--navy)}
+.document-qr svg{max-width:100%;height:auto}
+.document-qr span{font-size:12px}
+.document-sections{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:20px}
+.document-sections section:last-child{grid-column:1/-1}
+.document-sections h2,.document-instructions h2{font-size:15px;border-bottom:1px solid var(--border-soft);padding-bottom:9px}
+.document-sections dl{margin:12px 0}
+.document-sections dl>div{padding:5px 0;break-inside:avoid}
+.document-sections dt{color:var(--text-muted);font-size:11px}
+.document-sections dd{margin:2px 0 0;font-size:13px;font-weight:600}
+.document-sticker{min-height:95px;border:1px dashed #94a3b8;padding:12px;text-align:center;font-size:11px;color:var(--text-muted);margin:16px 0}
+.document-instructions{margin-top:20px}
+.document-instructions ul{padding-left:18px;font-size:12px}
+.document-instructions li{margin:8px 0}
+.lr-document footer{font-size:11px;border-top:1px solid var(--border-soft);padding-top:15px;margin-top:20px}
 @media(max-width:550px){.lr-document{margin:10px;padding:18px}.document-sections{grid-template-columns:1fr;gap:14px}.document-toolbar{position:static}.document-toolbar .controls{display:flex;flex-wrap:wrap}.document-toolbar .btn{flex:1 1 auto}.document-brand span{font-size:10px}}
-@media print{body:has(.document-dialog[open])>*:not(.document-dialog){display:none!important}.document-dialog[open]{display:block!important;position:static!important;max-height:none!important;width:100%!important;overflow:visible!important;border:0!important;margin:0!important;padding:0!important;background:#fff!important}.document-toolbar{display:none!important}.lr-document{margin:0;border:0;padding:8mm;print-color-adjust:exact}.document-dialog::backdrop{display:none}.document-sections{grid-template-columns:1fr 1fr}.document-brand,.document-reference,.document-qr,.document-sticker,.document-instructions{break-inside:avoid}}
+@media print{
+  body:has(.document-dialog[open])>*:not(.document-dialog){display:none!important}
+  .document-dialog[open]{display:block!important;position:static!important;max-height:none!important;width:100%!important;overflow:visible!important;border:0!important;margin:0!important;padding:0!important;background:#fff!important}
+  .document-toolbar{display:none!important}
+  .lr-document{margin:0;border:0;padding:8mm;print-color-adjust:exact}
+  .document-dialog::backdrop{display:none}
+  .document-sections{grid-template-columns:1fr 1fr}
+  .document-brand,.document-reference,.document-qr,.document-sticker,.document-instructions{break-inside:avoid}
+}
 @media print{
   @page{size:A4;margin:10mm}
   .lr-document{position:relative;padding:0;line-height:1.3}
@@ -279,76 +971,153 @@ summary{cursor:pointer;min-height:44px;padding-block:10px}
   .document-sticker{min-height:22mm}.lr-document footer{font-size:9px;margin-top:12px;padding-top:10px}
 }
 
-/* Forms in the platform consoles.
-   `.field` existed only inside `.trip-search`, so every console form that
-   reached for it got an unstyled label stack. It is a generic label+control
-   pair and belongs here. */
-.field{display:flex;flex-direction:column;gap:4px}
-.field>span:first-child{font-weight:700;color:var(--muted)}
-.field input,.field select,.field textarea{
-  font:inherit;font-size:13px;padding:10px 12px;border:1px solid var(--line);
-  border-radius:12px;background:#fff;color:var(--navy);min-height:44px}
-.field input:focus-visible,.field select:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
-
-/* The insurance add-on.
-   Deliberately quieter than the fare it sits beside: an option that shouts
-   louder than the thing being bought is an upsell, not an option. Each choice
-   is a radio in a radiogroup rather than a checkbox, because taking one cover
-   means not taking the other. */
-.insurance-offer{border-style:dashed}
-.insurance-options{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
-.insurance-option{display:flex;flex-direction:column;gap:5px;text-align:left;cursor:pointer;
-  border:1px solid var(--line);border-radius:16px;padding:13px;background:#fff;font:inherit;color:var(--navy)}
-.insurance-option:disabled{opacity:.6;cursor:default}
-.insurance-option.chosen{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-soft)}
-.insurance-option-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
-.insurance-option small{font-size:11px;line-height:1.45}
-.insurance-premium{font-weight:800;color:var(--primary-strong);white-space:nowrap}
-
-/* The referral block: what a coordinator copies and sends to the insurer.
-   Monospaced and selectable, because it is data being moved by hand and a
-   transposed digit in a phone number is a policy nobody can issue. */
-.referral-block{margin:0;padding:12px;border-radius:12px;background:var(--soft);
-  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
-
-/* Which page am I on.
-   `.lr-page-title` only exists at >=720px, and the role strip's label used to
-   be hidden at <=640px — so between them a phone showed the role and nothing
-   else, while a desktop showed the page name twice. Backwards on both counts:
-   the small screen is where wayfinding is scarce. The label now carries the
-   page name below 720px and steps aside above it, so exactly one is on screen
-   at every width. */
-@media(min-width:720px){.lr-role-strip small{display:none}}
-
-/* Buttons do not inherit font-family. Four of them (.lr-brand-btn, .icon-btn,
-   .avatar-btn, .swap-btn) were therefore rendering in Arial while the other
-   234 elements on the page used Plus Jakarta Sans — visible today in the
-   signed-in user's initials in the header avatar. Fixed once at the element
-   rather than four times at the class, so the next button added is correct by
-   default. Class-level font-size/weight still win: this sets family only. */
-button,input,select,textarea{font-family:inherit}
-
-/* Touch targets are fixed where each control is defined, not here: the app's
-   polish layer loads after this file and carries !important, so a rule added
-   here would lose. See .corridor-pill and .swap-btn in stitch-polish.css.
-   Footer links stay at 32px — above the WCAG 2.5.8 AA floor of 24px, and
-   inflating 27 links to 44px would add ~320px of footer for no real gain in
-   reachability. */
-
-/* Illustration inside an empty state.
-   Same treatment as .about-hero — intrinsic width/height on the <img> so the
-   box is reserved before the SVG loads and nothing shifts, then width:100% and
-   height:auto so it is fluid at every viewport. Capped and centred, because a
-   480px drawing stretched across a 1180px card stops being a small warm thing
-   and becomes the page.
-
-   The entrance is the one authored motion moment here: a short rise and fade,
-   ease-out from a visible default, so a reader who arrives with motion turned
-   off still sees a finished picture rather than an empty box. */
-.empty-illustration{
-  width:100%;max-width:340px;height:auto;display:block;margin:0 auto 2px;
-  animation:empty-illustration-in .32s cubic-bezier(.2,.7,.3,1) both;
+/* ═══════════════════════════════════════════════════════════════════════════
+   FOOTER
+   ═══════════════════════════════════════════════════════════════════════════
+   A brand column and four groups, then one legal row. Nothing is positioned
+   outside its box: a decorative element that overflows becomes real horizontal
+   scroll, which is the bug this file already caused once. */
+.site-footer{margin-top:var(--section-gap);border-top:1px solid var(--border-soft);background:var(--surface-raised)}
+.site-footer-inner{max-width:1180px;margin:0 auto;padding:clamp(34px,5vw,56px) max(var(--gutter),env(safe-area-inset-right)) 26px max(var(--gutter),env(safe-area-inset-left))}
+.site-footer-top{display:grid;gap:32px 24px;grid-template-columns:1fr}
+@media(min-width:600px){.site-footer-top{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(min-width:1000px){.site-footer-top{grid-template-columns:minmax(250px,1.5fr) repeat(4,minmax(0,1fr))}}
+.site-footer-brand{display:flex;flex-direction:column;gap:12px;max-width:340px}
+@media(min-width:600px){.site-footer-brand{grid-column:1/-1}}
+@media(min-width:1000px){.site-footer-brand{grid-column:auto}}
+.site-footer-brand .lr-logo{width:168px}
+.site-footer-brand p{font-size:13px;color:var(--text-muted);line-height:1.55}
+.site-footer-group h2,.site-footer-corridors h2{font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.09em;color:var(--text-muted);margin:0 0 12px}
+.site-footer-group ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.site-footer-group a{display:inline-flex;align-items:center;min-height:36px;color:var(--text);font-size:13.5px;text-decoration:none}
+.site-footer-group a:hover,.site-footer-group a:focus-visible{color:var(--primary-strong);text-decoration:underline}
+.site-footer-note{margin:12px 0 0;font-size:11.5px;line-height:1.5;color:var(--text-muted)}
+.site-footer-corridors{margin-top:34px;padding-top:26px;border-top:1px solid var(--border-soft)}
+.site-footer-corridors ul{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+.site-footer-corridors a{
+  display:inline-flex;align-items:center;min-height:40px;padding:7px 13px;border-radius:var(--radius-pill);
+  border:1px solid var(--border-soft);font-size:12.5px;font-weight:700;color:var(--text);text-decoration:none
 }
-@keyframes empty-illustration-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-@media(prefers-reduced-motion:reduce){.empty-illustration{animation:none}}
-@media(max-width:480px){.empty-illustration{max-width:260px}}
+.site-footer-corridors a:hover{border-color:var(--primary);color:var(--primary-strong);background:var(--primary-soft)}
+.site-footer-legal{margin-top:30px;padding-top:20px;border-top:1px solid var(--border-soft);display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center;justify-content:space-between}
+.site-footer-legal-links{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center}
+.site-footer-legal-links a,.site-footer-legal-links .footer-link{display:inline-flex;align-items:center;min-height:36px;font-size:12.5px;color:var(--text-muted)}
+.site-footer-legal p{margin:0;font-size:12px;color:var(--text-muted)}
+.footer-link{background:none;border:none;padding:0;margin:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer}
+.footer-link:hover{color:var(--primary-strong)}
+@media(max-width:640px){
+  .site-footer-group a,.site-footer-legal-links a,.site-footer-legal-links .footer-link{min-height:44px}
+  .site-footer-legal{flex-direction:column;align-items:flex-start;gap:10px}
+}
+.home-professional{margin:2px 0 0;font-size:13px;color:var(--text-muted)}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ASSISTANT
+   ═══════════════════════════════════════════════════════════════════════════
+   A restrained floating trigger, not a section of the page. It is never
+   louder than booking, and it sits above the safe area and clear of the
+   operational bottom navigation. */
+.assistant-launcher{
+  position:fixed;z-index:70;
+  right:max(16px,env(safe-area-inset-right));
+  bottom:max(16px,env(safe-area-inset-bottom));
+  display:inline-flex;align-items:center;gap:9px;
+  min-height:50px;padding:0 18px 0 15px;border:0;border-radius:var(--radius-pill);
+  background:var(--navy);color:#fff;font:inherit;font-size:13.5px;font-weight:800;cursor:pointer;
+  box-shadow:var(--shadow-raised);
+  transition:transform var(--dur-fast) var(--ease),background var(--dur-fast) var(--ease)
+}
+.assistant-launcher:hover{background:var(--navy-2);transform:translateY(-1px)}
+.assistant-launcher svg{color:#ffcfa4}
+/* On a phone it becomes a 52px bubble. The pill is 161px wide and the search
+   panel's date field sits under the corner it occupies; the label is kept in
+   the accessible name rather than dropped, so a screen reader still hears
+   "Besoin d'aide ?" — it is clipped visually, not removed. */
+@media(max-width:640px){
+  .assistant-launcher{width:52px;height:52px;padding:0;justify-content:center}
+  .assistant-launcher span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+}
+/* Clear of the operational bottom navigation, which occupies the same corner
+   on every workspace that has one. Below 980px that bar is fixed to the
+   bottom of the screen; above it, it is a sticky row at the top of the page
+   and the corner is free again. */
+body[data-nav="bottom"] .assistant-launcher{bottom:calc(88px + max(16px,env(safe-area-inset-bottom)))}
+@media(min-width:980px){body[data-nav="bottom"] .assistant-launcher{bottom:max(16px,env(safe-area-inset-bottom))}}
+.assistant-panel{
+  position:fixed;right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));
+  z-index:80;width:min(390px,calc(100vw - 32px));max-height:min(580px,calc(100dvh - 32px));
+  background:var(--surface-raised);border:1px solid var(--border-soft);border-radius:var(--radius-card);
+  box-shadow:var(--shadow-raised);display:flex;flex-direction:column;overflow:hidden;
+  animation:lr-rise var(--dur) var(--ease) both;
+}
+.assistant-panel header{padding:14px 16px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;justify-content:space-between;gap:10px}
+.assistant-panel h2{font-size:15px;margin:0;display:flex;align-items:center;gap:8px}
+.assistant-thread{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.assistant-msg{max-width:85%;padding:10px 13px;border-radius:var(--radius-block);background:var(--surface-soft);font-size:14px;line-height:1.5}
+.assistant-msg.user{align-self:flex-end;background:var(--primary-strong);color:#fff}
+.assistant-msg .small{margin-bottom:3px;display:block;opacity:.85}
+.assistant-msg p{margin:0}
+.assistant-suggestions{display:flex;flex-direction:column;gap:10px;margin-top:2px}
+.assistant-suggestion-group h3{margin:0 0 6px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted)}
+.assistant-followups{display:flex;flex-direction:column;gap:10px}
+.assistant-chips{display:flex;flex-wrap:wrap;gap:8px}
+.assistant-chips .chip{background:var(--primary-soft);border:1px solid var(--border-soft);border-radius:var(--radius-pill);padding:8px 13px;min-height:40px;font-size:13px;color:var(--text);cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-align:left}
+.assistant-chips .chip:hover{border-color:var(--primary)}
+.assistant-chips .chip:disabled{opacity:.5;cursor:not-allowed}
+.assistant-chips .chip-ghost{background:transparent;border-style:dashed;color:var(--text-muted)}
+.assistant-note{padding:0 16px 10px}
+.assistant-input{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--border-soft)}
+.assistant-input .control{flex:1}
+.assistant-typing{display:inline-flex;gap:3px;margin-right:7px;vertical-align:middle}
+.assistant-typing i{width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.35;animation:assistant-dot 1.1s infinite}
+.assistant-typing i:nth-child(2){animation-delay:.16s}
+.assistant-typing i:nth-child(3){animation-delay:.32s}
+@keyframes assistant-dot{0%,60%,100%{opacity:.3;transform:translateY(0)}30%{opacity:.9;transform:translateY(-2px)}}
+@media(max-width:640px){.assistant-panel{right:12px;left:12px;width:auto;bottom:12px}}
+.assistant-invite{border-color:#f3dbc7;box-shadow:none}
+.assistant-invite .row{gap:9px;align-items:center}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ABOUT & SEO PAGES — they sit outside the app shell, so they carry their own
+   header and footer.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.about-hero{width:100%;height:auto;border-radius:var(--radius-card);display:block}
+.about-section{min-width:0;overflow-wrap:anywhere}
+.about-section ul{padding-left:1.25rem;margin:0;display:flex;flex-direction:column;gap:6px}
+.about-section li{min-width:0}
+/* The article column for the pages that are routed above <App>: narrower than
+   the product container, because these are documents rather than tools. */
+.page-shell{width:100%;max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:var(--block-gap);min-width:0}
+/* Route and topic links, on the SEO pages. A link card, not a button: it goes
+   somewhere, and it must be openable in a new tab. */
+.home-actions{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.home-action{display:flex;align-items:center;gap:10px;min-height:58px;border:1px solid var(--border-soft);border-radius:var(--radius-block);padding:13px 16px;background:var(--surface-raised);font:inherit;font-size:14px;font-weight:700;color:var(--text);text-decoration:none}
+.home-action small{display:block;font-size:11.5px;font-weight:600;color:var(--text-muted);margin-top:2px}
+.home-action:hover{border-color:var(--primary);color:var(--primary-strong)}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOTION
+   ═══════════════════════════════════════════════════════════════════════════
+   Page entrances are 180–240ms, ease-out, from a visible default. Nothing
+   animates a layout property, nothing delays navigation, and nothing runs
+   while a field has focus. */
+@keyframes lr-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+/* One authored entrance, on the page container. Cards are NOT staggered: a
+   screen of twelve cards each rising on its own delay is a wave, and the
+   reader waits for the last one before the page looks finished. */
+.lr-enter{animation:lr-rise var(--dur-slow) var(--ease) both}
+
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    scroll-behavior:auto!important;
+    animation-duration:.01ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.01ms!important;
+    animation-delay:0ms!important;
+  }
+  .skeleton-line{animation:none}
+  .service-card:hover{transform:none}
+  .service-card:hover .service-card-media img{transform:none}
+  .btn:active:not(:disabled){transform:none}
+  .swap-btn:active:not(:disabled){transform:none}
+}
