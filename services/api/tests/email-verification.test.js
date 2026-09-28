@@ -123,11 +123,56 @@ test('an Admin SDK failure is the same retryable refusal', async () => {
   assert.equal((await r.json()).error.code, 'VERIFICATION_UNAVAILABLE');
 });
 
-test('no service-account configuration means the capability is unavailable, and the refusal is retryable', async () => {
+test('a missing service account is reported as unavailable, never as something to retry', async () => {
   const noCredential = createApi(db, { ...config, firebaseAdmin: undefined }, fixture.resolver);
   const uid = 'no-credential-' + randomUUID();
   const r = await noCredential(new Request('http://localhost/api/v1/auth/email-verification', {
     method: 'POST', headers: { authorization: 'Bearer ' + await passwordToken(uid) } }));
   assert.equal(r.status, 503);
-  assert.equal((await r.json()).error.code, 'VERIFICATION_UNAVAILABLE');
+  // No credential is a configuration fault. Answering "réessayez plus tard"
+  // invites a retry that cannot work, and hides the fault from whoever can fix it.
+  assert.equal((await r.json()).error.code, 'EMAIL_UNAVAILABLE');
+});
+
+test('a refusal that retrying cannot fix is distinguished from a provider hiccup', async () => {
+  // 401 from Brevo: the credential is wrong. Waiting will never change that.
+  const badKey = createApi(db, config, fixture.resolver, undefined, fakeBrevo(401, { code: 'unauthorized' }));
+  const refused = await badKey(new Request('http://localhost/api/v1/auth/email-verification', {
+    method: 'POST', headers: { authorization: 'Bearer ' + await passwordToken('bad-key-' + randomUUID()) } }));
+  assert.equal(refused.status, 503);
+  assert.equal((await refused.json()).error.code, 'EMAIL_UNAVAILABLE');
+  // 500 from Brevo: the provider is unwell. Retrying is exactly right.
+  const down = createApi(db, config, fixture.resolver, undefined, fakeBrevo(500, { code: 'internal_error' }));
+  const retryable = await down(new Request('http://localhost/api/v1/auth/email-verification', {
+    method: 'POST', headers: { authorization: 'Bearer ' + await passwordToken('down-' + randomUUID()) } }));
+  assert.equal(retryable.status, 503);
+  assert.equal((await retryable.json()).error.code, 'VERIFICATION_UNAVAILABLE');
+});
+
+test('every refused resend is recorded with its reason, and never with the address or the key', async () => {
+  const lines = [];
+  const realError = console.error;
+  console.error = line => lines.push(String(line));
+  try {
+    const refused = createApi(db, config, fixture.resolver, undefined, fakeBrevo(402, { code: 'not_enough_credits' }));
+    const uid = 'logged-' + randomUUID();
+    await refused(new Request('http://localhost/api/v1/auth/email-verification', {
+      method: 'POST', headers: { authorization: 'Bearer ' + await passwordToken(uid) } }));
+    // The Admin path, which used to fail completely silently.
+    const brokenAdmin = createApi(db, { ...config, firebaseAdmin: { available: true, generateEmailVerificationLink: async () => { throw new Error('google down'); } } }, fixture.resolver);
+    await brokenAdmin(new Request('http://localhost/api/v1/auth/email-verification', {
+      method: 'POST', headers: { authorization: 'Bearer ' + await passwordToken('admin-log-' + randomUUID()) } }));
+  } finally { console.error = realError; }
+
+  const events = lines.map(l => JSON.parse(l));
+  assert.deepEqual(events.map(e => [e.event, e.stage, e.reason]), [
+    ['verification_email_failed', 'send', 'quota_exhausted'],
+    ['verification_email_failed', 'link', 'admin_unavailable'],
+  ]);
+  // The whole point of the log is diagnosis without disclosure.
+  for (const line of lines) {
+    assert.equal(line.includes('@example.invalid'), false, 'no recipient address');
+    assert.equal(line.includes('test-brevo-key'), false, 'no credential');
+    assert.equal(line.includes('oobCode'), false, 'no action code');
+  }
 });

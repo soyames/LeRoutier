@@ -282,13 +282,36 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       invariant(claims.signInProvider==='password','FORBIDDEN','Cette action est réservée aux comptes créés avec une adresse e-mail et un mot de passe.',403);
       if(claims.emailVerified===true) return {status:'already_verified'};
       invariant(claims.email,'UNAUTHORIZED','Session is invalid or expired.',401);
+      // Both failure branches below log a reason word and nothing else. Before
+      // this, a resend could fail for six different causes — a missing API key,
+      // a spent allowance, a rotated credential, a rejected recipient, Google
+      // being down, a timeout — and production recorded none of them, so the
+      // only evidence was the passenger's screenshot.
       let link;
       try { link=await firebaseAdmin.generateEmailVerificationLink(claims.email,config.appUrl+'/verify-email'); }
-      catch { throw new DomainError('VERIFICATION_UNAVAILABLE','Impossible d’envoyer l’e-mail de confirmation pour le moment. Réessayez plus tard.',503); }
+      catch {
+        // No credential is a configuration fault that retrying cannot fix;
+        // anything else from the Admin SDK may be Google having a bad minute.
+        const reason=firebaseAdmin.available===false?'admin_unconfigured':'admin_unavailable';
+        console.error(JSON.stringify({event:'verification_email_failed',stage:'link',reason}));
+        if(reason==='admin_unconfigured')
+          throw new DomainError('EMAIL_UNAVAILABLE','L’envoi des e-mails de confirmation est indisponible sur ce déploiement. Contactez LeRoutier.',503);
+        throw new DomainError('VERIFICATION_UNAVAILABLE','Impossible d’envoyer l’e-mail de confirmation pour le moment. Réessayez plus tard.',503);
+      }
       // The send result is a reason, never a provider message: the raw action
       // link must not surface anywhere, response included.
       const send=await verificationMail.send({to:claims.email,...verificationEmail(link)});
-      invariant(send.accepted===true,'VERIFICATION_UNAVAILABLE','Impossible d’envoyer l’e-mail de confirmation pour le moment. Réessayez plus tard.',503);
+      if(send.accepted!==true){
+        const reason=send.reason||'provider_unavailable';
+        console.error(JSON.stringify({event:'verification_email_failed',stage:'send',reason}));
+        // A wrong credential, a spent allowance or a refused recipient cannot be
+        // waited out. Telling someone to "try again later" would be false, and
+        // would keep them retrying something that will never succeed.
+        const terminal=['invalid_configuration','quota_exhausted','recipient_rejected'].includes(reason);
+        if(terminal)
+          throw new DomainError('EMAIL_UNAVAILABLE','L’envoi des e-mails de confirmation est indisponible pour le moment. Contactez LeRoutier.',503);
+        throw new DomainError('VERIFICATION_UNAVAILABLE','Impossible d’envoyer l’e-mail de confirmation pour le moment. Réessayez plus tard.',503);
+      }
       return {status:'sent'};
     }
     // The public catalogue is the one authenticated-free read surface with real
