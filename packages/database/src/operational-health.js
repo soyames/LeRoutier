@@ -4,6 +4,10 @@ import {invariant} from '@leroutier/domain';
 // accounts. Two implementations would eventually disagree, and Platform Ops
 // would be reading a number that is not the one enforcing anything.
 import {registrationCapacity} from './registration.js';
+// The object-storage half of the same question. The database has been measured
+// and gated for a while; objects had no instrumentation at all, so five
+// gigabytes of files could fill with nothing anywhere saying so.
+import {objectStorageUsage} from './object-usage.js';
 import {requirePlatform, holds, isPlatformIdentity} from './platform-access.js';
 // What a dossier must contain is a product rule, and it is decided in exactly
 // one place. The review queue reports completeness computed from THAT rule, so
@@ -52,6 +56,11 @@ export function operationalHealth(db) {
           (SELECT count(*) FROM incidents WHERE status<>'resolved')::integer AS incidents_open`)).rows[0];
         const signals=!can('system')?[]:(await tx.query("SELECT signal,sum(count)::integer AS count FROM operational_signals WHERE minute>now()-interval '15 minutes' GROUP BY signal")).rows;
         const capacity=can('system')?await registrationCapacity(tx):null;
+        // Cheap by construction: the registry's own accounting, no provider
+        // call. Six screens poll this endpoint, and a listing per bucket on
+        // each of them would spend the allowance it is trying to report on.
+        // The measured figure is the reconciliation's job, not a health poll's.
+        const objectStorage=can('system')?await objectStorageUsage(tx):null;
 
         // The user register is NOT returned here. Six Platform Ops screens poll
         // this endpoint, and shipping hundreds of names, e-mails and phone
@@ -135,6 +144,7 @@ export function operationalHealth(db) {
           signals,counts:visibleCounts,pool:can('system')?(db.poolStats?.()??null):null,
           alertTransport:'internal_ops_only',
           storage:capacity,
+          objectStorage,
           capabilities:actor.platform_capabilities??[],
           kycQueue,paymentAnomalies,payoutAnomalies,incidents};
       });

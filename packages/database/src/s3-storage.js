@@ -48,6 +48,14 @@ export function uriEncode(value, encodeSlash = true) {
   return out;
 }
 
+/** Object keys are XML text on the way out of a listing, so they come back
+ * escaped. Only the five predefined entities can appear in a key we generate,
+ * and an unescaped key would silently fail to match its own row. */
+const decodeXml = value => String(value)
+  .replaceAll('&lt;', '<').replaceAll('&gt;', '>')
+  .replaceAll('&quot;', '"').replaceAll('&#39;', "'")
+  .replaceAll('&amp;', '&');
+
 /** `20260928T101530Z` — the only date format SigV4 accepts. */
 export const amzDate = date => date.toISOString().replace(/[:-]|\.\d{3}/g, '');
 
@@ -208,6 +216,48 @@ export function s3Store(settings, http = fetch) {
       const error = new Error('EVIDENCE_STORAGE_UNAVAILABLE');
       Object.assign(error, { code: 'EVIDENCE_STORAGE_UNAVAILABLE', status: 503 });
       throw error;
+    },
+
+    /**
+     * What this bucket actually holds.
+     *
+     * Read-only, and the only listing this store offers: enough to answer "how
+     * much of the allowance is spent, and is anything in here that no row
+     * mentions?", and nothing that could change a bucket. A store that could
+     * rewrite a bucket's access is a store that could publish a passport.
+     *
+     * Paginates, and stops at `limit` with `truncated` set rather than
+     * pretending the list is complete — a usage figure that silently caps is
+     * exactly the kind of comfortable number this project refuses.
+     */
+    async list({ prefix = '', limit = 5000 } = {}) {
+      const objects = [];
+      let token = null;
+      // A bounded number of pages, so a runaway loop cannot bill the account
+      // for listings it will never finish reading.
+      for (let page = 0; page < 100; page++) {
+        const query = new URLSearchParams({ 'list-type': '2', 'max-keys': '1000' });
+        if (prefix) query.set('prefix', prefix);
+        if (token) query.set('continuation-token', token);
+        const url = `${base}/${uriEncode(bucket)}?${query.toString()}`;
+        const response = await http(url, { method: 'GET', signal: AbortSignal.timeout(20_000),
+          headers: signedHeaders('GET', url, sha256Hex('')) });
+        if (!response.ok) {
+          const error = new Error('EVIDENCE_STORAGE_UNAVAILABLE');
+          Object.assign(error, { code: 'EVIDENCE_STORAGE_UNAVAILABLE', status: 503 });
+          throw error;
+        }
+        const body = await response.text();
+        for (const match of body.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+          const key = match[1].match(/<Key>([\s\S]*?)<\/Key>/)?.[1];
+          const size = Number(match[1].match(/<Size>(\d+)<\/Size>/)?.[1] ?? 0);
+          if (key !== undefined) objects.push({ key: decodeXml(key), size });
+        }
+        token = body.match(/<NextContinuationToken>([\s\S]*?)<\/NextContinuationToken>/)?.[1] ?? null;
+        if (!token || objects.length >= limit) break;
+      }
+      const truncated = objects.length > limit;
+      return { objects: objects.slice(0, limit), truncated };
     },
 
     /**
