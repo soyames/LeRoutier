@@ -1,8 +1,8 @@
 /**
  * How much of the object-storage allowance is spent.
  *
- * The database half of this has existed for a while (registration.js measures
- * `pg_database_size` and refuses new accounts before the allowance runs out).
+ * The database half of this has existed for a while: registration.js measures
+ * the database and refuses new accounts before the allowance runs out.
  * Objects had nothing at all: five gigabytes of files, no measurement anywhere,
  * and the first anybody would hear of it is a provider refusing a write.
  *
