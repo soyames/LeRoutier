@@ -79,13 +79,36 @@ try {
   };
 
   // ---------------------------------------------------------------- print --
+  /** Which of four things is true about the listing, said precisely. */
+  const measuredLine = () => {
+    if (!withMeasured) return 'not taken (pass --measured to list the buckets)';
+    if (!buckets.length) {
+      return 'no object store configured here — MEDIA_STORAGE_* / EVIDENCE_STORAGE_* / S3_* are set on the deployment, not in .env.local';
+    }
+    if (!measured?.reachable) return 'UNREACHABLE — a bucket exists but could not be listed';
+    return `${formatBytes(measured.bytes)} in ${measured.objects}${measured.truncated ? ' (truncated — the figure is a floor, not a total)' : ''}`;
+  };
+
   console.log(`Pilot measurement — ${record.measuredAt}\n`);
   console.log('  DATABASE');
-  console.log(`    ${formatBytes(record.database.bytes)} of ${formatBytes(record.database.allowanceBytes)} (${record.database.percentOfAllowance ?? 'n/a'}%), ${record.database.protection}`);
+  // `limitBytes` is null whenever nothing states an allowance, and that is the
+  // normal state on a developer machine: DATABASE_STORAGE_LIMIT_MB lives on the
+  // deployment, and Neon does not publish its own limit over the pooled
+  // connection. Printing "null" here would be a small lie; formatBytes requiring
+  // a real number would be a crash. Say which of the two facts is true.
+  console.log(record.database.allowanceBytes === null
+    ? `    ${formatBytes(record.database.bytes)}, no allowance configured here (${record.database.protection})`
+    : `    ${formatBytes(record.database.bytes)} of ${formatBytes(record.database.allowanceBytes)} (${record.database.percentOfAllowance}%), ${record.database.protection}`);
   console.log('  OBJECTS');
   console.log(`    accounted   ${formatBytes(record.objects.accountedBytes)} in ${record.objects.accountedObjects}`);
-  console.log(`    measured    ${record.objects.measuredBytes === null ? 'not taken (--measured to list)' : formatBytes(record.objects.measuredBytes)}`);
-  console.log(`    drift       ${record.objects.driftBytes === null ? 'unknown' : formatBytes(record.objects.driftBytes)}`);
+  // Four distinct states, and saying the wrong one is worse than saying
+  // nothing: "not taken" when somebody DID ask is the message that made this
+  // script look broken while it was behaving correctly.
+  console.log(`    measured    ${measuredLine()}`);
+  console.log(`    drift       ${record.objects.driftBytes === null ? 'unknown — needs a listing to compare against' : formatBytes(record.objects.driftBytes)}`);
+  console.log(record.objects.allowanceBytes === null
+    ? '    allowance   none configured'
+    : `    allowance   ${formatBytes(record.objects.allowanceBytes)} (${record.objects.percentOfAllowance ?? 'n/a'}%, ${record.objects.pressure})`);
   console.log('  ACTIVITY (last 24h)');
   console.log(`    gps writes ${day.gpsWrites}   api requests ${day.apiRequests}   outbox ${day.outboxEvents}   audit ${day.auditEvents}`);
   console.log(`    errors     api ${day.apiErrors}   gps anomalies ${day.gpsAnomalies}   webhooks rejected ${day.webhookRejected}`);
