@@ -36,6 +36,7 @@
     "db:bootstrap": "node --env-file=.env.local packages/database/scripts/bootstrap.js",
     "media:inventory": "node --env-file=.env.local packages/database/scripts/migrate-media-to-s3.js",
     "storage:usage": "node --env-file=.env.local packages/database/scripts/storage-usage.js",
+    "pilot:measure": "node --env-file=.env.local packages/database/scripts/pilot-measure.js",
     "secrets:check": "node scripts/check-secrets.mjs",
     "repo:policy": "node scripts/check-repo-policy.mjs",
     "rotate:b2": "node scripts/rotate-b2-key.mjs",
