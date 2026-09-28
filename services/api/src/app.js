@@ -33,6 +33,7 @@ import { assistantService } from './assistant.js';
 import { privacyCenter, retentionEngine } from '@leroutier/database/privacy';
 import { totpService } from '@leroutier/database/totp';
 import { evidenceStore, MAX_EVIDENCE_BYTES } from '@leroutier/database/evidence-storage';
+import { mediaService, mediaStore as selectMediaStore, MAX_MEDIA_BYTES } from '@leroutier/database/media';
 import { journeyPlanning } from '@leroutier/database/journey-planning';
 import { mobility } from '@leroutier/database/mobility';
 import { journeys } from '@leroutier/database/journeys';
@@ -84,6 +85,11 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   // documents. Constructed once and passed in, so no vendor call appears
   // anywhere outside evidence-storage.js.
   const evidence=config.evidenceStore ?? evidenceStore(config);
+  // The media registry's store. Independent of the KYC path above: this side is
+  // provider-agnostic from the start, so moving it between an S3-compatible
+  // endpoint and another is configuration rather than a user journey.
+  const mediaBackend=config.mediaStore ?? selectMediaStore(config);
+  const media=mediaService(db,mediaBackend,{bucket:config.mediaStorage?.bucket ?? 'media'});
   const health=operationalHealth(db);
   const secondFactor=totpService(db);
   const fares=fareIntelligence(db);
@@ -155,6 +161,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       '/onboarding/me': ['GET'], '/onboarding/company': ['POST'], '/onboarding/independent': ['POST'],
       '/onboarding/operator': ['PATCH'], '/onboarding/evidence': ['GET'], '/ops/corridors': ['GET'],
       '/ops/evidence-storage': ['GET'],
+      '/media': ['GET', 'POST'],
       '/ops/platform-team': ['GET', 'POST'], '/ops/platform-capabilities': ['GET'],
       '/insurance/offers': ['GET'], '/ops/insurance/partners': ['GET', 'POST'],
       '/ops/insurance/products': ['POST'], '/ops/insurance/policies': ['GET'],
@@ -546,6 +553,35 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       invariant(buffer.length<=MAX_EVIDENCE_BYTES,'INVALID_EVIDENCE_FILE','Le justificatif dépasse la taille maximale de 8 Mo.',413);
       return onboard.uploadEvidence(actor,evidenceUpload[1],buffer);
     }
+    // ---- the media registry --------------------------------------------------
+    // Stable, opaque LeRoutier media ids, for Passenger, Driver and Ops alike.
+    // A caller never receives a provider, a bucket or an object key: it names a
+    // media id, and receives a URL only once the module has authorized that
+    // specific file for that specific caller, and only briefly. Nothing here
+    // writes a provider URL into a business table, which is what keeps a
+    // provider swap from reaching a user journey.
+    if(method==='GET' && path==='/media') return media.mine(actor);
+    if(method==='POST' && path==='/media') {
+      // Binary, so it does not go through the JSON envelope reader — and capped
+      // before anything is read into memory, then again on the real buffer.
+      await limited('media-upload:'+actor.id,30);
+      const declared=Number(req.headers.get('content-length')??0);
+      invariant(!Number.isFinite(declared)||declared<=MAX_MEDIA_BYTES,'INVALID_MEDIA','Le fichier dépasse la taille maximale de 8 Mo.',413);
+      const buffer=new Uint8Array(await req.arrayBuffer());
+      invariant(buffer.length<=MAX_MEDIA_BYTES,'INVALID_MEDIA','Le fichier dépasse la taille maximale de 8 Mo.',413);
+      // Associations arrive as query parameters and each is validated as a uuid
+      // here, before the module sees it — never inferred from the file.
+      const uuidParam=name=>{const value=url.searchParams.get(name);return value?uuid(value):undefined;};
+      return media.upload(actor,{purpose:url.searchParams.get('purpose'),bytes:buffer,
+        associations:{subjectUserId:uuidParam('subject'),operatorId:uuidParam('operator'),
+          parcelId:uuidParam('parcel'),vehicleId:uuidParam('vehicle')}});
+    }
+    const mediaAccess=path.match(/^\/media\/(med_[A-Z2-7]{26})\/access$/);
+    if(method==='GET' && mediaAccess) return media.grant(actor,mediaAccess[1]);
+    const mediaOne=path.match(/^\/media\/(med_[A-Z2-7]{26})$/);
+    if(method==='GET' && mediaOne) return media.describe(actor,mediaOne[1]);
+    if(method==='DELETE' && mediaOne) { await limited('media-delete:'+actor.id); return media.remove(actor,mediaOne[1]); }
+
     // A reviewer opening ONE proof, at the moment they open it. The list
     // payloads carry no document address at all, so a permanent URL never sits
     // in a console's memory, a browser log or a copied response.

@@ -177,6 +177,25 @@ export function serverConfig(env = process.env) {
         bucketName: env.B2_BUCKET_NAME,
       },
     },
+    // The media registry's store. Separate from evidenceStorage on purpose: the
+    // KYC path keeps its own provider until the storage cutover is deliberate,
+    // and this side is provider-independent from the start — `provider` names a
+    // choice, and both 'b2' and 'neon' resolve to the same S3 code path with
+    // different coordinates. Half a configuration yields no store rather than
+    // one that fails on the first upload.
+    mediaStorage: {
+      provider: env.MEDIA_STORAGE_PROVIDER || null,
+      bucket: env.MEDIA_STORAGE_BUCKET || null,
+      s3: {
+        endpoint: env.MEDIA_S3_ENDPOINT,
+        region: env.MEDIA_S3_REGION,
+        bucket: env.MEDIA_STORAGE_BUCKET,
+        accessKeyId: env.MEDIA_S3_ACCESS_KEY_ID,
+        secretAccessKey: env.MEDIA_S3_SECRET_ACCESS_KEY,
+        service: env.MEDIA_S3_SERVICE || 's3',
+        ttlSeconds: env.MEDIA_READ_TTL_SECONDS ? Number(env.MEDIA_READ_TTL_SECONDS) : undefined,
+      },
+    },
     // Road routing engine. Unset means routes simply have no road geometry and
     // every surface says so — a straight line is never substituted. The public
     // OSRM/Valhalla demo servers forbid production use, so no default endpoint
