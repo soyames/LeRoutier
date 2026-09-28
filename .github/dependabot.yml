@@ -31,3 +31,24 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     labels: [dependencies, ci]
+    groups:
+      # The CodeQL actions MUST move together, and this group is the only thing
+      # that guarantees it. `init` writes a config file stamped with its own
+      # version and `analyze` refuses to read one that does not match, so a PR
+      # that moves one and not the other fails every run — which is exactly what
+      # happened twice, on 2026-09-28, from two separate ungrouped PRs.
+      #
+      # A comment in codeql.yml says the two must match. A comment cannot
+      # enforce it; a group can, because Dependabot then has no way to split
+      # them.
+      codeql-action:
+        patterns:
+          - 'github/codeql-action*'
+      # Everything else, so a routine patch bump is one PR rather than ten.
+      # Listed second because a dependency joins the first group whose pattern
+      # matches it.
+      actions:
+        patterns:
+          - '*'
+        exclude-patterns:
+          - 'github/codeql-action*'
