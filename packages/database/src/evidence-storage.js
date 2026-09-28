@@ -42,6 +42,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { invariant } from '@leroutier/domain';
+import { s3Store } from './s3-storage.js';
 
 /**
  * What the platform can honestly say about document handling, given its
@@ -257,20 +258,67 @@ export const EVIDENCE_READ_TTL_SECONDS = 120;
  * store rather than one that fails on the first upload — the same rule
  * sign-in follows.
  *
- * @param {{evidenceStorage?: {provider?: string|null,
- *   b2?: {keyId?: string, applicationKey?: string, bucketId?: string, bucketName?: string}}}} [config]
+ * @param {{evidenceStorage?: {provider?: string|null, bucket?: string|null,
+ *   b2?: {keyId?: string, applicationKey?: string, bucketId?: string, bucketName?: string}},
+ *   objectStorage?: {s3?: {endpoint?: string, region?: string, accessKeyId?: string, secretAccessKey?: string, service?: string}}}} [config]
  * @param {typeof fetch} [http]
  * @returns {EvidenceStore|null}
  */
 export function evidenceStore(config = {}, http = fetch) {
   const settings = config.evidenceStorage ?? {};
-  // The only store factory: B2 is the only implemented provider, an unknown
-  // provider fails closed, and an absent configuration means no evidence
-  // storage at all — never a weaker fallback.
+  // An unknown provider fails closed, and an absent configuration means no
+  // evidence storage at all — never a weaker fallback.
   if (!settings.provider) return null;
   if (settings.provider === 'b2') return backblazeEvidenceStore(settings.b2 ?? {}, http);
+  // Neon Object Storage (and any other S3-compatible endpoint) through the same
+  // four-member interface. The endpoint and its credentials come from the
+  // shared object-storage configuration; only the bucket belongs to KYC.
+  if (settings.provider === 'neon' || settings.provider === 's3') {
+    return s3EvidenceStore({ ...(config.objectStorage?.s3 ?? {}), bucket: settings.bucket ?? null }, http);
+  }
   invariant(false, 'EVIDENCE_STORAGE_UNAVAILABLE',
     `Le fournisseur de stockage « ${String(settings.provider).slice(0, 40) }» n'est pas implémenté.`, 503);
+}
+
+/**
+ * KYC evidence on any S3-compatible endpoint.
+ *
+ * A thin adapter over `s3Store`, not a second implementation: the signing, the
+ * expiring grants, the idempotent delete and the health probe are the same code
+ * the media registry uses. What differs is the KEY, and the key is the one
+ * thing that must not change when the provider does.
+ *
+ * `evidence/{operatorId}/{kind}/{uuid}` is exactly the shape the Backblaze store
+ * has always used, opaque and unguessable, so a row written before a switch
+ * still means what it meant: the same operator, the same kind of proof, and a
+ * random segment that stops one reviewer's URL being a template for everybody
+ * else's. `detectEvidenceType` still reads the file's own first bytes — the
+ * declared type is the uploader's claim and is never consulted.
+ *
+ * @param {{endpoint?:string, region?:string, bucket?:string, accessKeyId?:string, secretAccessKey?:string}} settings
+ * @param {typeof fetch} http
+ */
+export function s3EvidenceStore(settings = {}, http = fetch) {
+  const store = s3Store(settings, http);
+  // Half a configuration produces NO store rather than one that fails on the
+  // first upload — the rule every provider here follows.
+  if (!store) return null;
+  return {
+    name: 'neon',
+    health: () => store.health(),
+    async put({ operatorId, kind, bytes }) {
+      const contentType = detectEvidenceType(bytes);
+      const key = `evidence/${operatorId}/${kind}/${randomUUID()}`;
+      const stored = await store.put({ key, bytes, contentType });
+      return { key, contentType, byteSize: stored.byteSize };
+    },
+    // `read` returns a URL that EXPIRES, which is the property that makes a
+    // private bucket an access control rather than a filing cabinet.
+    read: (key, options) => store.read(key, options),
+    // Every version: a redaction that leaves an older copy behind has not
+    // deleted the document.
+    remove: key => store.remove(key),
+  };
 }
 
 const B2_API = 'https://api.backblazeb2.com/b2api/v3';

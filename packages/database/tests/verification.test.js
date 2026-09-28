@@ -1259,6 +1259,50 @@ test('a half-configured B2 produces no store, never one that fails on first uplo
   assert.throws(() => evidenceStore({ evidenceStorage: { provider: 'gcs' } }), { code: 'EVIDENCE_STORAGE_UNAVAILABLE' });
 });
 
+const S3_SETTINGS = { endpoint: 'https://br-test.storage.c-5.eu-central-1.aws.neon.tech', region: 'eu-central-1',
+  bucket: 'leroutier-evidence-prod', accessKeyId: 'test-access-key', secretAccessKey: 'test-secret' };
+
+test('the same evidence interface works on an S3 endpoint, under the same key shape', async () => {
+  const { evidenceStore, s3EvidenceStore } = await import('../src/evidence-storage.js');
+  const calls = [];
+  const http = async (url, init = {}) => { calls.push({ url, method: init.method }); return new Response(null, { status: init.method === 'PUT' ? 200 : 204 }); };
+
+  // Half a configuration is no store, exactly as for every other provider: the
+  // product falls back to operator-hosted links rather than to a broken store.
+  assert.equal(s3EvidenceStore({ ...S3_SETTINGS, bucket: undefined }, http), null);
+  assert.equal(s3EvidenceStore({ ...S3_SETTINGS, accessKeyId: undefined }, http), null);
+
+  const store = evidenceStore({ evidenceStorage: { provider: 'neon', bucket: S3_SETTINGS.bucket },
+    objectStorage: { s3: { endpoint: S3_SETTINGS.endpoint, region: S3_SETTINGS.region,
+      accessKeyId: S3_SETTINGS.accessKeyId, secretAccessKey: S3_SETTINGS.secretAccessKey } } }, http);
+  assert.equal(store.name, 'neon');
+
+  const operatorId = randomUUID();
+  const stored = await store.put({ operatorId, kind: 'identity', bytes: PDF() });
+  assert.equal(stored.contentType, 'application/pdf', 'the type is the file’s own, not a claim');
+  assert.equal(stored.byteSize, PDF().length);
+  // The key shape is the point: a row written under one provider must still
+  // mean the same thing under another.
+  assert.match(stored.key, new RegExp(`^evidence/${operatorId}/identity/[0-9a-f-]{36}$`));
+  assert.match(calls[0].url, /\/leroutier-evidence-prod\/evidence\//, 'path-style addressing, by bucket');
+
+  const grant = await store.read(stored.key, { ttlSeconds: 120 });
+  assert.ok(new URL(grant.url).searchParams.get('X-Amz-Signature'), 'a grant a private bucket will honour');
+  assert.ok(Date.parse(grant.expiresAt) > Date.now(), 'and that expires');
+
+  await store.remove(stored.key);
+  // Already gone is the desired end state; anything else is not, because a
+  // redaction that did not happen must never be recorded as one.
+  await s3EvidenceStore(S3_SETTINGS, async () => new Response(null, { status: 404 })).remove('evidence/x/y/z');
+  await assert.rejects(s3EvidenceStore(S3_SETTINGS, async () => new Response(null, { status: 500 })).remove('evidence/x/y/z'),
+    { code: 'EVIDENCE_STORAGE_UNAVAILABLE' });
+
+  // Scriptable content is refused before it is uploaded, on this provider
+  // exactly as on the last one — an SVG announced as a PNG is still a page.
+  const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  await assert.rejects(store.put({ operatorId, kind: 'identity', bytes: svg }), { code: 'INVALID_EVIDENCE_FILE' });
+});
+
 test('B2 stores a proof under an unguessable key and serves it only with a grant', async () => {
   const { backblazeEvidenceStore } = await import('../src/evidence-storage.js');
   const b2 = fakeB2();

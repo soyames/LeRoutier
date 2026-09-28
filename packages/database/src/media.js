@@ -347,9 +347,12 @@ export function mediaStore(config = {}, http = fetch) {
   const settings = config.mediaStorage ?? {};
   if (!settings.provider) return null;
   // Backblaze's S3 surface and Neon Object Storage are the same code path with
-  // different coordinates, which is the entire point of the interface.
+  // different coordinates, which is the entire point of the interface. The
+  // endpoint and its credentials are shared with the KYC evidence path; only
+  // the bucket is this consumer's own.
   if (settings.provider === 'neon' || settings.provider === 'b2' || settings.provider === 's3') {
-    return s3Store(settings.s3 ?? {}, http);
+    return s3Store({ ...(config.objectStorage?.s3 ?? {}), bucket: settings.bucket ?? null,
+      ttlSeconds: settings.readTtlSeconds }, http);
   }
   invariant(false, 'EVIDENCE_STORAGE_UNAVAILABLE',
     `Le fournisseur de stockage « ${String(settings.provider).slice(0, 40)} » n’est pas implémenté.`, 503);

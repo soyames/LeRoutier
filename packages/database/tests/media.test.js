@@ -78,9 +78,13 @@ test('a half-configured store is no store, never one that fails on first use', (
 });
 
 test('an unrecognised provider fails closed rather than falling back', () => {
+  const s3 = { endpoint: 'https://e.invalid', region: 'eu-central-1', accessKeyId: 'k', secretAccessKey: 's' };
   assert.equal(mediaStore({}), null, 'nothing configured is a supported state');
-  assert.ok(mediaStore({ mediaStorage: { provider: 'neon', s3: { endpoint: 'https://e.invalid', region: 'r', bucket: 'b', accessKeyId: 'k', secretAccessKey: 's' } } }),
+  assert.ok(mediaStore({ mediaStorage: { provider: 'neon', bucket: 'b' }, objectStorage: { s3 } }),
     'neon resolves to the same S3 code path');
+  assert.equal(mediaStore({ mediaStorage: { provider: 'neon', bucket: 'b' } }), null,
+    'a provider without an endpoint is half a configuration, so it is no store');
+  assert.equal(mediaStore({ mediaStorage: { provider: 'neon' }, objectStorage: { s3 } }), null, 'no bucket either');
   assert.throws(() => mediaStore({ mediaStorage: { provider: 'dropbox' } }), { code: 'EVIDENCE_STORAGE_UNAVAILABLE' });
 });
 

@@ -168,8 +168,32 @@ export function serverConfig(env = process.env) {
     // public git SHA, not a secret, and it is what lets a post-deploy check
     // tell the deployment it just shipped from the one it replaced.
     commitSha: env.VERCEL_GIT_COMMIT_SHA || env.GITHUB_SHA || null,
+    // ONE S3-compatible endpoint for everything LeRoutier stores, configured
+    // once. Two purposes use it — KYC evidence and the media registry — and
+    // they differ only by bucket and by key prefix (`evidence/…`, `media/…`).
+    //
+    // Deliberately not one credential set per purpose: the same account keys
+    // would then be pasted twice, and two copies of one secret is how one of
+    // them ends up stale without anybody noticing. It is also why these are
+    // named for the endpoint rather than for either consumer.
+    objectStorage: {
+      s3: {
+        endpoint: env.S3_ENDPOINT,
+        region: env.S3_REGION,
+        accessKeyId: env.S3_ACCESS_KEY_ID,
+        secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+        service: env.S3_SERVICE || 's3',
+      },
+    },
+    // KYC evidence. `provider` names the vendor choice; 'b2' and 'neon'/'s3'
+    // resolve to different stores, and an unset provider keeps the
+    // operator-hosted-link arrangement, which is a supported state.
+    //
+    // The b2 block is kept while Backblaze remains a rollback path. It is
+    // unused the moment `provider` moves off 'b2'.
     evidenceStorage: {
       provider: env.EVIDENCE_STORAGE_PROVIDER || null,
+      bucket: env.EVIDENCE_STORAGE_BUCKET || null,
       b2: {
         keyId: env.B2_KEY_ID,
         applicationKey: env.B2_APPLICATION_KEY,
@@ -177,24 +201,14 @@ export function serverConfig(env = process.env) {
         bucketName: env.B2_BUCKET_NAME,
       },
     },
-    // The media registry's store. Separate from evidenceStorage on purpose: the
-    // KYC path keeps its own provider until the storage cutover is deliberate,
-    // and this side is provider-independent from the start — `provider` names a
-    // choice, and both 'b2' and 'neon' resolve to the same S3 code path with
-    // different coordinates. Half a configuration yields no store rather than
-    // one that fails on the first upload.
+    // The media registry's store. Provider-independent from the start: 'neon',
+    // 'b2' and 's3' are the same code path with different coordinates. Half a
+    // configuration yields no store rather than one that fails on the first
+    // upload.
     mediaStorage: {
       provider: env.MEDIA_STORAGE_PROVIDER || null,
       bucket: env.MEDIA_STORAGE_BUCKET || null,
-      s3: {
-        endpoint: env.MEDIA_S3_ENDPOINT,
-        region: env.MEDIA_S3_REGION,
-        bucket: env.MEDIA_STORAGE_BUCKET,
-        accessKeyId: env.MEDIA_S3_ACCESS_KEY_ID,
-        secretAccessKey: env.MEDIA_S3_SECRET_ACCESS_KEY,
-        service: env.MEDIA_S3_SERVICE || 's3',
-        ttlSeconds: env.MEDIA_READ_TTL_SECONDS ? Number(env.MEDIA_READ_TTL_SECONDS) : undefined,
-      },
+      readTtlSeconds: env.MEDIA_READ_TTL_SECONDS ? Number(env.MEDIA_READ_TTL_SECONDS) : undefined,
     },
     // Road routing engine. Unset means routes simply have no road geometry and
     // every surface says so — a straight line is never substituted. The public
