@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
-import { Card, Badge, SectionTitle, ApiState, ProfileForm, ErrorState, SkeletonCards, PageHero, PAGE_HERO } from '@leroutier/ui';
+import { Card, Badge, SectionTitle, ApiState, ProfileForm, PasswordForm, ErrorState, SkeletonCards, PageHero, PAGE_HERO } from '@leroutier/ui';
 import { status, fcfa, time, dayShort, dayLong, dateTime, duration, reference, mapLink, placeLabel } from '@leroutier/ui';
 import { QRCodeSVG } from 'qrcode.react';
-import { Armchair, Ticket, Building2, Navigation, UserRound, ArrowLeftRight, CreditCard, Package, Store, MapPin, QrCode, Search, Lock } from 'lucide-react';
+import { Armchair, Ticket, Building2, Navigation, UserRound, ArrowLeftRight, CreditCard, Package, Store, MapPin, QrCode, Search, Lock, Mail, Bell, ShieldCheck, KeyRound, LogOut } from 'lucide-react';
+import { NotificationPreferences } from './notifications.jsx';
 import { JourneySearchResults } from './journey-results.jsx';
 import { useGeolocation, nearestPlace } from './geolocation.js';
 import { rememberCheckout } from './checkout.jsx';
@@ -729,22 +730,38 @@ function professionalWorkspace(user) {
   return { label: 'Ouvrir mon espace chauffeur', to: '/work/today' };
 }
 
+/**
+ * Mon compte — everything a signed-in person can configure about themselves,
+ * in one place, reachable from the header avatar.
+ *
+ * Signed out this renders only its heading: the shell already puts the sign-in
+ * panel directly above, and a card with no action in it was a dead end that
+ * told people to connect without offering to let them.
+ *
+ * The settings shown are only the ones that exist. There is no password form
+ * for a Google identity (it has no password), no language switcher, no saved
+ * cards and no second factor — this product has none of those, and a row that
+ * cannot do anything is worse than an absent one.
+ */
 export function Account() {
-  const { user } = useSession();
+  const { user, email, emailVerified, hasPassword, logout, online } = useSession();
   const navigate = useNavigate();
   const bookings = useApi(user ? '/me/bookings' : null);
   const parcels = useApi(user ? '/me/parcels' : null);
-  // The account screen leads with what is happening, not with settings.
+  const [busy, setBusy] = useState(false);
+  // What is happening leads; settings follow. A ticket in hand is more urgent
+  // than anything below it.
   const next = (bookings.data || [])
     .filter(b => ['held', 'confirmed', 'boarded'].includes(b.status))
     .sort((a, b) => Date.parse(a.departure_at) - Date.parse(b.departure_at))[0];
   const parcel = (parcels.data || [])[0];
+  async function signOut() {
+    setBusy(true);
+    try { await logout(); } finally { setBusy(false); }
+  }
   return <>
     <SectionTitle icon={UserRound} title="Mon compte"/>
-    {!user ? <Card className="stack">
-      <strong>Connectez-vous</strong>
-      <p className="small muted">Retrouvez vos billets, vos envois et vos notifications.</p>
-    </Card> : <>
+    {user && <>
       {next && <Card className="card-primary stack">
         <span className="eyebrow" style={{ color: '#fff', opacity: .85 }}>Prochain voyage</span>
         <h2>{next.departure_city} → {next.arrival_city}</h2>
@@ -760,11 +777,49 @@ export function Account() {
         <div><span className="small muted">Dernier envoi</span><h3>{parcel.trackingNumber}</h3></div>
         <Badge tone={status('parcel', parcel.status).tone}>{status('parcel', parcel.status).label}</Badge>
       </Card>}
+
+      {!user.needs_profile && <ProfileForm/>}
+
       <Card className="stack">
-        <h3>{user.display_name || 'Mon profil'}</h3>
-        {!user.needs_profile && <ProfileForm/>}
+        <SectionTitle icon={Mail} title="Adresse e-mail"/>
+        <div className="between wrap">
+          <span>{email || 'Aucune adresse associée à cette session.'}</span>
+          {email && <Badge tone={emailVerified ? 'success' : 'warning'}>{emailVerified ? 'confirmée' : 'à confirmer'}</Badge>}
+        </div>
+        {email && !emailVerified && <p className="small muted">Confirmez votre adresse e-mail depuis l’écran de connexion pour continuer à utiliser votre compte.</p>}
+        <p className="small muted">Cette adresse vous identifie et reçoit vos confirmations. Elle ne peut pas être modifiée ici : contactez LeRoutier pour la changer.</p>
       </Card>
-      {!user.needs_profile && <PrivacyCenter/>}
+
+      <NotificationPreferences/>
+
+      <Card className="stack">
+        <SectionTitle icon={ShieldCheck} title="Confidentialité et données"/>
+        <p className="small muted">Exportez vos données, gérez vos consentements, consultez ce que nous conservons et demandez la suppression de votre compte.</p>
+        <div className="controls">
+          <button type="button" className="btn btn-soft" onClick={() => navigate('/account/privacy')}>Ouvrir confidentialité et données</button>
+        </div>
+      </Card>
+
+      <Card className="stack">
+        <SectionTitle icon={KeyRound} title="Sécurité"/>
+        {hasPassword
+          ? <PasswordForm/>
+          : <p className="small muted">Ce compte se connecte avec Google. Il n’a pas de mot de passe LeRoutier à modifier.</p>}
+        <div className="between wrap">
+          <span className="small muted">Fermer la session sur cet appareil.</span>
+          <button type="button" className="btn btn-soft" disabled={busy || !online} onClick={signOut}>
+            <LogOut size={15} aria-hidden="true"/>Se déconnecter</button>
+        </div>
+      </Card>
+
+      <Card className="stack">
+        <SectionTitle icon={Ticket} title="Mes accès rapides"/>
+        <div className="controls">
+          <button type="button" className="btn btn-soft" onClick={() => navigate('/tickets')}><Ticket size={15} aria-hidden="true"/>Mes billets</button>
+          <button type="button" className="btn btn-soft" onClick={() => navigate('/parcels')}><Package size={15} aria-hidden="true"/>Mes colis</button>
+          <button type="button" className="btn btn-soft" onClick={() => navigate('/notifications')}><Bell size={15} aria-hidden="true"/>Mes notifications</button>
+        </div>
+      </Card>
     </>}
     {/* Two different people reach this point. Somebody who only travels is
         offered the professional door, quietly. Somebody who already works here
