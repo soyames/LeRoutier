@@ -176,3 +176,17 @@ test('every refused resend is recorded with its reason, and never with the addre
     assert.equal(line.includes('oobCode'), false, 'no action code');
   }
 });
+
+test('a deployment with no Brevo credential says so at construction, not only when used', async () => {
+  const lines = [];
+  const realError = console.error;
+  console.error = line => lines.push(String(line));
+  try {
+    createApi(db, { ...config, notificationProviders: { ...config.notificationProviders, brevo: { apiKey: '', fromAddress: '' } } }, fixture.resolver);
+  } finally { console.error = realError; }
+  // Every resend from this process would answer 503. That is a standing
+  // condition of the deployment, and it is worth saying once at cold start
+  // rather than only to whoever happens to trigger the failure.
+  assert.deepEqual(lines.map(line => JSON.parse(line)),
+    [{ event: 'email_channel_unavailable', channel: 'email', reason: 'invalid_configuration' }]);
+});

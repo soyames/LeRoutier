@@ -731,6 +731,77 @@ function professionalWorkspace(user) {
 }
 
 /**
+ * The second factor, managed from the account page.
+ *
+ * LeRoutier's own TOTP rather than Firebase's: Firebase's multi-factor support
+ * lives in Identity Platform, which is a paid product, and this deployment runs
+ * on the free tier. The algorithm is the one every authenticator app already
+ * speaks, so nothing is asked of the user beyond scanning a code.
+ *
+ * The recovery codes are shown exactly once, and the screen says so plainly.
+ * Only hashes are stored, so there is no way to show them again — claiming
+ * otherwise would be a lie told at the worst possible moment.
+ */
+function SecondFactorCard() {
+  const { request, online } = useSession();
+  const status = useApi('/me/totp');
+  const [enrolment, setEnrolment] = useState(null);
+  const [codes, setCodes] = useState(null);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  async function run(action) { setBusy(true); setError(''); setNotice(''); try { await action(); } catch (e) { setError(e.message); } finally { setBusy(false); } }
+  const start = () => run(async () => setEnrolment(await request('/me/totp/enrolment', { method: 'POST' })));
+  const confirm = e => { e.preventDefault(); return run(async () => {
+    const result = await request('/me/totp/activation', { method: 'POST', body: { code: code.trim() } });
+    setCodes(result.recoveryCodes); setEnrolment(null); setCode(''); status.reload();
+  }); };
+  const turnOff = e => { e.preventDefault(); return run(async () => {
+    await request('/me/totp/disable', { method: 'POST', body: { code: code.trim() } });
+    setCode(''); setNotice('Double authentification désactivée.'); status.reload();
+  }); };
+
+  const enabled = status.data?.enabled === true;
+  const remaining = status.data?.recoveryCodesRemaining ?? 0;
+
+  return <>
+    <Card className="stack">
+      <SectionTitle icon={ShieldCheck} title="Double authentification"/>
+      {codes ? <>
+        <p><strong>Notez ces codes maintenant.</strong> Ils remplacent le code de votre téléphone si vous le perdez. Ils ne seront plus affichés : nous n’en conservons qu’une empreinte.</p>
+        <div className="controls">{codes.map(value => <code key={value} className="control">{value}</code>)}</div>
+        <button type="button" className="btn btn-primary" onClick={() => { setCodes(null); setNotice('Double authentification activée.'); }}>J’ai noté mes codes</button>
+      </> : enrolment ? <>
+        <p>Scannez ce code avec votre application d’authentification (Google Authenticator, Authy, FreeOTP…), puis saisissez le code à 6 chiffres qu’elle affiche.</p>
+        <div className="controls"><QRCodeSVG value={enrolment.uri} size={168} role="img" aria-label="Code à scanner avec votre application d’authentification"/></div>
+        <details><summary>Vous ne pouvez pas scanner ?</summary>
+          <p className="small muted">Saisissez cette clé manuellement :</p><code className="control">{enrolment.secret}</code></details>
+        <form className="stack" onSubmit={confirm}>
+          <label>Code à 6 chiffres<input className="control" inputMode="numeric" autoComplete="one-time-code" required maxLength={6} value={code} onChange={e => setCode(e.target.value)}/></label>
+          <button type="submit" className="btn btn-primary" disabled={busy || !online || code.trim().length < 6}>{busy ? 'Vérification…' : 'Activer'}</button>
+        </form>
+        <button type="button" className="btn btn-soft" disabled={busy} onClick={() => { setEnrolment(null); setCode(''); }}>Annuler</button>
+      </> : enabled ? <>
+        <p>Activée. Le code de votre application est demandé à chaque nouvelle connexion sur un appareil.</p>
+        <p className={remaining <= 2 ? 'small' : 'small muted'}>
+          {remaining > 0
+            ? `Il vous reste ${remaining} code${remaining > 1 ? 's' : ''} de secours.`
+            : 'Vous n’avez plus de code de secours : désactivez puis réactivez pour en obtenir de nouveaux.'}
+        </p>
+        <form className="stack" onSubmit={turnOff}>
+          <label>Code actuel pour désactiver<input className="control" inputMode="numeric" autoComplete="one-time-code" required maxLength={11} value={code} onChange={e => setCode(e.target.value)}/></label>
+          <button type="submit" className="btn btn-danger" disabled={busy || !online || !code.trim()}>{busy ? 'Vérification…' : 'Désactiver la double authentification'}</button>
+        </form>
+      </> : <>
+        <p className="small muted">Ajoutez un second facteur : en plus de votre mot de passe, un code temporaire généré par votre téléphone sera demandé. Cela protège votre compte même si votre mot de passe est découvert.</p>
+        <div className="controls"><button type="button" className="btn btn-soft" disabled={busy || !online} onClick={start}>{busy ? 'Préparation…' : 'Activer la double authentification'}</button></div>
+      </>}
+      {error && <p role="alert">{error}</p>}
+      {notice && <p role="status">{notice}</p>}
+    </Card>
+  </>;
+}
+
+/**
  * Mon compte — everything a signed-in person can configure about themselves,
  * in one place, reachable from the header avatar.
  *
@@ -811,6 +882,8 @@ export function Account() {
             <LogOut size={15} aria-hidden="true"/>Se déconnecter</button>
         </div>
       </Card>
+
+      <SecondFactorCard/>
 
       <Card className="stack">
         <SectionTitle icon={Ticket} title="Mes accès rapides"/>

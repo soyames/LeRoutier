@@ -10,7 +10,7 @@ function isDriverApp(role){return Array.isArray(role)?role.includes('driver')||r
 // only — the LeRoutier API never sees them.
 export function SessionPanel({onWorkspace=undefined}) {
   const {user,identity,role,login,loginDemo,logout,demoLogin,configured,online,authLoading,authError,canSignin,
-    googleAuth,createAccount,loginEmail,resetPassword,verifyEmail,configStatus,retryConfig}=useSession();
+    googleAuth,createAccount,loginEmail,resetPassword,verifyEmail,configStatus,retryConfig,totpRequired}=useSession();
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const [mode,setMode]=useState('signin'); // signin | register | reset
   // Leaving the verification panel always returns to the sign-in entry, not
@@ -57,6 +57,7 @@ export function SessionPanel({onWorkspace=undefined}) {
   // the bypass from the bundle rather than a control from the product.
   const devSignIn = import.meta.env.VITE_DEVELOPMENT_SIGN_IN && demoLogin;
   if(verifyEmail) return <VerificationPanel/>;
+  if(totpRequired) return <TotpPanel/>;
   if(!configured) return <Card><p role="status">Connexion au service indisponible. Réessayez ultérieurement.</p></Card>;
   return <Card className="stack">
     {!online && <p role="status">Hors ligne : les actions nécessitent une connexion.</p>}
@@ -172,6 +173,42 @@ function VerificationPanel(){
     </form>
     <button type="button" className="footer-link" onClick={backToSignin}>Retour à la connexion</button>
     {notice && <p role="status">{notice}</p>}
+    {error && <p role="alert">{error}</p>}
+  </Card>;
+}
+
+/**
+ * The second-factor challenge, shown when a sign-in reaches an identity that
+ * has a confirmed factor and this browser has not passed it.
+ *
+ * It accepts a live code from the authenticator OR one of the recovery codes,
+ * in the same field: a recovery code exists precisely for the moment the phone
+ * is gone, and making the user find a different screen at that moment would
+ * defeat the point of printing them. The server tells the difference and says
+ * how many codes are left, so the count is never guessed at.
+ */
+function TotpPanel(){
+  const {submitTotp,retrySession,logout,online}=useSession();
+  const [code,setCode]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  async function submit(e){
+    e.preventDefault();setBusy(true);setError('');
+    try{
+      await submitTotp(code.trim());
+      // The call that raised this challenge already failed, so the session has
+      // to be established again now that this browser has passed the factor.
+      await retrySession();
+    }catch(err){setError(err.message);}finally{setBusy(false);}
+  }
+  async function leave(){setBusy(true);try{await logout();}finally{setBusy(false);}}
+  return <Card className="stack">
+    <h3>Double authentification</h3>
+    <p>Saisissez le code à 6 chiffres affiché par votre application d’authentification, ou l’un de vos codes de secours.</p>
+    <form className="stack" onSubmit={submit}>
+      <label>Code de vérification<input className="control" inputMode="numeric" autoComplete="one-time-code"
+        required maxLength={11} value={code} onChange={e=>setCode(e.target.value)}/></label>
+      <button type="submit" className="btn btn-primary" disabled={busy||!online||!code.trim()}>{busy?'Vérification…':'Valider'}</button>
+    </form>
+    <button type="button" className="footer-link" disabled={busy} onClick={leave}>Revenir à la connexion</button>
     {error && <p role="alert">{error}</p>}
   </Card>;
 }

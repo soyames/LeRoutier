@@ -13,11 +13,16 @@ export async function audit(tx,actorId,action,entityId,operatorId=null,details={
 }
 
 export async function activeIdentity(tx,id) {
+  // totp_enabled rides along on the identity every authenticated request
+  // already loads. Reading it here rather than in a second query keeps the
+  // second factor free for the many identities that never enable one — and
+  // only a CONFIRMED enrolment counts, so an abandoned one gates nothing.
   const user=(await tx.query(`SELECT u.id,u.auth_subject,u.auth_issuer,u.display_name,u.role,u.operator_id,u.active,u.is_demo,u.profile_completed_at,p.phone,
     d.active AS driver_active,c.active AS convoyeur_active,o.active AS operator_active,o.type AS operator_type,o.verification_status,
-    o.owner_user_id,o.name AS operator_name FROM users u
+    o.owner_user_id,o.name AS operator_name,t.confirmed_at AS totp_confirmed_at FROM users u
     LEFT JOIN passenger_profiles p ON p.user_id=u.id LEFT JOIN driver_profiles d ON d.user_id=u.id
     LEFT JOIN convoyeur_profiles c ON c.user_id=u.id
+    LEFT JOIN user_totp t ON t.user_id=u.id
     LEFT JOIN operators o ON o.id=u.operator_id WHERE u.id=$1`,[id])).rows[0];
   invariant(user && user.active && (!user.operator_id || user.operator_active) &&
     (user.role!=='driver' || user.driver_active) && (user.role!=='convoyeur' || user.convoyeur_active),
@@ -28,6 +33,7 @@ export async function activeIdentity(tx,id) {
   // almost everybody — see platform-access.js.
   const platform_capabilities=await platformCapabilities(tx,user);
   return {...user,platform_capabilities,
+    has_second_factor:user.totp_confirmed_at!==null,
     needs_profile:user.role==='passenger' && !user.profile_completed_at && !user.is_demo};
 }
 

@@ -150,6 +150,13 @@ export async function mockApi(page) {
       {category:'operational',locked:false,channels:[{channel:'in_app',enabled:true},{channel:'sms',enabled:true}]},
       {category:'marketing',locked:false,channels:[{channel:'in_app',enabled:true},{channel:'sms',enabled:true}]},
     ]}}}));
+  // The second factor. Off by default, so the account page shows the offer
+  // rather than a challenge; enrolment is served so the flow can be walked.
+  await page.route('**/api/v1/me/totp',r=>r.fulfill({json:{data:{enabled:false,confirmedAt:null,recoveryCodesRemaining:0}}}));
+  await page.route('**/api/v1/me/totp/enrolment',r=>r.fulfill({json:{data:{secret:'JBSWY3DPEHPK3PXP',
+    uri:'otpauth://totp/LeRoutier:Test?secret=JBSWY3DPEHPK3PXP&issuer=LeRoutier&algorithm=SHA1&digits=6&period=30'}}}));
+  await page.route('**/api/v1/me/totp/activation',r=>r.fulfill({json:{data:{
+    recoveryCodes:['AAAAA-AAAAA','BBBBB-BBBBB','CCCCC-CCCCC'],token:'fixture-totp-proof'}}}));
   await page.route('**/api/v1/notifications/*/read',r=>r.fulfill({json:{data:{id:id(60),read:true}}}));
   await page.route('**/api/v1/notifications*',r=>r.fulfill({json:{data:[
     {id:id(60),eventType:'service.rescheduled',category:'critical',severity:'warning',template:'service_delayed',

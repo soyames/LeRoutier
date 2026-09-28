@@ -176,6 +176,44 @@ test('the profile icon leads to Mon compte, and Mon compte is where the settings
   await expect(page).toHaveURL(/\/account\/privacy/);
 });
 
+test('the second factor is turned on from Mon compte, and its recovery codes are shown once', async ({ page }) => {
+  await signedIn(page);
+  // Through the avatar, not a reload: the development session lives in memory,
+  // so a fresh document would sign the test out again.
+  await page.getByRole('button', { name: /^Compte de / }).click();
+  await page.getByRole('menuitem', { name: 'Mon profil' }).click();
+  await expect(page).toHaveURL(/\/account/);
+  await page.getByRole('button', { name: 'Activer la double authentification' }).click();
+  // The code to scan, and — underneath — the key for anyone whose camera will
+  // not cooperate, which is the difference between a feature and a dead end.
+  await expect(page.getByRole('img', { name: /Code à scanner/ })).toBeVisible();
+  await page.getByLabel('Code à 6 chiffres').fill('123456');
+  await page.getByRole('button', { name: 'Activer' }).click();
+  // Shown once, and said plainly, because only a hash is kept.
+  await expect(page.getByText(/Notez ces codes maintenant/)).toBeVisible();
+  await expect(page.getByText('AAAAA-AAAAA')).toBeVisible();
+  await page.getByRole('button', { name: 'J’ai noté mes codes' }).click();
+  await expect(page.getByText('AAAAA-AAAAA')).toHaveCount(0);
+});
+
+test('an identity with a second factor is asked for the code before anything else', async ({ page }) => {
+  await mockApi(page);
+  await isolateProvider(page);
+  await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: { demoLogin: true, firebase: FIREBASE } } }));
+  // The API refuses every authenticated call until the factor is passed; the
+  // browser must turn that into a challenge rather than into an error.
+  await page.route('**/api/v1/me/totp', r => r.fulfill({ status: 403, json: { error: { code: 'TOTP_REQUIRED', message: 'Confirmez votre double authentification pour continuer.' } } }));
+  await page.route('**/api/v1/auth/demo', r => r.fulfill({ json: { data: { token: 'fixture-session',
+    user: { id: '00000000-0000-4000-8000-000000000099', display_name: 'Test Identity', role: 'passenger', operator_id: null, needs_profile: false } } } }));
+  await page.goto('http://127.0.0.1:4173/account');
+  await page.getByRole('button', { name: 'Connexion de développement' }).click();
+  // One field taking either a code from the app or a recovery code: the moment
+  // somebody needs a recovery code is the moment they must not be sent hunting
+  // for a different screen.
+  await expect(page.getByLabel('Code de vérification')).toBeVisible();
+  await expect(page.getByText(/codes de secours/)).toBeVisible();
+});
+
 test('a signed-out Mon compte is not a dead end', async ({ page }) => {
   await mockApi(page);
   await isolateProvider(page);

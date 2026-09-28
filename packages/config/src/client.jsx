@@ -3,6 +3,14 @@ import { signInWithGoogle, completeRedirectSignIn, signOutFirebase, idToken, onA
   safeReturnPath, clearRedirectMarker, createAccountWithEmail, signInWithEmail, sendPasswordReset, changePassword as changePasswordWithFirebase } from './firebase.js';
 import { clearQueuedActions } from './offline.js';
 
+// The proof a browser earned by passing the second factor. It is stored like a
+// session and not like a credential: it identifies nobody on its own, grants
+// nothing without a valid Firebase token sent alongside it, and expires on the
+// server. Clearing it costs the user one code, never access to their account.
+const TOTP_TOKEN='leroutier:totp';
+const readTotp=()=>{try{return window.localStorage.getItem(TOTP_TOKEN)||null;}catch{return null;}};
+const writeTotp=value=>{try{value?window.localStorage.setItem(TOTP_TOKEN,value):window.localStorage.removeItem(TOTP_TOKEN);}catch{/* private mode */}};
+
 const Context=createContext(null);
 const subscribe=callback=>{window.addEventListener('online',callback);window.addEventListener('offline',callback);return()=>{window.removeEventListener('online',callback);window.removeEventListener('offline',callback);};};
 
@@ -20,6 +28,12 @@ const ERROR_COPY={
   // fix (bad credentials, a spent allowance, a refused address), so it must not
   // invite the retry that the transient wording invites.
   EMAIL_UNAVAILABLE:'L’envoi des e-mails de confirmation est indisponible. Contactez LeRoutier.',
+  TOTP_REQUIRED:'Confirmez votre double authentification pour continuer.',
+  TOTP_INVALID:'Ce code n’est pas valide. Vérifiez l’heure de votre téléphone.',
+  TOTP_REPLAYED:'Ce code a déjà servi. Attendez le suivant.',
+  TOTP_ALREADY_ENABLED:'La double authentification est déjà activée sur ce compte.',
+  TOTP_NOT_ENABLED:'La double authentification n’est pas activée sur ce compte.',
+  TOTP_NOT_STARTED:'Commencez par afficher le code à scanner, puis saisissez un code.',
   DRIVER_ASSIGNED:'Réaffectez le service actif avant de désactiver ce compte.',
   NOT_FOUND:'Introuvable : cet élément n’existe plus.',
   TICKET_INVALID:'Ce billet est invalide, expiré ou remplacé. Demandez au voyageur d’afficher son billet actuel.',
@@ -37,7 +51,13 @@ export function ApiProvider({baseUrl='',role,children}) {
   // deployment's fault. Collapsing them told users the secure sign-in "is not
   // configured yet" during an ordinary outage — an assertion about the
   // deployment that the client was in no position to make.
-  const [session,setSession]=useState(null),[auth,setAuth]=useState({loading:true,demoLogin:false,firebase:null,googleAuth:false,error:'',hydrating:false,verifyEmail:null,configStatus:'loading',email:null,emailVerified:false,hasPassword:false});
+  const [session,setSession]=useState(null),[auth,setAuth]=useState({loading:true,demoLogin:false,firebase:null,googleAuth:false,error:'',hydrating:false,verifyEmail:null,configStatus:'loading',email:null,emailVerified:false,hasPassword:false,totpRequired:false});
+  // Held in a ref rather than state: nothing renders it, and the request that
+  // follows a successful code must see it immediately. State would only reach
+  // the next render, so that request would go out with the old value and be
+  // refused by the very gate it just passed.
+  const totpRef=useRef(readTotp());
+  const rememberTotp=useCallback(token=>{totpRef.current=token||null;writeTotp(token||null);},[]);
   // Bumped to re-run the config fetch. A retry is the only recovery path this
   // state has: nothing else re-reads it.
   const [configAttempt,setConfigAttempt]=useState(0);
@@ -70,12 +90,17 @@ export function ApiProvider({baseUrl='',role,children}) {
     if(!base) throw new Error('API non configurée.');
     if(!navigator.onLine) throw new Error('Hors ligne. Réessayez après reconnexion.');
     const bearer=await authorization(token);
-    const response=await fetch(base+'/api/v1'+path,{method,signal,cache:'no-store',headers:{'content-type':'application/json','x-request-id':crypto.randomUUID(),...(bearer?{authorization:'Bearer '+bearer}:{}),...(key?{'idempotency-key':key}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+    const response=await fetch(base+'/api/v1'+path,{method,signal,cache:'no-store',headers:{'content-type':'application/json','x-request-id':crypto.randomUUID(),...(bearer?{authorization:'Bearer '+bearer}:{}),...(key?{'idempotency-key':key}:{}),...(totpRef.current?{'x-totp':totpRef.current}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
     let payload;
     try { payload=await response.json(); } catch { throw new Error('Le service est indisponible.'); }
     if(!response.ok){
       if(response.status===401 && bearer)setSession(null);
       const code=payload.error?.code;
+      // Any endpoint can raise this, not just /me: a browser whose proof
+      // expired hits it on whatever call it happens to make next. Surfacing it
+      // from the one place every call goes through means the panel appears
+      // wherever the user is, instead of only at sign-in.
+      if(code==='TOTP_REQUIRED')setAuth(a=>a.totpRequired?a:{...a,totpRequired:true,error:''});
       throw Object.assign(new Error(ERROR_COPY[code] || payload.error?.message || 'Le service est indisponible.'),
         {status:response.status,code});
     }
@@ -281,7 +306,7 @@ export function ApiProvider({baseUrl='',role,children}) {
     firebaseUserRef.current=null;
     hydratedUidRef.current=null;
     setSession(null);
-    setAuth(a=>({...a,error:''}));
+    setAuth(a=>({...a,error:'',totpRequired:false}));
     try{ clearQueuedActions(window.localStorage); }catch{ /* private mode */ }
     if(auth.firebase)await signOutFirebase(auth.firebase);
   },[auth.firebase]);
@@ -338,6 +363,19 @@ export function ApiProvider({baseUrl='',role,children}) {
     await changePasswordWithFirebase(auth.firebase,{email:auth.email,currentPassword,newPassword});
   },[auth.firebase,auth.email]);
 
+  // Passing the second factor. A correct code (or recovery code) returns a
+  // proof this browser keeps, so the question is asked once per device rather
+  // than once per visit — and the session is then established afresh, because
+  // the attempt that raised the challenge already failed.
+  const submitTotp=useCallback(async code=>{
+    const result=await request('/auth/totp',{method:'POST',body:{code}});
+    rememberTotp(result.token);
+    setAuth(a=>({...a,totpRequired:false,error:''}));
+    return result;
+  },[request,rememberTotp]);
+
+  const forgetTotp=useCallback(()=>rememberTotp(null),[rememberTotp]);
+
   // Resend from the "confirm your email" panel. The provider session was
   // signed out cleanly, so the resend re-authenticates with the password —
   // that is what proves the caller owns the account — then signs back out.
@@ -353,7 +391,7 @@ export function ApiProvider({baseUrl='',role,children}) {
 
   const backToSignin=useCallback(()=>{
     setSession(null);
-    setAuth(a=>({...a,verifyEmail:null,error:''}));
+    setAuth(a=>({...a,verifyEmail:null,error:'',totpRequired:false}));
   },[]);
 
   const refresh=useCallback(async()=>{
@@ -377,8 +415,9 @@ export function ApiProvider({baseUrl='',role,children}) {
     firebase:auth.firebase,
     verifyEmail:auth.verifyEmail,resendVerification,backToSignin,
     googleAuth:auth.googleAuth,login,loginDemo:demoLogin,logout,updateProfile,refresh,
-    createAccount,loginEmail,resetPassword,changePassword}),
-  [request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles,createAccount,loginEmail,resetPassword,resendVerification,backToSignin,retryConfig,changePassword]);
+    createAccount,loginEmail,resetPassword,changePassword,
+    totpRequired:auth.totpRequired,submitTotp,forgetTotp,retrySession:establishSession}),
+  [request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles,createAccount,loginEmail,resetPassword,resendVerification,backToSignin,retryConfig,changePassword,submitTotp,forgetTotp,establishSession]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

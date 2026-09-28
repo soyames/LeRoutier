@@ -31,6 +31,7 @@ import { fareIntelligence } from '@leroutier/database/fare-intelligence';
 import { commercial } from '@leroutier/database/commercial';
 import { assistantService } from './assistant.js';
 import { privacyCenter, retentionEngine } from '@leroutier/database/privacy';
+import { totpService } from '@leroutier/database/totp';
 import { evidenceStore, MAX_EVIDENCE_BYTES } from '@leroutier/database/evidence-storage';
 import { journeyPlanning } from '@leroutier/database/journey-planning';
 import { mobility } from '@leroutier/database/mobility';
@@ -69,6 +70,14 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   // so it cannot travel the notification pipeline; it uses the SAME provider,
   // settings and failure vocabulary instead of inventing a second system.
   const verificationMail=brevoTransactionalSender(settings.notificationProviders?.brevo ?? {}, fetcher);
+  // A deployment whose Brevo credential is missing or empty answers EVERY
+  // verification resend with a 503, and until 2026-09-28 it did so silently:
+  // nothing was logged, every gate passed, and the only evidence was a
+  // passenger's screenshot. Each failed attempt now records itself; this
+  // records the standing condition once per cold start, which is where it is
+  // cheapest to notice and impossible to miss.
+  if(verificationMail.available===false)
+    console.error(JSON.stringify({event:'email_channel_unavailable',channel:'email',reason:'invalid_configuration'}));
   // Private storage for KYC/KYB documents. Null when no provider is
   // configured, which is a supported state: the product keeps accepting
   // operator-hosted links and keeps saying plainly that it does not hold the
@@ -76,6 +85,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   // anywhere outside evidence-storage.js.
   const evidence=config.evidenceStore ?? evidenceStore(config);
   const health=operationalHealth(db);
+  const secondFactor=totpService(db);
   const fares=fareIntelligence(db);
   const commerce=commercial(db);
   const domain=transport(db), auth=authentication(db,config,keyResolver),provision=provisioning(db,config);
@@ -457,6 +467,20 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method!=='GET') await limited(actor.id ?? actor.agent.id);
     if(actor.agent && !path.startsWith('/agent/') && !(method==='POST' && path==='/workflows/tick'))
       invariant(false,'FORBIDDEN','Agent principals can only use the agent API.',403);
+    // The second factor, enforced HERE rather than on a list of "sensitive"
+    // routes. An identity that has confirmed a factor must prove this browser
+    // has passed it before any authenticated call succeeds: gating only the
+    // profile would make the factor decorative, since the same bearer token
+    // opens every other endpoint. The single exemption is the call that passes
+    // the factor itself — without it nobody could ever get back in.
+    //
+    // Identity with no confirmed factor pays nothing: has_second_factor rode
+    // along on the identity query that already ran.
+    if(!actor.agent && actor.has_second_factor===true && path!=='/auth/totp') {
+      const proof=req.headers.get('x-totp');
+      invariant(proof && await secondFactor.hasSession(actor.id,proof),
+        'TOTP_REQUIRED','Confirmez votre double authentification pour continuer.',403);
+    }
     if(method==='GET' && path==='/me') return actor.agent ? {agent:actor.agent} : actor;
     if(method==='GET' && path==='/agent/me') {
       invariant(actor.agent,'FORBIDDEN','Agent authentication is required.',403);
@@ -720,6 +744,40 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       return domain.simulatedTestPayment(actor,id,req.headers.get('idempotency-key'), { allowTestInventory: config.allowTestInventory === true && !config.production });
     }
     if(method==='PATCH' && path==='/me') return updateProfile(db,actor,await body());
+    // ---- the second factor ---------------------------------------------------
+    // Managing the factor is part of the account, so it lives under /me. Every
+    // one of these runs behind the gate above: an identity that already has a
+    // factor must have passed it to reach even these, which is why disabling
+    // asks for a code as well rather than trusting the session alone.
+    if(method==='GET' && path==='/me/totp') return secondFactor.status(actor.id);
+    if(method==='POST' && path==='/me/totp/enrolment') {
+      await limited('totp-enrolment:'+actor.id,20);
+      // The label is what the person sees in their authenticator app next to
+      // the code, so it is their name rather than an identifier.
+      return secondFactor.beginEnrolment(actor.id,actor.display_name?.trim() || 'Compte LeRoutier');
+    }
+    if(method==='POST' && path==='/me/totp/activation') {
+      // Deliberately tight. A code is six digits, so without a ceiling an
+      // attacker holding a stolen password could simply walk the space.
+      await limited('totp-activate:'+actor.id,10);
+      const activated=await secondFactor.activate(actor.id,(await body()).code);
+      // The browser that just proved the factor is granted a session for it.
+      // Without this, enabling the factor would instantly lock out the device
+      // that enabled it and demand a code from the user who just typed one.
+      return {...activated,...await secondFactor.grant(actor.id)};
+    }
+    if(method==='POST' && path==='/me/totp/disable') {
+      await limited('totp-disable:'+actor.id,10);
+      return secondFactor.disable(actor.id,(await body()).code);
+    }
+    // Signing in past the factor. This is the one authenticated route the gate
+    // above exempts, because it is the thing that opens it.
+    if(method==='POST' && path==='/auth/totp') {
+      await limited('totp-verify:'+actor.id,10);
+      const verified=await secondFactor.verify(actor.id,(await body()).code);
+      const granted=await secondFactor.grant(actor.id);
+      return {...granted,method:verified.method,recoveryCodesRemaining:verified.recoveryCodesRemaining};
+    }
     // ---- privacy, consent, data rights --------------------------------------
     if(method==='GET' && path==='/me/privacy') return privacy.summary(actor);
     if(method==='GET' && path==='/me/consents') return privacy.consents(actor);
