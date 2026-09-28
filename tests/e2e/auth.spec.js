@@ -102,6 +102,26 @@ test('the browser is never given anything but the four public identifiers', asyn
   expect(Object.keys(payload.firebase).sort()).toEqual(['apiKey', 'appId', 'authDomain', 'projectId', 'providers']);
 });
 
+test('a config we could not read is an outage, not an unconfigured deployment', async ({ page }) => {
+  await mockApi(page);
+  await isolateProvider(page);
+  // The API is unreachable, so the sign-in configuration never arrives.
+  await page.route('**/api/v1/auth/config', r => r.fulfill({ status: 503, json: { error: { code: 'UNAVAILABLE', message: 'The service is temporarily unavailable.' } } }));
+  await page.goto('http://127.0.0.1:4173/account');
+  await expect(page.getByText('Connexion indisponible. Réessayez ultérieurement.')).toBeVisible();
+  // We never learned what this deployment offers. Saying it is "not configured
+  // yet" states as fact something the client has no way to know, and sends the
+  // user looking for a problem that is not there — which is the bug this test
+  // exists to keep closed.
+  await expect(page.getByText('La connexion sécurisée n’est pas encore configurée.')).toHaveCount(0);
+  // Registered last, so it wins: the service is back.
+  await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: { demoLogin: false, firebase: FIREBASE } } }));
+  await page.getByRole('button', { name: 'Réessayer' }).click();
+  // Recovered in place — no reload, and the stale error is gone.
+  await expect(page.getByRole('button', { name: 'Continuer avec Google' })).toBeEnabled();
+  await expect(page.getByText('Connexion indisponible. Réessayez ultérieurement.')).toHaveCount(0);
+});
+
 // ------------------------------------------------------------- the session --
 test('a passenger completes their profile and signs out leaving nothing behind', async ({ page }) => {
   await signedIn(page, { needsProfile: true });
@@ -137,6 +157,36 @@ test('a passenger completes their profile and signs out leaving nothing behind',
     return keys.filter(k => /firebase|token|auth|oidc/i.test(k));
   });
   expect(residue).toEqual([]);
+});
+
+// ------------------------------------------------------------- mon compte --
+test('the profile icon leads to Mon compte, and Mon compte is where the settings live', async ({ page }) => {
+  await signedIn(page);
+  // The avatar is the documented way in: open it, choose the account entry.
+  await page.getByRole('button', { name: /^Compte de / }).click();
+  await page.getByRole('menuitem', { name: 'Mon profil' }).click();
+  await expect(page).toHaveURL(/\/account/);
+  // Each thing a person can actually configure, in one place.
+  await expect(page.getByRole('heading', { name: 'Adresse e-mail' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sécurité' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Confidentialité et données' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Mes accès rapides' })).toBeVisible();
+  // The privacy centre keeps its own stable route rather than being inlined.
+  await page.getByRole('button', { name: 'Ouvrir confidentialité et données' }).click();
+  await expect(page).toHaveURL(/\/account\/privacy/);
+});
+
+test('a signed-out Mon compte is not a dead end', async ({ page }) => {
+  await mockApi(page);
+  await isolateProvider(page);
+  await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: { demoLogin: false, firebase: FIREBASE } } }));
+  await page.goto('http://127.0.0.1:4173/account');
+  // The card that used to sit here said "Connectez-vous" and offered no way to
+  // do it, directly beneath a sign-in panel that did. What must remain is the
+  // working entry, and the page's own heading.
+  await expect(page.getByText('Retrouvez vos billets, vos envois et vos notifications.')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Mon compte' })).toBeVisible();
+  await expect(page.getByLabel('Adresse e-mail')).toBeVisible();
 });
 
 // ---------------------------------------------------------- legal pages ----

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { signInWithGoogle, completeRedirectSignIn, signOutFirebase, idToken, onAuthChange, takeReturnPath,
-  safeReturnPath, clearRedirectMarker, createAccountWithEmail, signInWithEmail, sendPasswordReset } from './firebase.js';
+  safeReturnPath, clearRedirectMarker, createAccountWithEmail, signInWithEmail, sendPasswordReset, changePassword as changePasswordWithFirebase } from './firebase.js';
 import { clearQueuedActions } from './offline.js';
 
 const Context=createContext(null);
@@ -16,6 +16,10 @@ const ERROR_COPY={
   FORBIDDEN:'Vous n’avez pas accès à cette action avec ce compte.',
   EMAIL_NOT_VERIFIED:'Confirmez votre adresse e-mail avant de vous connecter.',
   VERIFICATION_UNAVAILABLE:'Impossible d’envoyer l’e-mail de confirmation pour le moment. Réessayez plus tard.',
+  // Distinct from the line above on purpose: this one is a fault waiting cannot
+  // fix (bad credentials, a spent allowance, a refused address), so it must not
+  // invite the retry that the transient wording invites.
+  EMAIL_UNAVAILABLE:'L’envoi des e-mails de confirmation est indisponible. Contactez LeRoutier.',
   DRIVER_ASSIGNED:'Réaffectez le service actif avant de désactiver ce compte.',
   NOT_FOUND:'Introuvable : cet élément n’existe plus.',
   TICKET_INVALID:'Ce billet est invalide, expiré ou remplacé. Demandez au voyageur d’afficher son billet actuel.',
@@ -28,8 +32,29 @@ const ERROR_COPY={
 };
 
 export function ApiProvider({baseUrl='',role,children}) {
-  const [session,setSession]=useState(null),[auth,setAuth]=useState({loading:true,demoLogin:false,firebase:null,googleAuth:false,error:'',hydrating:false,verifyEmail:null});
+  // configStatus is deliberately three-valued, because "we could not ask" and
+  // "the answer is no" are different facts and only one of them is the
+  // deployment's fault. Collapsing them told users the secure sign-in "is not
+  // configured yet" during an ordinary outage — an assertion about the
+  // deployment that the client was in no position to make.
+  const [session,setSession]=useState(null),[auth,setAuth]=useState({loading:true,demoLogin:false,firebase:null,googleAuth:false,error:'',hydrating:false,verifyEmail:null,configStatus:'loading',email:null,emailVerified:false,hasPassword:false});
+  // Bumped to re-run the config fetch. A retry is the only recovery path this
+  // state has: nothing else re-reads it.
+  const [configAttempt,setConfigAttempt]=useState(0);
+  const retryConfig=useCallback(()=>{setAuth(a=>({...a,configStatus:'loading',error:''}));setConfigAttempt(n=>n+1);},[]);
   const online=useSyncExternalStore(subscribe,()=>navigator.onLine,()=>true),base=baseUrl.replace(/\/$/,'');
+  // The config fetch is the one request the whole sign-in surface depends on,
+  // and it previously had no recovery path at all: a single transient failure
+  // left that tab unable to sign in until the user reloaded by hand. Coming
+  // back online is exactly the moment to try again, and only the failed state
+  // needs it, so a healthy config is never re-read. Adjusted during render —
+  // the repo's convention for state derived from a value just read — because
+  // an effect here would be a cascading render for no gain.
+  const [prevOnline,setPrevOnline]=useState(online);
+  if(prevOnline!==online){
+    setPrevOnline(online);
+    if(online && auth.configStatus==='failed') retryConfig();
+  }
   // Hoisted so the memoization dependency is exactly the value read: the
   // session object changes on every /me refresh, but session.token is only set
   // by demo login — depending on it keeps `request` (and the auth-change
@@ -113,7 +138,10 @@ export function ApiProvider({baseUrl='',role,children}) {
     (async()=>{
       try{
         if(!base)throw new Error();
-        const response=await fetch(base+'/api/v1/auth/config',{cache:'no-store'});
+        // Bounded like /me: a hung proxy must not leave the sign-in entry
+        // saying "Connexion en cours…" indefinitely. The payload is four
+        // public identifiers, so this is generous rather than tight.
+        const response=await fetch(base+'/api/v1/auth/config',{cache:'no-store',signal:AbortSignal.timeout(15_000)});
         if(!response.ok)throw new Error();
         const {data}=await response.json();
         if(cancelled)return;
@@ -121,7 +149,13 @@ export function ApiProvider({baseUrl='',role,children}) {
         // A provider not listed is not rendered — and when the API says nothing
         // about providers (an older API, a fixture), fail hidden.
         const googleAuth=Array.isArray(data.firebase?.providers) && data.firebase.providers.includes('google');
-        setAuth({loading:false,demoLogin:data.demoLogin===true,firebase:data.firebase ?? null,googleAuth,error:'',hydrating:false,verifyEmail:null});
+        // A merge, not a replacement: the auth-state listener owns email and
+        // emailVerified, and a retry of this fetch must not blank them.
+        setAuth(a=>({...a,loading:false,demoLogin:data.demoLogin===true,firebase:data.firebase ?? null,googleAuth,error:'',hydrating:false,verifyEmail:null,
+          // The API answered. If it answered without a firebase block, sign-in
+          // genuinely is not configured here — that is the only case that may
+          // say so.
+          configStatus:data.firebase?'ready':'unconfigured'}));
 
         if(!googleAuth){
           // The provider is disabled: a redirect attempt that started under an
@@ -148,11 +182,14 @@ export function ApiProvider({baseUrl='',role,children}) {
           }
         }
       }catch{
-        if(!cancelled)setAuth(a=>({...a,loading:false,error:'Connexion indisponible. Réessayez ultérieurement.'}));
+        // We never learned what the deployment offers. Record the failure as
+        // its own state rather than as an empty answer, so the UI can offer a
+        // retry instead of asserting something it does not know.
+        if(!cancelled)setAuth(a=>({...a,loading:false,configStatus:'failed',error:'Connexion indisponible. Réessayez ultérieurement.'}));
       }
     })();
     return()=>{cancelled=true;};
-  },[base]);
+  },[base,configAttempt]);
 
   // One session-establishment path. onAuthStateChanged is the only thing that
   // calls /me: popup, password and redirect completion all converge on it, and
@@ -164,6 +201,18 @@ export function ApiProvider({baseUrl='',role,children}) {
       unsubscribe=await onAuthChange(auth.firebase,async firebaseUser=>{
         if(cancelled)return;
         firebaseUserRef.current=firebaseUser;
+        // The account page shows the address and its verified state, and the
+        // password change needs the address to re-authenticate with. LeRoutier
+        // deliberately keeps no email of its own (users has no such column),
+        // so the provider's own user is the single source. Identity-stable, so
+        // a token refresh that changes nothing causes no re-render.
+        const nextEmail=firebaseUser?.email??null,nextVerified=firebaseUser?.emailVerified===true;
+        // Whether a password EXISTS on this identity — which is what decides if
+        // the account page may offer to change one. A Google identity has none,
+        // and offering the form would be offering something that cannot work.
+        const nextHasPassword=(firebaseUser?.providerData??[]).some(entry=>entry?.providerId==='password');
+        setAuth(a=>a.email===nextEmail&&a.emailVerified===nextVerified&&a.hasPassword===nextHasPassword
+          ?a:{...a,email:nextEmail,emailVerified:nextVerified,hasPassword:nextHasPassword});
         if(!firebaseUser){
           gateRef.current=null;
           hydratedUidRef.current=null;
@@ -281,6 +330,14 @@ export function ApiProvider({baseUrl='',role,children}) {
     catch{ throw new Error('Impossible d’envoyer le lien de réinitialisation. Réessayez.'); }
   },[auth.firebase]);
 
+  // Changing the password re-authenticates with the current one first; see
+  // changePassword in firebase.js for why that ordering is the safe one.
+  const changePassword=useCallback(async({currentPassword,newPassword})=>{
+    if(!auth.firebase)throw new Error('La connexion sécurisée n’est pas encore configurée.');
+    if(!auth.email)throw new Error('Aucune adresse e-mail associée à ce compte.');
+    await changePasswordWithFirebase(auth.firebase,{email:auth.email,currentPassword,newPassword});
+  },[auth.firebase,auth.email]);
+
   // Resend from the "confirm your email" panel. The provider session was
   // signed out cleanly, so the resend re-authenticates with the password —
   // that is what proves the caller owns the account — then signs back out.
@@ -308,13 +365,20 @@ export function ApiProvider({baseUrl='',role,children}) {
     // Hydrating (a redirect just delivered its user and /me is in flight) is
     // loading too: the login UI must not offer a second attempt mid-hydration.
     demoLogin:auth.demoLogin,authLoading:auth.loading||auth.hydrating,authError:auth.error,canSignin:!!auth.firebase,
+    // 'loading' | 'ready' | 'unconfigured' | 'failed'. Only 'unconfigured' may
+    // claim the deployment has no secure sign-in; 'failed' means we could not
+    // ask, and is the one the user can act on.
+    configStatus:auth.configStatus,retryConfig,
+    // The provider's own view of the signed-in address. Read-only by design:
+    // LeRoutier stores no email of its own, so there is nothing here to edit.
+    email:auth.email,emailVerified:auth.emailVerified,hasPassword:auth.hasPassword,
     // The published Firebase web config, for the verify-email route to apply
     // the oobCode through the same SDK instance. Public identifiers only.
     firebase:auth.firebase,
     verifyEmail:auth.verifyEmail,resendVerification,backToSignin,
     googleAuth:auth.googleAuth,login,loginDemo:demoLogin,logout,updateProfile,refresh,
-    createAccount,loginEmail,resetPassword}),
-  [request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles,createAccount,loginEmail,resetPassword,resendVerification,backToSignin]);
+    createAccount,loginEmail,resetPassword,changePassword}),
+  [request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles,createAccount,loginEmail,resetPassword,resendVerification,backToSignin,retryConfig,changePassword]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

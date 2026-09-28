@@ -132,10 +132,14 @@ export function signInFailure(error, during = 'popup') {
     return fail('Choisissez un mot de passe d’au moins six caractères.', true);
   case 'auth/invalid-email':
     return fail('Cette adresse e-mail n’est pas valide.', true);
+  case 'auth/requires-recent-login':
+    return fail('Pour des raisons de sécurité, reconnectez-vous puis recommencez.', true);
   default:
-    return fail(during === 'password'
-      ? 'Impossible de vous connecter. Réessayez.'
-      : 'Impossible de démarrer la connexion. Réessayez.', true);
+    return fail(during === 'change-password'
+      ? 'Impossible de changer le mot de passe. Réessayez.'
+      : during === 'password'
+        ? 'Impossible de vous connecter. Réessayez.'
+        : 'Impossible de démarrer la connexion. Réessayez.', true);
   }
 }
 
@@ -325,6 +329,31 @@ export async function signInWithEmail(config, { email, password }) {
   if (!ready) throw new Error('auth-unavailable');
   try { return await ready.sdk.signInWithEmailAndPassword(ready.auth, String(email).trim(), String(password)); }
   catch (error) { throw signInFailure(error, 'password'); }
+}
+
+/**
+ * Changes the password of the signed-in identity.
+ *
+ * The current password is required and is verified FIRST, by re-authenticating
+ * against Firebase. That is what makes the change safe — it proves whoever is
+ * at the keyboard knows the existing secret, so a borrowed unlocked phone
+ * cannot lock the owner out — and it is also what makes it reliable, because
+ * Firebase refuses a password change on a session that is no longer recent and
+ * re-authenticating clears that condition rather than racing it.
+ *
+ * Passwords never reach LeRoutier: every call here is browser to Firebase.
+ * Identities created with Google have no password to change, and the caller is
+ * responsible for not offering the form to them.
+ */
+export async function changePassword(config, { email, currentPassword, newPassword }) {
+  const ready = await firebaseAuth(config);
+  if (!ready) throw new Error('auth-unavailable');
+  const user = ready.auth.currentUser;
+  if (!user) throw new Error('auth-unavailable');
+  try {
+    await ready.sdk.reauthenticateWithCredential(user, ready.sdk.EmailAuthProvider.credential(String(email).trim(), String(currentPassword)));
+    await ready.sdk.updatePassword(user, String(newPassword));
+  } catch (error) { throw signInFailure(error, 'change-password'); }
 }
 
 export async function sendPasswordReset(config, email) {

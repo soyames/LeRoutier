@@ -10,7 +10,7 @@ function isDriverApp(role){return Array.isArray(role)?role.includes('driver')||r
 // only — the LeRoutier API never sees them.
 export function SessionPanel({onWorkspace=undefined}) {
   const {user,identity,role,login,loginDemo,logout,demoLogin,configured,online,authLoading,authError,canSignin,
-    googleAuth,createAccount,loginEmail,resetPassword,verifyEmail}=useSession();
+    googleAuth,createAccount,loginEmail,resetPassword,verifyEmail,configStatus,retryConfig}=useSession();
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const [mode,setMode]=useState('signin'); // signin | register | reset
   // Leaving the verification panel always returns to the sign-in entry, not
@@ -70,12 +70,17 @@ export function SessionPanel({onWorkspace=undefined}) {
       </p>}
       {user?.needs_profile && <ProfileForm/>}</> : <>
       <h3>Bienvenue sur LeRoutier</h3>
-      {authLoading ? <p role="status">Connexion en cours…</p> : <>
+      {/* A retry puts the config back into 'loading', so progress has to
+          follow configStatus and not only the session's own loading flag. */}
+      {(authLoading || configStatus==='loading') ? <p role="status">Connexion en cours…</p> : <>
         {/* The Google entry exists only when the published provider list says
             so — one flag decides the whole surface, button and separator. */}
         {googleAuth && <button type="button" className="btn btn-primary" disabled={busy || !online || !canSignin} onClick={()=>run(login)}>
           {busy?'Connexion en cours…':canSignin?'Continuer avec Google':'Connexion indisponible'}</button>}
-        {!canSignin && !demoLogin && <p role="status">La connexion sécurisée n’est pas encore configurée.</p>}
+        {/* Only a deployed answer may claim the deployment is unconfigured.
+            When the config fetch failed we know no such thing, and saying it
+            sends people to look for a problem that is not there. */}
+        {configStatus==='unconfigured' && !demoLogin && <p role="status">La connexion sécurisée n’est pas encore configurée.</p>}
         {devSignIn && <button type="button" className="btn btn-soft" disabled={busy || !online} onClick={()=>run(loginDemo)}>Connexion de développement</button>}
         {devSignIn && Array.isArray(role) && role.length>1 && <div className="controls">
           {role.map(r=><button type="button" key={r} className="control" disabled={busy || !online}
@@ -119,9 +124,12 @@ export function SessionPanel({onWorkspace=undefined}) {
         </form>}
       </>}
       {notice && <p role="status">{notice}</p>}
-      {!authLoading && !canSignin && !demoLogin && mode==='signin' && <p className="small muted">Connectez-vous pour réserver un trajet, suivre vos billets et envoyer des colis.</p>}
+      {configStatus==='unconfigured' && !demoLogin && mode==='signin' && <p className="small muted">Connectez-vous pour réserver un trajet, suivre vos billets et envoyer des colis.</p>}
     </>}
     {(error || authError) && <p role="alert">{error || authError}</p>}
+    {/* The failure is recoverable and the user is the only one who can trigger
+        the retry, so offer it rather than making them reload the page. */}
+    {configStatus==='failed' && <button type="button" className="btn btn-soft" disabled={busy || !online} onClick={()=>run(retryConfig)}>Réessayer</button>}
   </Card>;
 }
 
@@ -177,6 +185,41 @@ export function ProfileForm(){
     <label>Téléphone<input className="control" type="tel" autoComplete="tel" maxLength={30} value={phone} onChange={e=>setPhone(e.target.value)}/></label>
     <button type="submit" className="btn btn-primary" disabled={busy || !online || !name.trim()}>Enregistrer mon profil</button>
     {error && <p role="alert">{error}</p>}{saved && <p role="status">Profil enregistré.</p>}
+  </form>;
+}
+
+/**
+ * Changing the password of the signed-in identity.
+ *
+ * The current password is asked for and verified first (see changePassword in
+ * firebase.js). That ordering is the safety property: only somebody who knows
+ * the existing secret can replace it, so an unlocked borrowed phone cannot lock
+ * the owner out. It is also why the change works at all on a session Firebase
+ * no longer considers recent.
+ *
+ * Passwords go browser → Firebase and never reach LeRoutier, so there is
+ * nothing here for the API to store, log or leak.
+ */
+export function PasswordForm(){
+  const {changePassword,online}=useSession();
+  const [current,setCurrent]=useState(''),[next,setNext]=useState(''),[confirm,setConfirm]=useState('');
+  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false);
+  const mismatch=confirm!==''&&next!==confirm;
+  async function submit(e){
+    e.preventDefault();setBusy(true);setError('');setSaved(false);
+    try{
+      await changePassword({currentPassword:current,newPassword:next});
+      setCurrent('');setNext('');setConfirm('');setSaved(true);
+    }catch(err){setError(err.message);}finally{setBusy(false);}
+  }
+  return <form className="stack" onSubmit={submit}>
+    <label>Mot de passe actuel<input className="control" type="password" autoComplete="current-password" required value={current} onChange={e=>setCurrent(e.target.value)}/></label>
+    <label>Nouveau mot de passe<input className="control" type="password" autoComplete="new-password" required minLength={6} maxLength={128} value={next} onChange={e=>setNext(e.target.value)}/></label>
+    <label>Confirmer le nouveau mot de passe<input className="control" type="password" autoComplete="new-password" required minLength={6} maxLength={128} value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>
+    <button type="submit" className="btn btn-soft" disabled={busy||!online||mismatch||!current||!next||!confirm}>{busy?'Enregistrement…':'Changer mon mot de passe'}</button>
+    {mismatch && <p role="alert" className="small">Les deux nouveaux mots de passe ne correspondent pas.</p>}
+    {error && <p role="alert">{error}</p>}
+    {saved && <p role="status">Mot de passe modifié.</p>}
   </form>;
 }
 
