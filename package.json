@@ -67,5 +67,10 @@
     "jose": "^6.2.12",
     "terser": "^5.51.2",
     "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "jwks-rsa>jose": "5.10.0"
+    }
   }
 }
