@@ -29,10 +29,16 @@ try {
     await page.goto(origin+'/parcels/track');await page.getByLabel('Numéro de suivi').fill('LRP-00000000');
     await page.getByRole('button',{name:'Suivre mon colis',exact:true}).click();
     await page.getByText('Ce numéro de suivi est introuvable. Vérifiez les caractères saisis.',{exact:true}).waitFor();checks++;
-    await page.goto(origin+'/tickets');await page.getByRole('heading',{name:'Connexion requise',exact:true}).waitFor();
+    // /tickets is reachable without an account since guest checkout: a ticket
+    // bought without one belongs to the device that bought it, and a sign-in
+    // wall here would lock somebody out of a ticket they had already paid for.
+    // What still matters is asserted instead — the account surface is offered,
+    // and production exposes no developer or TEST login.
+    await page.goto(origin+'/tickets');await page.getByRole('heading',{name:'Bienvenue sur LeRoutier',exact:true}).waitFor();
+    assert.equal(await page.getByText('Connectez-vous',{exact:true}).count(),1);
     assert.equal(await page.getByRole('button',{name:/TEST :|Développement :/}).count(),0);checks++;
     assert.deepEqual(errors,[]);assert.deepEqual(writes,[]);
-    console.log(`PASS ${width}px: anonymous search, parcel reference, account gate; no writes`);
+    console.log(`PASS ${width}px: anonymous search, parcel reference, account surface; no writes`);
     await context.close();
   }
   console.log(`Production browser smoke: ${checks}/${checks} passed. No bookings, payments or test records created.`);
