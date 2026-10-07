@@ -1,22 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
-import { Card, Badge, SectionTitle, ProfileForm, ErrorState, SessionPanel } from '@leroutier/ui';
+import { Card, Badge, SectionTitle, ErrorState, BrandLoader, PHONE_COUNTRIES, resolvePhoneCountry, composePhone } from '@leroutier/ui';
 import { fcfa, time, dayLong } from '@leroutier/ui';
-import { ArrowLeft, CreditCard, Lock } from 'lucide-react';
+import { ArrowLeft, CreditCard, Lock, Users } from 'lucide-react';
 import { TestBadge, ModeTestBanner } from './journey-results.jsx';
 import { InsuranceOffer } from './insurance.jsx';
 
-// The checkout: anonymous review first, authentication ONLY on
-// "Continuer vers le paiement".
+// The checkout: no account is required at any point.
 //
 //   choose() → /checkout (anonymous, fare visible)
-//   → Continuer vers le paiement → login/register (right here)
-//   → profile if missing (inline)
-//   → hold → payment (FedaPay, or the simulated TEST path) → confirmation
+//   → quantity, and a name and phone to reach the buyer on
+//   → hold (one purchase, N seats) → payment (FedaPay, or the simulated TEST
+//     path) → confirmation → the tickets
 //
-// The selected offer lives in sessionStorage (no secrets, no payment data)
-// and survives the Google/email round trip and page refreshes.
+// An ACCOUNT is offered afterwards, on the tickets, as a way to keep them. It
+// is never a toll gate on the way to one, which is what it used to be: this
+// screen stopped at "Continuer vers le paiement" and demanded a sign-in.
+//
+// A SIGNED-IN passenger still buys as themselves, and their tickets land on
+// their account. An account that has never bought anything is not a passenger
+// account yet, so it buys as a guest and adopts the purchase afterwards — the
+// one path that turns it into a passenger account.
+//
+// The selected offer lives in sessionStorage (no secrets, no payment data) and
+// survives a page refresh. The guest access token does NOT live here: it is
+// written to localStorage by the session provider, because it has to outlive
+// the tab that made the purchase.
 
 const INTENT = 'leroutier:checkout-intent';
 const readIntent = () => { try { return JSON.parse(window.sessionStorage.getItem(INTENT) || 'null'); } catch { return null; } };
@@ -30,9 +40,14 @@ export function rememberCheckout(intent) {
 
 const mins = seconds => (Number.isFinite(seconds) ? `${Math.round(seconds / 60)} min` : null);
 const km = metres => (Number.isFinite(metres) ? `${Math.round(metres / 1000 * 10) / 10} km` : null);
+const MAX_TICKETS = 10;
 
-function JourneySummary({ intent, fare }) {
+/** The seat a purchase is anchored to: the first of its party. */
+const firstBookingId = purchase => purchase?.bookings?.[0]?.id ?? purchase?.id ?? null;
+
+function JourneySummary({ intent, perPassenger, quantity, seatsLeft }) {
   const option = intent.option;
+  const plural = quantity > 1;
   return <div className="checkout-summary stack">
     <div className="between wrap">
       <div><h2>Votre trajet</h2>
@@ -59,11 +74,17 @@ function JourneySummary({ intent, fare }) {
           <div><strong>{intent.destinationLabel ?? option.dropoffStop.city}</strong>
             <span className="small muted"> · Dernier kilomètre : {mins(option.lastMile.durationS)} · {km(option.lastMile.distanceM)}</span></div></div></>}
     </div>
-    <p className="small muted">{option.available} place{option.available > 1 ? 's' : ''} disponible{option.available > 1 ? 's' : ''} · Arrivée estimée : {option.etaAt ? time(option.etaAt) : 'Indisponible'}</p>
+    <p className="small muted">{seatsLeft} place{seatsLeft > 1 ? 's' : ''} disponible{seatsLeft > 1 ? 's' : ''} pour cette portion · Arrivée estimée : {option.etaAt ? time(option.etaAt) : 'Indisponible'}</p>
     {option.waitingS > 0 && <p className="small muted">Attente à la prise en charge : {mins(option.waitingS)}</p>}
+    {/* The fare per passenger and the total for the party, both from the
+        server's quote, both before payment. */}
+    <div className="between wrap checkout-line">
+      <span>{fcfa(perPassenger)} par voyageur</span>
+      {plural && <span className="muted">× {quantity} voyageurs</span>}
+    </div>
     <div className="between wrap checkout-total">
       <span>Prix total</span>
-      <span className="trip-price">{fcfa(fare ?? option.fare.amountMinor)}</span>
+      <span className="trip-price">{fcfa(perPassenger * quantity)}</span>
     </div>
   </div>;
 }
@@ -74,6 +95,11 @@ function JourneySummary({ intent, fare }) {
 // the route is genuinely free here and is offered as such. Skipping is the
 // default: a passenger who does not care gets the first free seat, exactly as
 // before, and is never blocked by a grid they did not ask for.
+//
+// One seat is offered at a time because one passenger is choosing. For a party
+// the coach assigns the seats itself — picking three neighbours off a phone
+// screen, for people who are not in the room, is a puzzle nobody asked for, and
+// the seats are printed on the tickets either way.
 function SeatPicker({ option, value, onChange }) {
   const plan = useApi(`/services/${option.serviceId}/seats?origin=${option.originSequence}&destination=${option.destinationSequence}`);
   if (plan.loading || plan.error || !plan.data) return null;
@@ -99,6 +125,36 @@ function SeatPicker({ option, value, onChange }) {
   </Card>;
 }
 
+/**
+ * How many tickets, with quick choices and a number for anything else.
+ *
+ * The ceiling is the smaller of the product's ten and what the coach still has,
+ * so a quantity that cannot be sold is never offered in the first place.
+ */
+function QuantityPicker({ quantity, onChange, seatsLeft }) {
+  const max = Math.max(1, Math.min(MAX_TICKETS, seatsLeft));
+  const clamp = value => { const n = Number.parseInt(value, 10); return Number.isFinite(n) ? Math.min(max, Math.max(1, n)) : 1; };
+  return <Card className="stack">
+    <div className="between wrap">
+      <div><strong>Combien de billets ?</strong>
+        <p className="small muted">Un siège et un billet par voyageur, payés en une seule fois.</p></div>
+      <Badge tone={seatsLeft > 3 ? 'success' : 'warning'}>{seatsLeft} place{seatsLeft > 1 ? 's' : ''}</Badge>
+    </div>
+    <div className="qty-row" role="group" aria-label="Nombre de billets">
+      {/* Each chip names itself in words, so "3" is never read out — or looked
+          up — as a seat number the coach happens to be showing. */}
+      {[1, 2, 3].map(n => <button key={n} type="button" className={`qty ${quantity === n ? 'chosen' : ''}`}
+        aria-label={`${n} billet${n > 1 ? 's' : ''}`} aria-pressed={quantity === n}
+        disabled={n > max} onClick={() => onChange(n)}>{n}</button>)}
+    </div>
+    <label className="field">Autre nombre (1 à {max})
+      <input className="control" type="number" inputMode="numeric" min={1} max={max}
+        value={quantity} aria-label="Autre nombre de billets"
+        onChange={e => onChange(clamp(e.target.value))}/>
+    </label>
+  </Card>;
+}
+
 export function Checkout() {
   const navigate = useNavigate();
   const [intent] = useState(readIntent);
@@ -108,19 +164,33 @@ export function Checkout() {
 
 function CheckoutFlow({ intent }) {
   const navigate = useNavigate();
-  const { user, request, online } = useSession();
-  const [step, setStep] = useState(intent.paymentRequested ? 'auth' : 'review');
+  const { user, request, online, guestToken, rememberGuest } = useSession();
+  const option = intent.option;
+  const [step, setStep] = useState('review');
   const [seat, setSeat] = useState(null);
-  // The optional cover, chosen before the booking exists and attached once it
-  // does. Null is the default and staying null costs nothing.
+  const [quantity, setQuantity] = useState(1);
+  const [name, setName] = useState(user?.display_name ?? '');
+  const [phone, setPhone] = useState('');
+  const [country, setCountry] = useState(() => resolvePhoneCountry(option?.pickupStop?.countryCode));
+  // The server's quote, not the offer's. The offer's fare travelled through a
+  // search result; this one comes from the availability the booking is made
+  // against, and it is the one both sides compare.
+  const availability = useApi(`/services/${option.serviceId}/availability?origin=${option.originSequence}&destination=${option.destinationSequence}`);
+  const [fareNotice, setFareNotice] = useState('');
   const [cover, setCover] = useState(null);
   const [coverNotice, setCoverNotice] = useState('');
   const [error, setError] = useState('');
-  const [fare, setFare] = useState(null);
-  const [booking, setBooking] = useState(null);
   const keys = useRef(new Map([['hold', intent.holdKey ?? crypto.randomUUID()], ['pay', intent.payKey ?? crypto.randomUUID()]]));
   const running = useRef(false);
-  const option = intent.option;
+  // The token this purchase is being made with: the one already in this browser,
+  // or the one the hold hands back. Null means "no identity", which the API
+  // reads as a guest buyer — deliberately not the session's token, or a
+  // signed-in account that cannot yet buy would have the purchase attributed to
+  // it anyway.
+  const [buyToken, setBuyToken] = useState(guestToken ?? null);
+  const buyingAsSelf = Boolean(user?.passenger_activated && !user?.needs_profile);
+  const authOptions = buyingAsSelf ? {} : { token: buyToken };
+
   const backToResults = () => {
     clearIntent();
     const params = new URLSearchParams({ date: intent.search?.date ?? '' });
@@ -130,63 +200,92 @@ function CheckoutFlow({ intent }) {
     navigate(`/trips?${params}`);
   };
 
-  async function holdBooking() {
+  const perPassenger = availability.data?.fare?.amountMinor ?? option.fare.amountMinor;
+  const seatsLeft = availability.data?.available ?? option.available;
+  const total = perPassenger * quantity;
+  const soldOut = seatsLeft === 0;
+  const contactIncomplete = !buyingAsSelf && (name.trim().length < 2 || phone.replace(/[^0-9]/g, '').length < 6);
+
+  async function holdPurchase() {
     setError(''); setStep('paying');
     const key = keys.current.get('hold') ?? crypto.randomUUID();
     keys.current.set('hold', key);
     try {
-      const b = await request('/bookings', { method: 'POST', key, body: { serviceId: option.serviceId,
-        origin: option.originSequence, destination: option.destinationSequence,
-        ...(seat ? { seatNumber: seat } : {}) } });
-      setBooking(b);
+      const body = { serviceId: option.serviceId, origin: option.originSequence, destination: option.destinationSequence,
+        quantity,
+        // The fare the customer is looking at is asserted only when there is a
+        // server quote behind it to have shown them. Without one — the quote
+        // failed to load — the hold carries the server's own price and the
+        // screen renders it before payment, rather than being refused against a
+        // number that could never be refreshed.
+        ...(availability.data ? { expectedAmountMinor: total } : {}),
+        ...(quantity === 1 && seat ? { seatNumber: seat } : {}),
+        ...(buyingAsSelf ? {} : { passengerName: name.trim(), passengerPhone: composePhone(country, phone) }) };
+      const held = await request('/bookings', { method: 'POST', key, body, ...authOptions });
+      // The purchase mints an access token the first time this browser buys
+      // without an account. It is kept so the tickets survive the payment
+      // redirect and the tab being closed.
+      if (held.guestToken) { rememberGuest(held.guestToken); setBuyToken(held.guestToken); }
       // The add-on attaches to the booking that now exists. Deliberately
       // outside the try that governs the booking: an insurance request that
       // fails must never cost somebody their seat. It is reported as itself
       // and the journey continues to payment either way.
       if (cover) {
         try {
-          await request(`/bookings/${b.id}/insurance`, { method: 'POST', key: 'cover-' + b.id,
-            body: { productId: cover.productId, consentVersion: cover.consentVersion } });
+          await request(`/bookings/${firstBookingId(held)}/insurance`, { method: 'POST', key: 'cover-' + held.id,
+            body: { productId: cover.productId, consentVersion: cover.consentVersion }, ...authOptions });
         } catch {
-          setCoverNotice('Votre réservation est confirmée. La demande d’assurance n’a pas pu être envoyée : '
+          setCoverNotice('Votre réservation est enregistrée. La demande d’assurance n’a pas pu être envoyée : '
             + 'vous pourrez la refaire depuis votre billet.');
         }
       }
-      // Fare stability: the hold's amount is authoritative. A changed amount
-      // is stated, never silently applied.
-      if (b.amount_minor !== option.fare.amountMinor) {
-        setFare(b.amount_minor); setStep('quote'); return null;
-      }
-      return b;
+      return held;
     } catch (e) {
+      // A fare that moved between the quote and the hold is stated and has to be
+      // accepted. Nothing is held at a price the customer never saw: the server
+      // refuses the hold outright rather than taking the seats and asking later.
+      if (e.code === 'FARE_CHANGED') {
+        setStep('quote');
+        // The quote is re-read. If somebody accepts before the new figures land,
+        // the server refuses again with the same reason — a stale client is
+        // never able to pay a price that has moved.
+        availability.reload();
+        setFareNotice('Le tarif a changé depuis votre recherche. Vérifiez le nouveau prix avant de payer. Aucun paiement n’a été effectué.');
+        return null;
+      }
       // A seat that went while the passenger was deciding is a different
       // problem from a full coach, and only one of them they can fix here.
       if (e.code === 'SEAT_TAKEN') { setSeat(null); setError('Ce siège vient d’être pris. Choisissez-en un autre.'); }
-      else setError(e.code === 'SOLD_OUT' || e.code === 'SERVICE_UNAVAILABLE'
-        ? 'Ce trajet n’est plus disponible. Retournez aux résultats pour choisir un autre départ.'
-        : e.message);
+      else if (e.code === 'SOLD_OUT' || e.code === 'SERVICE_UNAVAILABLE') {
+        setError(e.message || 'Ce trajet n’est plus disponible. Retournez aux résultats pour choisir un autre départ.');
+        availability.reload();
+      } else if (e.code === 'PASSENGER_NOT_ACTIVATED' || e.code === 'PROFILE_REQUIRED') {
+        // The account asked to buy as itself and cannot yet. Buying as a guest is
+        // the way forward, and it is the way the purchase becomes adoptable.
+        setError('Achetez sans compte, puis rattachez ce billet : votre compte voyageur s’activera. Rechargez la page pour repartir en invité.');
+      } else setError(e.message);
       setStep('review');
       return null;
     }
   }
 
-  async function pay(b) {
+  async function pay(held) {
     setError('');
+    const key = keys.current.get('pay') ?? crypto.randomUUID();
+    keys.current.set('pay', key);
+    const anchor = firstBookingId(held);
     // TEST bookings take the simulated path: no provider, no real money,
     // and the same confirmation flow as a real payment.
     if (option.isTest) {
-      const key = keys.current.get('pay') ?? crypto.randomUUID();
-      keys.current.set('pay', key);
       try {
-        await request(`/bookings/${b.id}/payments/test`, { method: 'POST', key, body: {} });
-        const confirmed = { id: b.id }; // The TEST endpoint confirms atomically with payment.
+        await request(`/bookings/${held.id}/payments/test`, { method: 'POST', key, body: {}, ...authOptions });
         clearIntent();
-        navigate(`/tickets/${confirmed.id}`);
+        navigate(`/tickets/${anchor}`);
       } catch (e) { setError(e.message); setStep('review'); }
       return;
     }
     try {
-      const payment = await request(`/bookings/${b.id}/payment-intents`, { method: 'POST', key: 'pay-' + b.id, body: {} });
+      const payment = await request(`/bookings/${held.id}/payment-intents`, { method: 'POST', key: 'pay-' + held.id, body: {}, ...authOptions });
       if (payment.checkoutUrl) window.location.assign(payment.checkoutUrl);
       else { setError('Le lien de paiement est indisponible. Réessayez dans un instant.'); setStep('review'); }
     } catch (e) {
@@ -195,69 +294,67 @@ function CheckoutFlow({ intent }) {
     }
   }
 
-  // The one authentication gate: continuing to payment. After the session
-  // arrives (Google, email or registration — all through the same panel),
-  // the profile step completes and the booking is created automatically.
   async function continueToPayment() {
     if (running.current) return;
-    rememberCheckout({ ...intent, paymentRequested: true, holdKey: keys.current.get('hold'), payKey: keys.current.get('pay') });
-    if (!user || user.needs_profile) { setStep('auth'); return; }
     running.current = true;
-    try { const b = await holdBooking(); if (b) await pay(b); }
+    try { const held = await holdPurchase(); if (held) await pay(held); }
     finally { running.current = false; }
   }
-  useEffect(() => {
-    if (step !== 'auth' || !user || user.needs_profile) return;
-    const timer = setTimeout(() => { void continueToPayment(); }, 0);
-    return () => clearTimeout(timer);
-    // The session/profile change resumes the action the passenger requested.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, step]);
 
-  const soldOut = option.available === 0;
   return <div className="stack">
     <SectionTitle icon={CreditCard} title="Récapitulatif avant paiement"/>
     <Card className="stack">
       {!online && <p role="status">Hors ligne : les actions nécessitent une connexion.</p>}
-      <JourneySummary intent={intent} fare={fare ?? (booking?.amount_minor ?? null)}/>
+      <JourneySummary intent={intent} perPassenger={perPassenger} quantity={quantity} seatsLeft={seatsLeft}/>
       {option.isTest && <ModeTestBanner/>}
-      {/* A changed fare is stated plainly, never silently applied. */}
-      {fare !== null && fare !== option.fare.amountMinor && <p className="notice" role="status">
-        Le tarif a changé. Vérifiez le nouveau prix avant de poursuivre. Aucun paiement n’a été effectué.</p>}
-      <p className="small muted">Aucun compte n’est nécessaire pour consulter ce récapitulatif. La connexion n’est demandée qu’au paiement.</p>
+      {fareNotice && <p className="notice" role="status">{fareNotice}</p>}
+      <p className="small muted">Aucun compte n’est nécessaire, ni pour réserver ni pour voyager. Vos billets vous sont remis à la fin du paiement.</p>
 
-      {step === 'review' && !soldOut && <SeatPicker option={option} value={seat} onChange={setSeat}/>}
+      {step !== 'paying' && !soldOut && <QuantityPicker quantity={quantity} onChange={setQuantity} seatsLeft={seatsLeft}/>}
+
+      {/* Only a visitor — or an account that cannot yet buy as itself — is asked
+          for contact details. A returning passenger already gave them. */}
+      {step !== 'paying' && !soldOut && !buyingAsSelf && <Card className="stack">
+        <div><strong>Vos coordonnées</strong>
+          <p className="small muted">Pour vous joindre au sujet de ce départ. Elles servent aussi à retrouver vos billets.</p></div>
+        <label className="field">Nom et prénom du voyageur principal
+          <input className="control" value={name} onChange={e => setName(e.target.value)} autoComplete="name" maxLength={100}/>
+        </label>
+        <label className="field">Téléphone
+          <div className="phone-field">
+            <select className="control" value={country} onChange={e => setCountry(e.target.value)} aria-label="Pays de l’indicatif">
+              {PHONE_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name} (+{c.dial})</option>)}
+            </select>
+            <input className="control" type="tel" inputMode="tel" value={phone} onChange={e => setPhone(e.target.value)}
+              autoComplete="tel" maxLength={25} placeholder="97 00 00 42" aria-label="Numéro de téléphone"/>
+          </div>
+        </label>
+      </Card>}
+
+      {step === 'review' && !soldOut && quantity === 1 && <SeatPicker option={option} value={seat} onChange={setSeat}/>}
+      {step === 'review' && quantity > 1 && <p className="small muted" role="status">
+        Nous attribuons {quantity} places libres. Chaque voyageur reçoit son propre billet avec son siège.</p>}
       {/* Offered while the fare is still on screen, so it is a decision rather
           than a surprise after payment. Renders nothing at all when no partner
           is active, which is the state until one signs. */}
       {step === 'review' && !soldOut && !option.isTest
         && <InsuranceOffer scope="trip" chosen={cover} onChoose={setCover}/>}
       {coverNotice && <p className="notice" role="status">{coverNotice}</p>}
+
       {step === 'review' && <div className="controls">
         <button className="btn btn-soft" onClick={backToResults}><ArrowLeft size={15}/>Retour aux résultats</button>
-        <button className="btn btn-primary" disabled={soldOut || !online} onClick={continueToPayment}>
-          <Lock size={15}/>Continuer vers le paiement</button>
+        <button className="btn btn-primary" disabled={soldOut || !online || contactIncomplete} onClick={continueToPayment}>
+          <Lock size={15}/>{quantity > 1 ? `Payer ${quantity} billets` : 'Continuer vers le paiement'}</button>
       </div>}
+      {step === 'review' && !buyingAsSelf && contactIncomplete && !soldOut && <p className="small muted" role="status">
+        Indiquez le nom du voyageur principal et un numéro de téléphone joignable pour continuer.</p>}
 
-      {step === 'auth' && !user && <>
-        <SectionTitle title="Connectez-vous pour payer"/>
-        <p className="small muted">Votre trajet est conservé : vous reviendrez exactement ici après la connexion.</p>
-        {/* The one authentication gate: Google, e-mail or account creation,
-            all returning to this checkout. */}
-        <SessionPanel/>
-      </>}
-      {step === 'auth' && user?.needs_profile && <Card className="stack">
-        <strong>Complétez votre profil</strong>
-        <p className="small muted">Nom complet et téléphone suffisent pour voyager. Vous reprendrez le paiement automatiquement.</p>
-        <ProfileForm/>
-      </Card>}
       {step === 'quote' && <div className="controls">
         <button className="btn btn-soft" onClick={backToResults}>Retour aux résultats</button>
-        <button className="btn btn-primary" disabled={!online} onClick={async () => {
-          setStep('paying'); await pay(booking);
-        }}>Accepter {fcfa(fare)} et payer</button>
+        <button className="btn btn-primary" disabled={!online || soldOut} onClick={continueToPayment}>
+          <Users size={15}/>Accepter {fcfa(total)} et payer</button>
       </div>}
-      {step === 'paying' && <p role="status">Création de votre réservation…</p>}
+      {step === 'paying' && <BrandLoader label="Création de votre réservation…"/>}
       {error && <ErrorState title="Paiement impossible" text={error}/>}
     </Card>
   </div>;

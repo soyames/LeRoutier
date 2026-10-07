@@ -33,7 +33,14 @@ export function journeys(db, config = {}) {
           bap.name AS arrival_name,bap.description AS arrival_landmark,bap.latitude AS arrival_latitude,
           bap.longitude AS arrival_longitude,ap.name AS arrival_city,
           (SELECT count(*)::integer FROM ticket_credentials t WHERE t.booking_id=b.id) AS ticket_issued,
-          (SELECT coalesce(sum(amount_minor),0)::integer FROM payments p WHERE p.booking_id=b.id AND p.status='succeeded') AS paid_minor,
+          -- A seat bought as part of a party is settled by the purchase's payment,
+          -- so the timeline has to look at both or the payment step would stay
+          -- "pending" for ever on a ticket that is fully paid for.
+          (SELECT coalesce(sum(amount_minor),0)::integer FROM payments p WHERE p.status='succeeded'
+            AND (p.booking_id=b.id OR (b.group_id IS NOT NULL AND p.group_id=b.group_id))) AS paid_minor,
+          -- What was actually paid for: the purchase total when there is one, so
+          -- a seat's own fare is never compared against the party's payment.
+          coalesce((SELECT amount_minor FROM booking_groups WHERE id=b.group_id), b.amount_minor) AS due_minor,
           b.amount_minor
           FROM bookings b JOIN services s ON s.id=b.service_id JOIN operators o ON o.id=s.operator_id
           LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN places dp ON dp.id=bdp.place_id
@@ -47,7 +54,7 @@ export function journeys(db, config = {}) {
           `SELECT * FROM mobility_providers WHERE active AND country=$1 AND capabilities @> '["first_mile"]'::jsonb ORDER BY name`,
           [row.operator_country ?? 'BJ'])).rows;
         const suggestion = providers[0] ?? null;
-        const paid = row.paid_minor >= row.amount_minor;
+        const paid = row.paid_minor >= row.due_minor;
         const cancelled = ['cancelled', 'expired'].includes(row.status) || row.service_status === 'cancelled';
 
         // done: already true in stored state. upcoming: scheduled, not reached.

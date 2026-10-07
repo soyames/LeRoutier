@@ -105,18 +105,33 @@ export function createActions(ctx) {
       input: { status: optStr }, async run(executor, input) {
         const { status } = validate(this.input, input);
         invariant(status == null || ['pending', 'succeeded', 'failed', 'cancelled', 'refunded'].includes(status), 'INVALID_ACTION_INPUT', 'Invalid payment status.');
-        return many(`SELECT p.*,b.passenger_id,s.operator_id,u.display_name AS passenger_name FROM payments p
-          JOIN bookings b ON b.id=p.booking_id JOIN services s ON s.id=b.service_id JOIN users u ON u.id=b.passenger_id
-          WHERE p.provider='fedapay' AND ($1::text IS NULL OR p.status=$1) AND ($2::uuid IS NULL OR s.operator_id=$2)
+        // The operator and the passenger are read from whichever subject the
+        // payment settles: a purchase payment has no booking, and an inner join
+        // through one hid every grouped payment from this action.
+        return many(`SELECT p.*,coalesce(b.passenger_id,g.purchaser_id) AS passenger_id,
+          coalesce(s.operator_id,gs.operator_id) AS operator_id,coalesce(u.display_name,gu.display_name) AS passenger_name
+          FROM payments p
+          LEFT JOIN bookings b ON b.id=p.booking_id
+          LEFT JOIN booking_groups g ON g.id=p.group_id
+          LEFT JOIN services s ON s.id=b.service_id
+          LEFT JOIN services gs ON gs.id=g.service_id
+          LEFT JOIN users u ON u.id=b.passenger_id
+          LEFT JOIN users gu ON gu.id=g.purchaser_id
+          WHERE p.provider='fedapay' AND ($1::text IS NULL OR p.status=$1) AND ($2::uuid IS NULL OR coalesce(s.operator_id,gs.operator_id)=$2)
           ORDER BY p.created_at DESC LIMIT 100`, [status, await scopeOperator(executor, null)]);
       } },
     'payment.reconcile': { category: 'financial', approval: 'always', scope: 'payment.reconcile', description: 'Reconcile a payment against the trusted provider state.',
       input: { paymentId: id }, async run(executor, input) {
         const { paymentId } = validate(this.input, input);
         const payment = await payments.getById(paymentId);
-        const booking = await one('SELECT service_id FROM bookings WHERE id=$1', [payment.booking_id]);
-        const service = await one('SELECT operator_id FROM services WHERE id=$1', [booking.service_id]);
-        await scopeOperator(executor, service.operator_id);
+        // Dereferencing the booking column alone was a null dereference for a
+        // purchase payment, which removed the recovery path for exactly the
+        // payments an operator needs to reconcile by hand.
+        const scope = await one(payment.group_id
+          ? 'SELECT s.operator_id FROM booking_groups g JOIN services s ON s.id=g.service_id WHERE g.id=$1'
+          : 'SELECT s.operator_id FROM bookings b JOIN services s ON s.id=b.service_id WHERE b.id=$1',
+        [payment.group_id ?? payment.booking_id]);
+        await scopeOperator(executor, scope.operator_id);
         return payments.reconcile(executor, paymentId);
       } },
     'payout.inspect': { category: 'read', approval: 'never', scope: 'payout.review', description: 'Inspect driver payout requests.',

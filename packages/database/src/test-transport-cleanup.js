@@ -11,7 +11,11 @@ const BOOKING_CHILDREN = ['ticket_credentials','boarding_events','alighting_even
   'booking_passengers','mobility_handoff_events'];
 // Everything that points at a service. `recovery_assignments` precedes
 // `incidents` because it points at those too.
-const SERVICE_CHILDREN = ['booking_segments','bookings','vehicle_positions','driver_action_receipts',
+//
+// `booking_groups` follows `bookings` rather than leading it: it is the purchase
+// the bookings belong to, so the seats have to go before the order they were
+// bought in, or the seats' own foreign key blocks the delete.
+const SERVICE_CHILDREN = ['booking_segments','bookings','booking_groups','vehicle_positions','driver_action_receipts',
   'service_assignments','service_seats','service_segments','service_stops',
   'parcel_custody','parcel_events','parcel_service_assignments','recovery_assignments','incidents'];
 // Handled by their own parent's delete, or by the database.
@@ -56,11 +60,16 @@ export async function cleanupTestServices(tx) {
   await assertDeleteOrderIsComplete(tx);
   const services = (await tx.query('SELECT id FROM services WHERE id=ANY($1::uuid[]) AND is_demo FOR UPDATE', [serviceIds])).rows.map(r => r.id);
   const bookings = 'SELECT id FROM bookings WHERE service_id=ANY($1::uuid[])';
-  await tx.query(`DELETE FROM payment_events WHERE payment_id IN (SELECT id FROM payments WHERE booking_id IN (${bookings}))`, [services]);
+  // A payment settles a seat or a purchase, so both attributions are cleared.
+  // Deleting only the seat-level ones would leave a purchase payment behind and
+  // the next delete of `booking_groups` would fail on it.
+  const paid = `SELECT id FROM payments WHERE booking_id IN (${bookings})
+    OR group_id IN (SELECT id FROM booking_groups WHERE service_id=ANY($1::uuid[]))`;
+  await tx.query(`DELETE FROM payment_events WHERE payment_id IN (${paid})`, [services]);
   for (const table of BOOKING_CHILDREN) {
     await tx.query(`DELETE FROM ${table} WHERE booking_id IN (${bookings})`, [services]);
   }
-  await tx.query(`DELETE FROM payments WHERE booking_id IN (${bookings})`, [services]);
+  await tx.query(`DELETE FROM payments WHERE id IN (${paid})`, [services]);
   for (const table of SERVICE_CHILDREN) {
     await tx.query(`DELETE FROM ${table} WHERE service_id=ANY($1::uuid[])`, [services]);
   }

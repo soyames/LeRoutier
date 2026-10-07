@@ -450,6 +450,19 @@ summary{cursor:pointer;min-height:44px;padding-block:10px;font-weight:700}
 .skeleton{display:flex;flex-direction:column;gap:9px}
 .skeleton-line{height:12px;border-radius:var(--radius-pill);background:linear-gradient(90deg,var(--surface-mid) 25%,#dde5f4 37%,var(--surface-mid) 63%);background-size:400% 100%;animation:skeleton 1.4s ease infinite}
 @keyframes skeleton{0%{background-position:100% 50%}100%{background-position:0 50%}}
+/* The brand mark, while a region waits for something whose shape is not known
+   yet. It sits IN the layout rather than over it — no scrim, nothing inert —
+   and it reserves its box from the first frame so revealing it moves nothing.
+   The delayed reveal is the component's, not CSS's: a wait shorter than the
+   delay never shows a mark at all, which is what stops a fast answer from
+   flickering. */
+.lr-loader{display:flex;align-items:center;justify-content:center;min-height:72px}
+.lr-loader-mark{display:block;width:34px;height:34px;opacity:0;transition:opacity var(--dur) var(--ease)}
+.lr-loader-mark[data-visible]{opacity:1;animation:lr-breathe 1.6s var(--ease) infinite}
+.lr-loader-logo{width:100%;height:100%;display:block}
+/* Scale and opacity only: nothing here can move a line of text or trigger a
+   reflow, so a page waiting on one region never shifts under a thumb. */
+@keyframes lr-breathe{0%,100%{transform:scale(.94);opacity:.72}50%{transform:scale(1);opacity:1}}
 
 /* ── Accessibility ────────────────────────────────────────────────────────
    A visible ring wherever focus lands, on every interactive element, and a
@@ -859,6 +872,21 @@ picture{display:contents}
 /* Checkout. */
 .checkout-summary h2{font-size:18px}
 .checkout-total{border-top:1px solid var(--border-soft);padding-top:12px;font-weight:800;font-size:16px}
+/* The fare per passenger, above the total it multiplies. Two lines rather than
+   one so the arithmetic is readable before paying rather than afterwards. */
+.checkout-line{font-size:13.5px;color:var(--text-muted);padding-top:10px}
+/* Quick ticket counts. Large targets on a phone, and the pressed state is the
+   only thing that says which one is chosen — no colour-only signal. */
+.qty-row{display:flex;gap:8px;flex-wrap:wrap}
+.qty{min-width:56px;min-height:46px;border:1px solid var(--border-soft);background:var(--surface-raised);color:var(--text);
+  font:inherit;font-size:15px;font-weight:800;border-radius:var(--radius-control);cursor:pointer}
+.qty:hover:not(:disabled){border-color:var(--primary)}
+.qty.chosen{background:var(--primary-strong);border-color:var(--primary-strong);color:#fff}
+.qty:disabled{background:var(--surface-soft);color:#98a2b3;cursor:not-allowed;border-color:transparent}
+/* A dialling code beside the number it belongs to, so the pair reads as one
+   field: a phone number without its country is not a phone number. */
+.phone-field{display:grid;grid-template-columns:minmax(120px,1.1fr) 1fr;gap:8px;align-items:center}
+@media(max-width:420px){.phone-field{grid-template-columns:1fr}}
 .steps{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11.5px;font-weight:800}
 .steps .step{display:flex;align-items:center;gap:6px;color:var(--text-muted)}
 .steps .step .num{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--surface-soft);color:var(--text-muted);font-size:10.5px}
@@ -1140,4 +1168,9 @@ body[data-nav="bottom"] .assistant-launcher{bottom:calc(88px + max(16px,env(safe
   .service-card:hover .service-card-media img{transform:none}
   .btn:active:not(:disabled){transform:none}
   .swap-btn:active:not(:disabled){transform:none}
+  /* The blanket rule above shortens the breath to a single near-instant
+     iteration, which would strand the mark at the dim end of the cycle. The
+     mark still appears — it is the only sign the region is busy — it simply
+     holds still. */
+  .lr-loader-mark[data-visible]{animation:none;opacity:1;transform:none}
 }

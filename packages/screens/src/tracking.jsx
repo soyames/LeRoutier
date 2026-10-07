@@ -50,7 +50,12 @@ function arrivalLine(eta) {
  * while the screen is open is sufficient for a bus and costs far less. The
  * transport is isolated here, so a streaming upgrade later touches this file.
  */
-export function JourneyTracking({ bookingId, serviceId, pollMs = 20_000 }) {
+/**
+ * @param {{ bookingId?: string|null, serviceId?: string|null, pollMs?: number, token?: string|null }} props
+ * `token` names the identity the journey is read as, for a purchase made without
+ * an account: an explicit null reads as a visitor.
+ */
+export function JourneyTracking({ bookingId, serviceId, pollMs = 20_000, token }) {
   const { request } = useSession();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -63,7 +68,7 @@ export function JourneyTracking({ bookingId, serviceId, pollMs = 20_000 }) {
       try {
         const result = await request(bookingId
           ? `/journeys/${bookingId}/tracking`
-          : `/services/${serviceId}/tracking`);
+          : `/services/${serviceId}/tracking`, token === undefined ? {} : { token });
         if (!cancelled) { setData(result); setError(''); }
       } catch (e) {
         if (!cancelled) setError(e.message);
@@ -77,7 +82,7 @@ export function JourneyTracking({ bookingId, serviceId, pollMs = 20_000 }) {
     const onVisibility = () => { if (document.visibilityState === 'visible' && !timer) load(); };
     document.addEventListener('visibilitychange', onVisibility);
     return () => { cancelled = true; if (timer) clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); };
-  }, [bookingId, serviceId, request, pollMs]);
+  }, [bookingId, serviceId, request, pollMs, token]);
 
   if (!bookingId && !serviceId) return null;
   if (loading) return <SkeletonCards count={1} lines={5}/>;

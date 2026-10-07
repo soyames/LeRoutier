@@ -1,6 +1,7 @@
 // Read-only projection shared by the passenger document and confirmation mail.
 // Authorization belongs to the calling domain service. No credential, payment
 // provider secret or invented tax/company detail enters this projection.
+import { bookingMoney } from './transport.js';
 export async function bookingDocument(tx, id) {
   const b = (await tx.query(`SELECT b.*,u.display_name AS passenger_name,o.name AS operator_name,
     r.name AS route_name,s.is_demo,s.status AS service_status,
@@ -25,8 +26,12 @@ export async function bookingDocument(tx, id) {
     LEFT JOIN users driver ON driver.id=a.driver_id LEFT JOIN vehicles v ON v.id=a.vehicle_id
     WHERE b.id=$1`, [id])).rows[0];
   if (!b) return null;
-  const payments = (await tx.query(`SELECT id,amount_minor,currency,status,created_at FROM payments
-    WHERE booking_id=$1 AND status IN ('succeeded','refunded') ORDER BY created_at,id`, [id])).rows;
-  return { ...b, payments, paidMinor: payments.reduce((n, p) => n + p.amount_minor, 0),
-    refundedMinor: payments.filter(p => p.status === 'refunded').reduce((n, p) => n + p.amount_minor, 0) };
+  // A seat is paid for by its own payment or by its purchase's, so the document
+  // shows both: the traveller's receipt is the money that actually settled their
+  // seat, not only the rows addressed to it.
+  const payments = (await tx.query(`SELECT id,amount_minor,currency,status,created_at,group_id FROM payments
+    WHERE (booking_id=$1 OR ($2::uuid IS NOT NULL AND group_id=$2)) AND status IN ('succeeded','refunded')
+    ORDER BY created_at,id`, [id, b.group_id ?? null])).rows;
+  const money = await bookingMoney(tx, b);
+  return { ...b, payments, paidMinor: money.paidMinor, refundedMinor: money.refundedMinor, dueMinor: money.dueMinor };
 }

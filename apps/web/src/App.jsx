@@ -1,6 +1,6 @@
 import { Suspense, lazy, useState, Component } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router';
-import { AppShell, Card, Badge, SectionTitle, SessionPanel, EmptyState } from '@leroutier/ui';
+import { AppShell, Card, Badge, SectionTitle, SessionPanel, EmptyState, BrandLoader } from '@leroutier/ui';
 import { useSession } from '@leroutier/config/client';
 import { Trips, Tickets, Stations, Tracking, Account, Parcels as PassengerParcels, ParcelTracking, OnboardingPage, PrivacyCenter } from '@leroutier/screens/passenger';
 import { Checkout } from '@leroutier/screens/checkout';
@@ -82,10 +82,20 @@ class ScreenBoundary extends Component {
 
 function TicketsRoute() {
   const { id } = useParams();
+  // A ticket bought without an account is still a ticket. The token that came
+  // with the purchase is what the journey and the timeline are read as, so a
+  // guest sees exactly what a signed-in passenger sees on the same screen.
+  //
+  // Only a PASSENGER account reads as itself. A signed-in operator account is a
+  // service provider and is refused by the passenger endpoints, so a driver who
+  // bought a ticket reads it through the guest link like anybody else — rather
+  // than meeting a 403 on a journey they paid for.
+  const { user, guestToken } = useSession();
+  const token = user?.role === 'passenger' ? undefined : (guestToken ?? null);
   return <div className="stack">
     <Tickets focusId={id}/>
-    {id && <JourneyTracking bookingId={id}/>}
-    {id && <JourneyTimeline bookingId={id}/>}
+    {id && <JourneyTracking bookingId={id} token={token}/>}
+    {id && <JourneyTimeline bookingId={id} token={token}/>}
   </div>;
 }
 
@@ -297,13 +307,18 @@ export default function App() {
         landed on the passenger parcel page, because that is whose nav was
         still rendered. On a slow connection that window is seconds. */}
     <ScreenBoundary>
-      <Suspense key={`${workspace}:${page}`} fallback={<Card><p role="status">Chargement de votre espace…</p></Card>}>{content}</Suspense>
+      {/* The brand mark, not a card of text. This is the wait that happens on a
+          cold chunk — often the first thing somebody sees after tapping a
+          console — and it is a real wait, so the mark is the honest thing to
+          show. It sits inside the shell, so the header and navigation stay
+          usable while it is there. */}
+      <Suspense key={`${workspace}:${page}`} fallback={<BrandLoader label="Chargement de votre espace…"/>}>{content}</Suspense>
     </ScreenBoundary>
   </AppShell>;
 
   if (!known) return <Navigate to={workspace===OPS&&can.platformOps?'/ops/platform':scoped.prefix || '/'} replace/>;
   if (workspace !== PASSENGER) {
-    if (authLoading) return shell(<Card><p role="status">Vérification de votre identité…</p></Card>);
+    if (authLoading) return shell(<BrandLoader label="Vérification de votre identité…"/>);
     if (!user) return shell(<SignInRequired/>);
     if (!isAuthorized(workspace, user)) return shell(<NotAuthorized workspace={workspace}/>);
     if (workspace === WORK && (((page === 'boarding-points' || page === 'departures') && !can.independent) || (page === 'vehicle' && can.convoyeur))) {
@@ -324,7 +339,13 @@ export default function App() {
   // entry that lands on a sign-in wall is a menu entry that lied. The screen
   // itself already has an honest anonymous state — it says tracking appears
   // once a booking is confirmed, and offers the search.
+  //
+  // /tickets is public for the same reason and one more. The screen has an
+  // honest anonymous state — it explains that tickets appear once there is a
+  // purchase, and offers the search — and a purchase no longer implies an
+  // account, so a sign-in wall here would lock somebody out of a ticket they had
+  // already paid for.
   const fullyPublic = workspace === PASSENGER && (page === '' || page === 'trips' || page === 'professionnel' ||
-    page === 'tracking' || (page === 'parcels' && segments[1] === 'track') || page === 'checkout');
+    page === 'tracking' || page === 'tickets' || (page === 'parcels' && segments[1] === 'track') || page === 'checkout');
   return shell(<>{user?.is_demo && <div className="notice" role="status">Espace TEST · données de démonstration · aucun paiement réel</div>}{!fullyPublic && <SessionPanel onWorkspace={navigate}/>}{privacySub ? <PrivacyCenter/> : scoped.screens[page]}</>);
 }

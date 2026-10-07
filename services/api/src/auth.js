@@ -49,10 +49,22 @@ export function authentication(db, config, keyResolver = undefined) {
     async authenticate(request) {
       const token = request.headers.get('authorization')?.match(/^Bearer ([^\s]+)$/)?.[1];
       invariant(token && token.length < 8192, 'UNAUTHORIZED', 'Sign in to continue.', 401);
-      if(config.demoLogin && !token.includes('.')) {
+      // Opaque session tokens. A provider token always carries dots, so this is
+      // the one unambiguous test, and both kinds live in the same table: the
+      // development login's, which is only honoured where that login exists, and
+      // a guest purchaser's, which is honoured everywhere because buying without
+      // an account is a product path and not a development convenience.
+      //
+      // Whether the identity is still ACTIVE is deliberately left to
+      // activeIdentity below rather than filtered here. A suspended account has
+      // to be told it is suspended; resolving its session to nothing instead
+      // reported "your session is invalid", which sends somebody to sign in again
+      // for a problem signing in cannot fix.
+      if(!token.includes('.')) {
         return db.transaction(async tx=>{
           const row=(await tx.query(`SELECT u.id FROM api_sessions s JOIN users u ON u.id=s.user_id
-            WHERE s.token_hash=$1 AND s.expires_at>now() AND u.is_demo=true`,[hash(token)])).rows[0];
+            WHERE s.token_hash=$1 AND s.expires_at>now()
+              AND (s.kind='guest' OR ($2::boolean AND u.is_demo=true))`,[hash(token),config.demoLogin===true])).rows[0];
           invariant(row,'UNAUTHORIZED','Session is invalid or expired.',401);
           return activeIdentity(tx,row.id);
         });

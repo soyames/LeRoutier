@@ -29,12 +29,17 @@ function StepIcon({ state }) {
   return <CircleDashed size={18}/>;
 }
 
-export function JourneyTimeline({ bookingId }) {
+/**
+ * @param {{ bookingId?: string|null, token?: string|null }} props
+ * `token` names the identity the journey is read as, for a purchase made without
+ * an account: an explicit null reads as a visitor.
+ */
+export function JourneyTimeline({ bookingId, token }) {
   const { request, online } = useSession();
   const [travelMinutes, setTravelMinutes] = useState(null);
   const [locating, setLocating] = useState('');
   const path = bookingId ? `/journeys/${bookingId}/timeline${travelMinutes === null ? '' : `?localTravelMinutes=${travelMinutes}`}` : null;
-  const journey = useApi(path);
+  const journey = useApi(path, token === undefined ? {} : { token });
   const data = journey.data;
 
   // Handoff funnel. Failure to record analytics must never block the journey.

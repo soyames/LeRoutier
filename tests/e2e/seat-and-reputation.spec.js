@@ -56,11 +56,13 @@ test('a seat can be chosen at checkout, and skipping it still books', async ({ p
   await expect(seats.getByRole('button', { name: /Siège 5, libre à partir de votre montée/ })).toBeEnabled();
   await seats.getByRole('button', { name: /Siège 5/ }).click();
   await expect(page.getByText('Siège 5 sélectionné.')).toBeVisible();
+  await page.getByLabel('Nom et prénom du voyageur principal').fill('Awa Sossou');
+  await page.getByLabel('Numéro de téléphone').fill('97000042');
   await page.getByRole('button', { name: 'Continuer vers le paiement' }).click();
-  // The hold happens after the auth gate, so the chosen seat has to survive it.
-  await page.getByRole('button', { name: 'Connexion de développement' }).click();
   await expect.poll(() => held.length, { timeout: 15000 }).toBeGreaterThan(0);
+  // The chosen seat travels with the purchase, not only with the seat map.
   expect(held[0].seatNumber).toBe(5);
+  expect(held[0].quantity).toBe(1);
 });
 
 test('a seat taken while deciding is explained, not reported as a full bus', async ({ page }) => {
@@ -69,8 +71,9 @@ test('a seat taken while deciding is explained, not reported as a full bus', asy
     json: { error: { code: 'SEAT_TAKEN', message: 'Ce siège vient d’être pris. Choisissez-en un autre.' } } }));
   await page.getByRole('button', { name: 'Choisir' }).first().click();
   await page.getByRole('group', { name: 'Sièges disponibles' }).getByRole('button', { name: /Siège 2/ }).click();
+  await page.getByLabel('Nom et prénom du voyageur principal').fill('Awa Sossou');
+  await page.getByLabel('Numéro de téléphone').fill('97000042');
   await page.getByRole('button', { name: 'Continuer vers le paiement' }).click();
-  await page.getByRole('button', { name: 'Connexion de développement' }).click();
   await expect(page.getByText(/Ce siège vient d’être pris/)).toBeVisible({ timeout: 15000 });
   // The passenger is not told the departure is gone, because it is not.
   await expect(page.getByText(/n’est plus disponible/)).toHaveCount(0);

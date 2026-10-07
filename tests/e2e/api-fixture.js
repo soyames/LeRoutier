@@ -61,6 +61,11 @@ const TILE_HOSTS=new Set(['tile.openstreetmap.org','basemaps.cartocdn.com']);
 
 export async function mockApi(page) {
   const token=role=>`fixture-session-${role}`;
+  // The purchases made during a test, so the tickets screen can show what the
+  // checkout just bought. Deliberately stateful: the guest journey is
+  // purchase-then-read-it-back, and a fixture that answered each call
+  // independently could not tell whether the second half ever happened.
+  const bought=[];
   // Map tiles are never fetched in tests: the suite must not depend on a tile
   // server being online, and a blocked tile is indistinguishable to Leaflet
   // from a slow one. The container, route line and markers still render.
@@ -73,10 +78,15 @@ export async function mockApi(page) {
   });
   await page.route('**/api/v1/auth/config',r=>r.fulfill({json:{data:{demoLogin:true}}}));
   await page.route('**/api/v1/auth/demo',r=>{const role=r.request().postDataJSON().role;
-    return r.fulfill({json:{data:{token:token(role),user:{id:id(2),role,display_name:'Compte Démo',operator_id:role==='passenger'?null:id(1)}}}});
+    return r.fulfill({json:{data:{token:token(role),user:{id:id(2),role,display_name:'Compte Démo',operator_id:role==='passenger'?null:id(1),
+      passenger_activated:role==='passenger',needs_profile:false}}}});
   });
+  // `passenger_activated` is what a returning account carries: it has bought
+  // before, so it buys as itself. An account without it is not a passenger
+  // account yet and is offered the guest route instead.
   await page.route('**/api/v1/me',r=>{const role=(r.request().headers()['authorization']||'').replace('Bearer ','').split('-').at(-1)||'passenger';
-    return r.fulfill({json:{data:{id:id(2),role,display_name:'Compte Démo',operator_id:role==='passenger'?null:id(1)}}});});
+    return r.fulfill({json:{data:{id:id(2),role,display_name:'Compte Démo',operator_id:role==='passenger'?null:id(1),
+      passenger_activated:role==='passenger',needs_profile:false}}});});
   await page.route('**/api/v1/routes',r=>r.fulfill({json:{data:[{id:id(10),stops}]}}));
   await page.route('**/api/v1/stops',r=>r.fulfill({json:{data:stops}}));
   // Benin geography: the parcel city picker reads communes, independent of routes.
@@ -87,6 +97,15 @@ export async function mockApi(page) {
   await page.route('**/api/v1/services/*/seats*',r=>r.fulfill({json:{data:{serviceId:id(30),origin:0,destination:3,capacity:8,
     seats:[1,2,3,4,5,6,7,8].map(n=>({seatNumber:n,available:n!==3,freedForThisLeg:n===5}))}}}));
   await page.route('**/api/v1/services?*',r=>r.fulfill({json:{data:[service]}}));
+  // The authoritative quote the checkout reads before it lets anybody pay. It
+  // answers for whichever offer the checkout is on, so the fare and the seats
+  // left always belong to the trip being bought.
+  await page.route('**/api/v1/services/*/availability*',r=>{
+    const serviceId=r.request().url().match(/services\/([^/?]+)\/availability/)?.[1];
+    const option=serviceId===id(31)?TEST_JOURNEY_OPTION:JOURNEY_OPTION;
+    return r.fulfill({json:{data:{serviceId,origin:0,destination:3,available:option.available,capacity:12,
+      fare:option.fare,segments:[],stops:[]}}});
+  });
   // The geography-backed journey planner answers with one real and one TEST
   // feasible option; specs that need the empty-catalogue state override this.
   await page.route('**/api/v1/journey-plan*',r=>r.fulfill({json:{data:{
@@ -94,13 +113,36 @@ export async function mockApi(page) {
     originResolved:{id:id(200),name:'Gare démo',city:'Cotonou',distanceM:600},
     destinationResolved:null,generatedAt:'2026-09-17T00:00:00Z'}}}));
   // The checkout flow: hold, then the simulated TEST payment path (no real
-  // provider), then confirmation. The booking id routes to the tickets mock.
-  await page.route('**/api/v1/bookings',r=>r.fulfill({json:{data:{id:id(40),status:'held',amount_minor:7500,currency:'XOF',
-    service_id:id(31),origin_sequence:0,destination_sequence:3,expires_at:new Date(Date.now()+600_000).toISOString()}}}));
-  await page.route('**/api/v1/bookings/*/payments/test',r=>r.fulfill({json:{data:{id:id(90),bookingId:id(40),provider:'demo',
-    provider_reference:'TEST-SIM-00000000',status:'succeeded',amount_minor:7500,currency:'XOF'}}}));
+  // provider), then confirmation.
+  //
+  // The hold answers with a PURCHASE, the way the API does: a quantity, a fare
+  // per passenger, a total, and one booking per traveller hanging off it. The
+  // seats it hands back are recorded, so the tickets screen afterwards shows the
+  // party that was actually bought rather than a fixed list.
+  await page.route('**/api/v1/bookings',r=>{
+    const body=r.request().postDataJSON()??{};
+    const quantity=body.quantity??1;
+    const purchase={id:id(40),status:'held',amount_minor:7500*quantity,currency:'XOF',
+      service_id:id(31),origin_sequence:0,destination_sequence:3,quantity,perPassengerMinor:7500,
+      expires_at:new Date(Date.now()+600_000).toISOString()};
+    purchase.bookings=Array.from({length:quantity},(_,i)=>({id:id(400+i),seat_number:i+1,status:'held',
+      amount_minor:7500,currency:'XOF',group_id:purchase.id,service_id:id(31),
+      departure_city:'Cotonou',arrival_city:'Parakou',route_name:'TEST Service Cotonou–Parakou',
+      departure_at:DEPARTURE_AT,expires_at:purchase.expires_at}));
+    bought.push(...purchase.bookings);
+    return r.fulfill({json:{data:{...purchase,guestToken:body.passengerName?'fixture-guest-token':'fixture-account'}}});
+  });
+  await page.route('**/api/v1/bookings/*/payments/test',r=>{
+    // The simulated payment confirms the party, exactly as the real one does, so
+    // the tickets that come back are boardable tickets and not held seats.
+    for(const seat of bought) seat.status='confirmed';
+    return r.fulfill({json:{data:{id:id(90),bookingId:id(40),groupId:id(40),
+      provider:'demo',provider_reference:'TEST-SIM-00000000',status:'succeeded',amount_minor:7500,currency:'XOF'}}});
+  });
   await page.route('**/api/v1/bookings/*/confirm',r=>r.fulfill({json:{data:{id:id(40),status:'confirmed'}}}));
-  await page.route('**/api/v1/me/bookings',r=>r.fulfill({json:{data:[]}}));
+  await page.route('**/api/v1/me/bookings',r=>r.fulfill({json:{data:bought}}));
+  // Keeping a guest's tickets: the account adopts the purchase it just paid for.
+  await page.route('**/api/v1/me/claim',r=>r.fulfill({json:{data:{activated:true,tickets:bought.length||1}}}));
   await page.route('**/api/v1/driver/service',r=>r.fulfill({json:{data:service}}));
   await page.route('**/api/v1/services/*/manifest',r=>r.fulfill({json:{data:[]}}));
   await page.route('**/api/v1/ops/fleet',r=>r.fulfill({json:{data:{services:[service],vehicles:[{id:id(20),registration:'DEMO-BUS-01',capacity:12,status:'active'}]}}}));

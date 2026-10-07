@@ -43,8 +43,11 @@ test('public browsing still works while sign-in is unavailable', async ({ page }
 });
 
 // ------------------------------------------------------- identity states ----
-test('a new passenger is asked to complete their profile before booking', async ({ page }) => {
+test('an account that has never bought is asked for contact details, never for a profile', async ({ page }) => {
   await mockApi(page);
+  // Signed in, but a passenger account only once a purchase has been adopted —
+  // so the checkout takes a name and a phone and lets it buy anyway, rather than
+  // stopping it to finish an account it does not need in order to travel.
   await signInAs(me({ role: 'passenger', needs_profile: true, display_name: '' }))(page);
   await page.goto(APP + '/trips');
   // Search and selection are anonymous-safe: no sign-in anywhere first.
@@ -55,11 +58,16 @@ test('a new passenger is asked to complete their profile before booking', async 
   await page.getByRole('button', { name: 'Rechercher un trajet' }).click();
   await page.getByRole('button', { name: 'Choisir' }).first().click();
   await expect(page).toHaveURL(/\/checkout/);
-  await page.getByRole('button', { name: 'Continuer vers le paiement' }).click();
-  // The one authentication gate, then the inline profile step.
-  await login(page);
-  await expect(page.getByRole('heading', { name: 'Complétez votre profil' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Enregistrer mon profil' })).toBeVisible();
+  // Nothing about an account stands between the fare and the payment: what the
+  // checkout wants is somebody to reach about this departure.
+  await expect(page.getByText('Vos coordonnées')).toBeVisible();
+  await expect(page.getByLabel('Nom et prénom du voyageur principal')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Complétez votre profil' })).toHaveCount(0);
+  await expect(page.getByText('Bienvenue sur LeRoutier')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Continuer vers le paiement' })).toBeDisabled();
+  await page.getByLabel('Nom et prénom du voyageur principal').fill('Voyageur Test');
+  await page.getByLabel('Numéro de téléphone').fill('97000042');
+  await expect(page.getByRole('button', { name: 'Continuer vers le paiement' })).toBeEnabled();
 });
 
 test('a disabled account is explained in product language, not API language', async ({ page }) => {

@@ -1,5 +1,6 @@
 import { ApiProvider } from '@leroutier/config/client';
-import React from 'react';
+import { BrandLoader } from '@leroutier/ui';
+import React, { Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router';
 // One stylesheet, one set of tokens. There used to be a second layer here
@@ -38,6 +39,12 @@ createRoot(document.getElementById('root')).render(
     <ApiProvider baseUrl={apiUrl} role={['passenger', 'driver', 'convoyeur', 'ops']}>
       <PwaUpdate/>
       <Seo/>
+      {/* The first paint, before any screen exists. The application bundle is
+          small and this is over almost immediately, which is exactly why it is
+          the brand mark rather than a screenful of placeholder: it reserves its
+          own box, shows nothing at all for the first fraction of a second, and
+          hands over to the real shell without the page moving. */}
+      <Suspense fallback={<BrandLoader label="Chargement de LeRoutier…"/>}>
       <Routes>
         {/* Routed above <App>, so they carry their own instance of the public
             shell. They used to carry no header at all: a visitor arriving from
@@ -68,6 +75,7 @@ createRoot(document.getElementById('root')).render(
       {/* After the shell in DOM order, so the app's skip link stays the first
           tabbable element and the launcher never steals the keyboard start. */}
       <Assistant/>
+      </Suspense>
     </ApiProvider>
   </BrowserRouter></React.StrictMode>,
 );

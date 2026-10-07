@@ -11,6 +11,22 @@ const TOTP_TOKEN='leroutier:totp';
 const readTotp=()=>{try{return window.localStorage.getItem(TOTP_TOKEN)||null;}catch{return null;}};
 const writeTotp=value=>{try{value?window.localStorage.setItem(TOTP_TOKEN,value):window.localStorage.removeItem(TOTP_TOKEN);}catch{/* private mode */}};
 
+// The proof a browser earned by BUYING rather than by signing in.
+//
+// A visitor can now buy without an account, and this token is how they come back
+// to what they bought: it is issued once, at the purchase, and stored hashed on
+// the server. It is held exactly like the second-factor proof above — a stored
+// secret that identifies nothing on its own and grants a passenger nothing an
+// account grants, with no sign-in state attached, so the header still shows the
+// visitor as a visitor.
+//
+// localStorage and not a cookie, and never a query string: a token in a URL ends
+// up in referrers, browser history and server logs, and this one is the only
+// thing standing between a purchase and anybody who reads those.
+const GUEST_TOKEN='leroutier:guest-access';
+const readGuest=()=>{try{return window.localStorage.getItem(GUEST_TOKEN)||null;}catch{return null;}};
+const writeGuest=value=>{try{value?window.localStorage.setItem(GUEST_TOKEN,value):window.localStorage.removeItem(GUEST_TOKEN);}catch{/* private mode */}};
+
 const Context=createContext(null);
 const subscribe=callback=>{window.addEventListener('online',callback);window.addEventListener('offline',callback);return()=>{window.removeEventListener('online',callback);window.removeEventListener('offline',callback);};};
 
@@ -58,6 +74,11 @@ export function ApiProvider({baseUrl='',role,children}) {
   // refused by the very gate it just passed.
   const totpRef=useRef(readTotp());
   const rememberTotp=useCallback(token=>{totpRef.current=token||null;writeTotp(token||null);},[]);
+  // State rather than a ref, unlike the factor proof above: the screens that
+  // show a guest their tickets have to re-render when the token arrives, and a
+  // ref would leave them showing the sign-in prompt they rendered a moment ago.
+  const [guestToken,setGuestToken]=useState(readGuest);
+  const rememberGuest=useCallback(token=>{setGuestToken(token||null);writeGuest(token||null);},[]);
   // Bumped to re-run the config fetch. A retry is the only recovery path this
   // state has: nothing else re-reads it.
   const [configAttempt,setConfigAttempt]=useState(0);
@@ -81,7 +102,10 @@ export function ApiProvider({baseUrl='',role,children}) {
   // subscription) stable across refreshes instead of re-subscribing each time.
   const sessionToken=session?.token;
   const authorization=useCallback(async explicit=>{
-    if(explicit)return explicit;
+    // An explicit value is final, including an explicit null: buying as a guest
+    // has to be able to say "no session", and falling back to the signed-in
+    // token would silently attribute the purchase to the account.
+    if(explicit!==undefined)return explicit||null;
     if(sessionToken)return sessionToken;
     return auth.firebase?await idToken(auth.firebase).catch(()=>null):null;
   },[sessionToken,auth.firebase]);
@@ -315,6 +339,21 @@ export function ApiProvider({baseUrl='',role,children}) {
     const user=await request('/me',{method:'PATCH',body});setSession(s=>s?{...s,user}:s);
   },[request]);
 
+  // Adopting the tickets bought before signing in. The token is the evidence of
+  // the purchase and the session is the identity that keeps it; the server needs
+  // both, which is why this is the one action that turns a new account into a
+  // passenger account. The token is spent server-side on success, so it is
+  // cleared here rather than kept as a second way in.
+  const claimPurchase=useCallback(async()=>{
+    const token=guestToken;
+    if(!token)throw new Error('Aucun achat à rattacher à ce compte.');
+    const result=await request('/me/claim',{method:'POST',body:{guestToken:token}});
+    rememberGuest(null);
+    const user=await request('/me');
+    setSession(s=>s?{...s,user}:s);
+    return result;
+  },[request,guestToken,rememberGuest]);
+
   // The verification email endpoint takes the Firebase ID token itself — the
   // address in the message always comes from the verified token's claims,
   // never from whatever a caller might put in a body.
@@ -416,24 +455,39 @@ export function ApiProvider({baseUrl='',role,children}) {
     verifyEmail:auth.verifyEmail,resendVerification,backToSignin,
     googleAuth:auth.googleAuth,login,loginDemo:demoLogin,logout,updateProfile,refresh,
     createAccount,loginEmail,resetPassword,changePassword,
+    // The guest purchase, if this browser made one: the token is what reads it
+    // back, and `claimPurchase` is how an account adopts it.
+    guestToken,rememberGuest,claimPurchase,
     totpRequired:auth.totpRequired,submitTotp,forgetTotp,retrySession:establishSession}),
-  [request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles,createAccount,loginEmail,resetPassword,resendVerification,backToSignin,retryConfig,changePassword,submitTotp,forgetTotp,establishSession]);
+  [request,session,role,online,base,auth,login,demoLogin,logout,updateProfile,refresh,roles,createAccount,loginEmail,resetPassword,resendVerification,backToSignin,retryConfig,changePassword,submitTotp,forgetTotp,establishSession,guestToken,rememberGuest,claimPurchase]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
 export function useSession(){return useContext(Context);}
 
-export function useApi(path) {
+/**
+ * A GET, cached against the path it was made for.
+ *
+ * `token` names the identity the read is for, and an explicit null means "read
+ * this as a visitor". It exists for the guest purchase: somebody who bought
+ * without an account has a token and no session, and the screens that show them
+ * what they bought have to make the same call an account makes.
+ *
+ * @param {string|null} path
+ * @param {{ token?: string|null }} [options]
+ */
+export function useApi(path, { token } = {}) {
   const {request,online}=useSession();
   const [version,setVersion]=useState(0),[state,setState]=useState({path:null,request:null,version:0,data:null,error:null,code:null,loading:true});
   useEffect(()=>{
     if(!path) return;
     if(!online) return;
     const controller=new AbortController();
-    request(path,{signal:controller.signal}).then(data=>{if(!controller.signal.aborted)setState({path,request,version,data,error:null,code:null,loading:false});})
+    const options={signal:controller.signal,...(token===undefined?{}:{token})};
+    request(path,options).then(data=>{if(!controller.signal.aborted)setState({path,request,version,data,error:null,code:null,loading:false});})
       .catch(error=>{if(!controller.signal.aborted)setState({path,request,version,data:null,error:error.message,code:error.code ?? null,loading:false});});
     return()=>controller.abort();
-  },[path,request,version,online]);
+  },[path,request,version,online,token]);
   const cached=state.path===path && state.request===request?state.data:null;
   const offline={data:cached,error:cached?null:'Hors ligne. Réessayez après reconnexion.',code:null,loading:false};
   return {...(!online?offline:state.path===path && state.request===request && state.version===version?state:{data:null,error:null,code:null,loading:!!path}),reload:()=>setVersion(v=>v+1)};

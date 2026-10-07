@@ -107,9 +107,19 @@ export function operationalHealth(db) {
           operator.evidenceComplete=operator.evidenceMissing.length===0 && rejected.length===0;
         }
 
-        const paymentAnomalies=!can('finance')?[]:(await tx.query(`SELECT p.id,p.status,p.amount_minor,p.currency,p.created_at,b.id AS booking_id,
-          s.id AS service_id,o.id AS operator_id,o.name AS operator_name
-          FROM payments p JOIN bookings b ON b.id=p.booking_id JOIN services s ON s.id=b.service_id JOIN operators o ON o.id=s.operator_id
+        // A failed payment settles one seat or a whole purchase. An inner join
+        // through the seat column would have hidden every failed group payment
+        // from the one screen built to find payments that went wrong.
+        const paymentAnomalies=!can('finance')?[]:(await tx.query(`SELECT p.id,p.status,p.amount_minor,p.currency,p.created_at,
+          b.id AS booking_id,g.id AS group_id,
+          coalesce(s.id,gs.id) AS service_id,coalesce(o.id,go.id) AS operator_id,coalesce(o.name,go.name) AS operator_name
+          FROM payments p
+          LEFT JOIN bookings b ON b.id=p.booking_id
+          LEFT JOIN booking_groups g ON g.id=p.group_id
+          LEFT JOIN services s ON s.id=b.service_id
+          LEFT JOIN services gs ON gs.id=g.service_id
+          LEFT JOIN operators o ON o.id=s.operator_id
+          LEFT JOIN operators go ON go.id=gs.operator_id
           WHERE p.status='failed' ORDER BY p.created_at DESC LIMIT 100`)).rows;
         const payoutAnomalies=!can('finance')?[]:(await tx.query(`SELECT r.id,r.status,r.amount_minor,r.currency,r.created_at,u.display_name AS beneficiary,
           dp.operator_id,o.name AS operator_name

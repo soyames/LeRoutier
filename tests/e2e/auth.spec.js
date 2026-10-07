@@ -40,6 +40,10 @@ async function signedIn(page, { role = 'passenger', needsProfile = false, routes
     display_name: needsProfile ? '' : 'Test Identity',
     role, operator_id: role === 'passenger' ? null : '00000000-0000-4000-8000-000000000001',
     needs_profile: needsProfile,
+    // A returning passenger: it has bought before, so it buys as itself. The
+    // real /me reports this; without it the checkout would (correctly) treat
+    // the account as one that has never bought anything.
+    passenger_activated: role === 'passenger',
   };
   let current = user;
   await page.route('**/api/v1/auth/demo', r => r.fulfill({ json: { data: { token: 'fixture-session', user: current } } }));
@@ -125,6 +129,26 @@ test('a config we could not read is an outage, not an unconfigured deployment', 
 // ------------------------------------------------------------- the session --
 test('a passenger completes their profile and signs out leaving nothing behind', async ({ page }) => {
   await signedIn(page, { needsProfile: true });
+  // The profile belongs to the account, and it is finished on the account
+  // screen. It used to be demanded mid-checkout with the payment held up behind
+  // it, which made an account a toll gate on the way to a ticket; the checkout
+  // now takes a name and a phone from whoever is buying and offers the account
+  // afterwards.
+  //
+  // Reached through the app's own navigation, never `page.goto`: a reload would
+  // end the demonstration session this test just established.
+  await page.getByRole('button', { name: /^Compte de/ }).click();
+  await page.getByRole('menuitem', { name: 'Mon profil' }).click();
+  await expect(page.getByRole('heading', { name: 'Complétez votre profil' })).toBeVisible();
+  await page.getByLabel('Nom complet').fill('Voyageur Test');
+  await page.getByLabel('Téléphone', { exact: true }).fill('');
+  await page.getByRole('button', { name: 'Enregistrer mon profil' }).click();
+  await expect(page.getByRole('button', { name: /^Compte de Voyageur Test$/ })).toBeVisible();
+
+  // With a completed profile the account buys as itself, and the checkout asks
+  // it for nothing at all. The search is run from the home page rather than a
+  // nav link, because on a phone those links live behind the drawer.
+  await page.getByRole('button', { name: 'Accueil LeRoutier' }).click();
   await page.getByLabel('Départ', { exact: true }).selectOption('place');
   await page.getByLabel('Ville de départ').fill('Cotonou'); await page.getByLabel('Ville de départ').press('Enter');
   await page.getByLabel('Destination').fill('Parakou'); await page.getByLabel('Destination').press('Enter');
@@ -134,17 +158,15 @@ test('a passenger completes their profile and signs out leaving nothing behind',
   await page.getByRole('button', { name: 'Choisir' }).first().click();
   await expect(page).toHaveURL(/\/checkout/);
   await expect(page.getByText('TEST', { exact: true })).toBeVisible();
+  await expect(page.getByText('Vos coordonnées')).toHaveCount(0);
   await page.getByRole('button', { name: 'Continuer vers le paiement' }).click();
-  // The profile gate sits at the payment step — inline, not onboarding.
-  await expect(page.getByRole('heading', { name: 'Complétez votre profil' })).toBeVisible();
-  await page.getByLabel('Nom complet').fill('Voyageur Test');
-  await page.getByLabel('Téléphone', { exact: true }).fill('');
-  await page.getByRole('button', { name: 'Enregistrer mon profil' }).click();
-  // Profile saved: the checkout resumes automatically and completes the
-  // simulated payment against the TEST booking.
   await expect(page).toHaveURL(/\/tickets\//, { timeout: 15000 });
 
-  await page.getByRole('button', { name: 'Déconnexion' }).click();
+  // Signing out through the account menu, which is the documented way and the
+  // one that exists on every screen — /tickets is reachable without an account,
+  // so the shell no longer puts a session panel in front of it.
+  await page.getByRole('button', { name: /^Compte de / }).click();
+  await page.getByRole('menuitem', { name: 'Déconnexion' }).click();
   // The development fixture has no configured identity provider: the entry
   // after sign-out is the local demo entry, never a dead Google button.
   await expect(page.getByRole('button', { name: 'Connexion de développement' })).toBeVisible();

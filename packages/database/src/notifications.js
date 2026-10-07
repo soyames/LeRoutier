@@ -16,7 +16,16 @@ const AUDIENCES = {
   async booking_passenger(tx, event) {
     const bookingId = event.payload?.bookingId ?? event.aggregate_id;
     const row = await one(tx, 'SELECT id,passenger_id FROM bookings WHERE id=$1', [bookingId]);
-    return row ? [{ userId: row.passenger_id, entityId: row.id }] : [];
+    if (row) return [{ userId: row.passenger_id, entityId: row.id }];
+    // A purchase event carries the order's id rather than a seat's. Its seats all
+    // belong to the purchaser, and the entity points at the first of them so the
+    // notification still opens a document. Emitting one event per seat instead
+    // would send the buyer N copies of the same message.
+    const group = await one(tx, 'SELECT id,purchaser_id FROM booking_groups WHERE id=$1',
+      [event.payload?.groupId ?? event.aggregate_id]);
+    if (!group) return [];
+    const seat = await one(tx, 'SELECT id FROM bookings WHERE group_id=$1 ORDER BY seat_number LIMIT 1', [group.id]);
+    return [{ userId: group.purchaser_id, entityId: seat?.id ?? group.id }];
   },
   async service_passengers(tx, event) {
     return (await rows(tx, `SELECT DISTINCT passenger_id,service_id FROM bookings
@@ -115,9 +124,15 @@ async function testService(tx, event, payload) {
   const ids = [event.aggregate_id, payload.serviceId, payload.bookingId, payload.parcelId,
     payload.data?.serviceId, payload.data?.bookingId].filter(Boolean);
   if (!ids.length) return false;
+  // A payment settles one seat or a whole purchase, so both attributions are
+  // walked. Missing the purchase one would let a TEST group purchase reach real
+  // SMS, WhatsApp and e-mail — the single-seat case cannot, because its payment
+  // names a booking.
   const row = await one(tx, `SELECT EXISTS(SELECT 1 FROM services s WHERE s.is_demo AND (
     s.id=ANY($1::uuid[]) OR s.id IN (SELECT service_id FROM bookings WHERE id=ANY($1::uuid[])) OR
     s.id IN (SELECT b.service_id FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE p.id=ANY($1::uuid[])) OR
+    s.id IN (SELECT g.service_id FROM payments p JOIN booking_groups g ON g.id=p.group_id WHERE p.id=ANY($1::uuid[])) OR
+    s.id IN (SELECT service_id FROM booking_groups WHERE id=ANY($1::uuid[])) OR
     s.id IN (SELECT service_id FROM parcel_service_assignments WHERE parcel_id=ANY($1::uuid[])) OR
     s.id IN (SELECT service_id FROM incidents WHERE id=ANY($1::uuid[]))))
     OR EXISTS(SELECT 1 FROM parcels p JOIN operators o ON o.id=p.operator_id LEFT JOIN users u ON u.id=p.created_by

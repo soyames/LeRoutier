@@ -44,6 +44,13 @@ test('first login is idempotent and ignores JWT privilege claims',async()=>{
 test('passenger completes own profile without privilege fields',async()=>{
   const result=await call('new-passenger','/api/v1/me','PATCH',{displayName:'Passenger Test',phone:'+229 0100000000'});
   assert.equal(result.status,200);assert.equal(result.data.needs_profile,false);
+  // This fixture stands for a RETURNING passenger — an account with a purchase
+  // behind it, which is what makes an identity a passenger account and lets it
+  // buy as itself. A freshly provisioned identity deliberately is not one until
+  // it adopts a purchase; that rule has its own suite (guest-checkout.test.js).
+  // Writing the flag directly is what migration 041 did for every account that
+  // existed before the rule.
+  await db.transaction(tx=>tx.query('UPDATE users SET passenger_activated_at=now() WHERE id=$1',[passenger.id]));
 });
 
 test('profile updates preserve omitted phone and accept explicit empty optional phone',async()=>{

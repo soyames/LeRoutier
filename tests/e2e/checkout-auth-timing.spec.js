@@ -1,9 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { mockApi, TEST_JOURNEY_OPTION } from './api-fixture.js';
 
-// The product rule: SEARCH → RESULTS → COMPARE → VIEW → SELECT → CHECKOUT
-// happen entirely anonymously. Authentication begins ONLY at
-// "Continuer vers le paiement" — and returns the user to this checkout.
+// The product rule: the WHOLE funnel — SEARCH → RESULTS → COMPARE → VIEW →
+// SELECT → CHECKOUT → PAY — happens anonymously.
+//
+// There used to be exactly one authentication wall, at "Continuer vers le
+// paiement": a visitor could review a trip but had to create an account before
+// paying for it. That is gone, and the account is now offered afterwards as a
+// way to keep the tickets. The tests below are the fence around that: if the
+// wall ever comes back, the funnel stops being anonymous and these fail.
 const APP = 'http://127.0.0.1:4173';
 const GOOGLE_MAP_HOSTS = new Set(['maps.googleapis.com', 'maps.google.com']);
 
@@ -57,7 +62,7 @@ test('sorting and filters are factual and stay anonymous', async ({ page }) => {
   await expect(page.getByText('2 trajets disponibles')).toBeVisible();
 });
 
-test('choosing an offer opens the checkout anonymously; auth only at the payment gate', async ({ page }) => {
+test('choosing an offer opens the checkout anonymously, with no payment gate behind it', async ({ page }) => {
   await mockApi(page);
   await searchTrips(page);
   await page.getByRole('button', { name: 'Chauffeurs indépendants' }).click();
@@ -68,25 +73,37 @@ test('choosing an offer opens the checkout anonymously; auth only at the payment
   await expect(page.getByText('Transport LeRoutier · TEST Chauffeur 01')).toBeVisible();
   await expect(page.getByText('7 500 FCFA').first()).toBeVisible();
   await expect(page.getByText(/Aucun compte n’est nécessaire/)).toBeVisible();
-  // Still no sign-in UI.
   await expect(page.getByText('Bienvenue sur LeRoutier')).toHaveCount(0);
 
-  // The ONE authentication gate.
-  await page.getByRole('button', { name: 'Continuer vers le paiement' }).click();
-  await expect(page.getByText('Bienvenue sur LeRoutier')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Connexion de développement' })).toBeVisible();
+  // Where the wall used to be: the details a booking actually needs, and
+  // nothing about an account.
+  await expect(page.getByLabel('Nom et prénom du voyageur principal')).toBeVisible();
+  await expect(page.getByText('Vos coordonnées')).toBeVisible();
+  await expect(page.getByText('Bienvenue sur LeRoutier')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Connexion de développement' })).toHaveCount(0);
 });
 
-test('authentication returns to the checkout and completes the TEST payment', async ({ page }) => {
+test('the whole funnel to the tickets completes with no authentication at any point', async ({ page }) => {
   await mockApi(page);
+  // Checked at every step rather than only at the end, because the wall this
+  // guards against used to sit in the middle of the funnel: a visitor could
+  // reach the checkout and was stopped only at "Continuer vers le paiement".
+  const stillAnonymous = () => expect(page.getByText('Bienvenue sur LeRoutier')).toHaveCount(0);
   await searchTrips(page);
+  await stillAnonymous();
   await page.getByRole('button', { name: 'Chauffeurs indépendants' }).click();
+  await stillAnonymous();
   await page.getByRole('button', { name: 'Choisir' }).first().click();
-  await page.getByRole('button', { name: 'Continuer vers le paiement' }).click();
-  // Login through the development path; the checkout resumes on its own.
-  await page.getByRole('button', { name: 'Connexion de développement' }).click();
-  await expect(page.getByText('Mode test')).toBeVisible();
+  await stillAnonymous();
+  await page.getByLabel('Nom et prénom du voyageur principal').fill('Awa Sossou');
+  await page.getByLabel('Numéro de téléphone').fill('97000042');
+  await stillAnonymous();
+  await page.getByRole('button', { name: /Continuer vers le paiement/ }).click();
+  // Paid, and on the tickets. The account offer lives on THAT screen, beside
+  // the tickets rather than in front of them, which is the difference the whole
+  // change is about.
   await expect(page).toHaveURL(/\/tickets\//, { timeout: 15000 });
+  await expect(page.getByRole('button', { name: 'Afficher mon billet' })).toBeVisible();
 });
 
 test('a sold-out offer is visible with an honest badge and no bookable action', async ({ page }) => {

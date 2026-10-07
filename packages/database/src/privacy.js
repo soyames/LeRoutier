@@ -94,7 +94,9 @@ export function privacyCenter(db, store = null, firebaseAdmin = null) {
           u.retention_due_at,u.keep_confirmed_at,pp.phone FROM users u LEFT JOIN passenger_profiles pp ON pp.user_id=u.id WHERE u.id=$1`, [actor.id]);
         const counts = await one(tx, `SELECT
           (SELECT count(*)::integer FROM bookings WHERE passenger_id=$1) AS bookings,
-          (SELECT count(*)::integer FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE b.passenger_id=$1) AS payments,
+          (SELECT count(*)::integer FROM payments p
+            LEFT JOIN bookings b ON b.id=p.booking_id LEFT JOIN booking_groups g ON g.id=p.group_id
+            WHERE b.passenger_id=$1 OR g.purchaser_id=$1) AS payments,
           (SELECT count(*)::integer FROM parcels WHERE created_by=$1) AS parcels,
           (SELECT count(*)::integer FROM notifications WHERE user_id=$1) AS notifications,
           (SELECT count(*)::integer FROM user_consents WHERE user_id=$1) AS consents,
@@ -132,8 +134,12 @@ export function privacyCenter(db, store = null, firebaseAdmin = null) {
         const [bookings, payments, parcelsRows, notifications, consents, acknowledgements] = await Promise.all([
           rows(tx, `SELECT b.id,b.service_id,b.origin_sequence,b.destination_sequence,b.status,b.amount_minor,b.currency,b.created_at
             FROM bookings b WHERE b.passenger_id=$1 ORDER BY b.created_at`, [actor.id]),
-          rows(tx, `SELECT p.id,p.booking_id,p.provider,p.status,p.amount_minor,p.currency,p.created_at
-            FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE b.passenger_id=$1 ORDER BY p.created_at`, [actor.id]),
+          // A data export that omitted the payment for a purchase would understate
+          // what the person actually paid, which is the one thing an export of
+          // somebody's own data must not do.
+          rows(tx, `SELECT p.id,p.booking_id,p.group_id,p.provider,p.status,p.amount_minor,p.currency,p.created_at
+            FROM payments p LEFT JOIN bookings b ON b.id=p.booking_id LEFT JOIN booking_groups g ON g.id=p.group_id
+            WHERE b.passenger_id=$1 OR g.purchaser_id=$1 ORDER BY p.created_at`, [actor.id]),
           rows(tx, `SELECT id,tracking_number,origin_stop_id,destination_stop_id,category,quantity,weight_g,price_minor,service_level,status,created_at
             FROM parcels WHERE created_by=$1 ORDER BY created_at`, [actor.id]),
           rows(tx, `SELECT event_type,category,severity,template,created_at,superseded_at FROM notifications WHERE user_id=$1 ORDER BY created_at`, [actor.id]),
@@ -399,7 +405,9 @@ async function collectBlockers(tx, userId) {
   const blockers = [];
   const activeBooking = await one(tx, `SELECT count(*)::integer AS n FROM bookings WHERE passenger_id=$1 AND status IN ('held','confirmed','boarded')`, [userId]);
   if (activeBooking.n) blockers.push({ kind: 'active_booking', count: activeBooking.n });
-  const pendingPayment = await one(tx, `SELECT count(*)::integer AS n FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE b.passenger_id=$1 AND p.status IN ('pending')`, [userId]);
+  const pendingPayment = await one(tx, `SELECT count(*)::integer AS n FROM payments p
+    LEFT JOIN bookings b ON b.id=p.booking_id LEFT JOIN booking_groups g ON g.id=p.group_id
+    WHERE (b.passenger_id=$1 OR g.purchaser_id=$1) AND p.status IN ('pending')`, [userId]);
   if (pendingPayment.n) blockers.push({ kind: 'pending_payment', count: pendingPayment.n });
   const activeParcel = await one(tx, `SELECT count(*)::integer AS n FROM parcels WHERE created_by=$1 AND status NOT IN ('collected','cancelled','rejected','returned','lost','damaged')`, [userId]);
   if (activeParcel.n) blockers.push({ kind: 'active_parcel', count: activeParcel.n });

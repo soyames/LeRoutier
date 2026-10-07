@@ -1,17 +1,14 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { invariant, uuid } from '@leroutier/domain';
-import { transport } from './transport.js';
+import { transport, bookingMoney } from './transport.js';
 import { bookingDocument } from './booking-document.js';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const one=async(tx,sql,args=[]) => (await tx.query(sql,args)).rows[0];
 const nested=tx=>({transaction:fn=>fn(tx)});
 export function tickets(db){
   async function payable(tx,b){
-    const p=await one(tx,`SELECT
-      coalesce(sum(amount_minor) FILTER (WHERE status='succeeded'),0)::integer AS paid,
-      coalesce(sum(amount_minor) FILTER (WHERE status='refunded'),0)::integer AS refunded
-      FROM payments WHERE booking_id=$1`,[b.id]);
-    invariant(p.paid-p.refunded===b.amount_minor && b.status==='confirmed','TICKET_INVALID','Ticket is not confirmed and paid for boarding.',409);
+    const money=await bookingMoney(tx,b);
+    invariant(money.settled && b.status==='confirmed','TICKET_INVALID','Ticket is not confirmed and paid for boarding.',409);
   }
   return {
     async issue(actor,id){
@@ -21,7 +18,11 @@ export function tickets(db){
         invariant(b.status!=='held','TICKET_INVALID','Le paiement doit être confirmé avant l’émission du billet.',409);
         const document=await bookingDocument(tx,id);
         const s=await one(tx,'SELECT * FROM services WHERE id=$1',[b.service_id]);
-        const canBoard=b.status==='confirmed' && document.paidMinor-document.refundedMinor===b.amount_minor &&
+        // The document carries the purchase-aware figures, so a traveller whose
+        // seat was paid for as part of a party is as boardable as one who paid
+        // alone. Comparing the seat's own fare instead is what would make every
+        // grouped ticket permanently unusable at the door.
+        const canBoard=b.status==='confirmed' && document.paidMinor-document.refundedMinor===document.dueMinor &&
           ['scheduled','active'].includes(s.status) && s.current_sequence<=b.origin_sequence;
         let ticket=await one(tx,'SELECT * FROM ticket_credentials WHERE booking_id=$1',[id]);
         // Viewing an archive must never depend on eligibility to board again.

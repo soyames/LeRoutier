@@ -23,20 +23,32 @@ before(async()=>{
   for(const role of ['passenger','driver','ops']) sessions[role]=(await call('/api/v1/auth/demo','POST',{role})).data.token;
 });
 after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}});
-let booking;
+let booking,purchase;
 test('real catalog exposes ordered stops and server fares',async()=>{
   const routes=await call('/api/v1/routes');assert.equal(routes.data[0].stops.length,4);
   const services=await call(`/api/v1/services?originStopId=${demoId(200)}&destinationStopId=${demoId(203)}`);
   assert.equal(services.data[0].availability.fare.amountMinor,7500);
 });
 test('authenticated passenger creates and retrieves a hold',async()=>{
-  const r=await call('/api/v1/bookings','POST',{serviceId:demo.service,origin:0,destination:1});assert.equal(r.status,200);booking=r.data;
+  const r=await call('/api/v1/bookings','POST',{serviceId:demo.service,origin:0,destination:1});assert.equal(r.status,200);
+  // The hold answers with the PURCHASE — one seat here, and the same shape if it
+  // had been four — with the booking that carries the seat hanging off it. The
+  // seat, not the purchase, is what the manifest, the ticket and the crew
+  // actions are addressed by.
+  purchase=r.data;booking=purchase.bookings[0];
+  assert.equal(purchase.quantity,1);assert.equal(purchase.amount_minor,booking.amount_minor);
+  assert.equal(booking.group_id,purchase.id);
   assert.equal((await call('/api/v1/me/bookings')).data[0].id,booking.id);
   assert.equal((await call(`/api/v1/bookings/${booking.id}`)).data.status,'held');
+  assert.equal((await call(`/api/v1/bookings/${purchase.id}`)).data.bookings.length,1,'the purchase reads too');
 });
 test('ops records payment and passenger confirms without client-supplied fare',async()=>{
   assert.equal((await call(`/api/v1/bookings/${booking.id}/confirm`,'POST')).status,409);
-  assert.equal((await call(`/api/v1/bookings/${booking.id}/payments`,'POST',{provider:'cash',reference:'OPS-CASH-'+randomUUID().slice(0,8),amountMinor:2500,currency:'XOF'},'ops')).status,200);
+  // The clerk is handed the purchase, and settles it in one payment — a party
+  // pays once, at the counter exactly as online. A single seat of a purchase
+  // refuses its own payment and says which id to use.
+  assert.equal((await call(`/api/v1/bookings/${booking.id}/payments`,'POST',{provider:'cash',reference:'OPS-CASH-'+randomUUID().slice(0,8),amountMinor:2500,currency:'XOF'},'ops')).status,409);
+  assert.equal((await call(`/api/v1/bookings/${purchase.id}/payments`,'POST',{provider:'cash',reference:'OPS-CASH-'+randomUUID().slice(0,8),amountMinor:2500,currency:'XOF'},'ops')).status,200);
   assert.equal((await call(`/api/v1/bookings/${booking.id}/confirm`,'POST')).data.status,'confirmed');
 });
 test('driver reads assignment and manifest then boards/alights',async()=>{

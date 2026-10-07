@@ -5,7 +5,8 @@ import { validateVehiclePosition, distanceMetres } from '@leroutier/geo';
 import { enqueue, channelAvailability } from '@leroutier/notifications';
 import { authentication } from './auth.js';
 import { publicAuthConfig } from '@leroutier/config';
-import { updateProfile, audit, managesOperator } from '@leroutier/database/identities';
+import { updateProfile, audit, managesOperator, claimGuestPurchase } from '@leroutier/database/identities';
+import { guestCheckout } from '@leroutier/database/guest-checkout';
 import { provisioning } from '@leroutier/database/provisioning';
 import { requirePlatform, requireAnyPlatform } from '@leroutier/database/platform-access';
 import { schemaStatus } from '@leroutier/database/migrations';
@@ -99,6 +100,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const cover=insurance(db),coverAdmin=insuranceAdmin(db);
   const earn=earnings(db),payout=payouts(db,adapter,config),recover=recovery(db),parcel=parcels(db);
   const onboard=onboarding(db,evidence),loc=locations(db),settle=operatorSettlements(db,adapter),walkUp=walkUpBookings(db);
+  const guestBuy=guestCheckout(db);
   const notify=notificationPolicies(db,config),rides=mobility(db),journey=journeys(db,config);
   const router=createRouter(config),geometry=routeGeometry(db,router),track=tracking(db,config);
   const actions=createActions({db,domain,payments:pay,payouts:payout,recovery:recover,parcels:parcel});
@@ -152,7 +154,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       '/health': ['GET'], '/auth/config': ['GET'], '/payments/config': ['GET'],
       '/stops': ['GET'], '/places': ['GET'], '/routes': ['GET'], '/services': ['GET'],
       '/webhooks/fedapay': ['POST'], '/auth/demo': ['POST'], '/auth/email-verification': ['POST'], '/me': ['GET', 'PATCH'],
-      '/me/bookings': ['GET'], '/me/parcels': ['GET'], '/notifications': ['GET'],
+      '/me/bookings': ['GET'], '/me/claim': ['POST'], '/me/parcels': ['GET'], '/notifications': ['GET'],
       '/notifications/preferences': ['GET', 'PUT'], '/parcels/quote': ['GET'], '/parcels': ['POST'],
       '/bookings': ['POST'], '/operator/settlements': ['GET'], '/operator/payouts': ['GET', 'POST'],
       '/driver/earnings': ['GET'], '/driver/parcels': ['GET'], '/driver/parcels/lookup': ['GET'], '/driver/service': ['GET'],
@@ -457,6 +459,48 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       invariant(assistantInput && Object.keys(assistantInput).every(k=>['sessionId','message'].includes(k)),
         'INVALID_INPUT','Unexpected assistant fields.');
       return assistant.handle({actor:assistantHuman,sessionId:assistantInput.sessionId,message:assistantInput.message,reasoning});
+    }
+    // Buying a ticket — the one write a visitor may make without an account.
+    //
+    // It sits ABOVE the identity gate rather than behind an exemption from it.
+    // That gate treats "there is no caller" as a failure, and for this route it
+    // is not a failure, it is the ordinary case. Authentication is still
+    // attempted, so a returning passenger's purchase is theirs and a guest who
+    // already holds a token keeps buying with it; what changes is that failing
+    // to identify the caller begins a guest purchase instead of ending the
+    // request.
+    if(method==='POST' && path==='/bookings') {
+      const requester=await auth.authenticate(req).catch(()=>null);
+      const booking=await body();
+      invariant(booking && Object.keys(booking).every(k=>['serviceId','origin','destination','seatNumber','seatNumbers',
+        'quantity','passengerName','passengerPhone','expectedAmountMinor'].includes(k)),
+      'INVALID_BOOKING','Unexpected booking fields.');
+      // Metered here rather than by the authenticated path below, because this
+      // route returns before reaching it. Identified callers are metered per
+      // identity exactly as every other write is; visitors per client address,
+      // since a guest purchase is the one write that can create an identity.
+      if(!requester) await limited('guest-checkout:'+((req.headers.get('x-forwarded-for')||'').split(',')[0].trim()||'local'));
+      else await limited(requester.id);
+      // WHO THE PURCHASE BELONGS TO. An account buys as itself only when it IS a
+      // passenger account: the role, a purchase already behind it, and a
+      // completed profile. Everything else buys through the guest route, which
+      // is what the guest route is for.
+      //
+      // A DRIVER OR AN OPERATOR IS NOT A PASSENGER. Their account is a service
+      // provider's, created and used by the provider flows and never by this
+      // one, so they buy as guests — as any visitor does — and are not lectured
+      // about a passenger account they did not ask for. What they must not get
+      // is a refusal that reads as "buy a ticket to become an operator": the two
+      // journeys do not touch, in either direction.
+      //
+      // A PASSENGER account that is not there yet is told how to get there,
+      // because that is a fact about its own journey. The screens never send
+      // that call — they buy as a guest — so this is the answer to a direct one.
+      const isPassengerAccount=requester?.role==='passenger';
+      invariant(!isPassengerAccount || requester.passenger_activated,'PASSENGER_NOT_ACTIVATED',
+        'Votre compte n’a pas encore de billet. Achetez sans compte, puis rattachez ce billet : votre compte voyageur s’activera à ce moment-là.',403);
+      invariant(!isPassengerAccount || !requester.needs_profile,'PROFILE_REQUIRED','Complete your passenger profile before booking.',409);
+      return guestBuy(isPassengerAccount?requester:null,booking,req.headers.get('idempotency-key'));
     }
     // Human users authenticate first; service/agent principals (distinct identity
     // namespace) only apply to the dedicated agent API below.
@@ -876,12 +920,14 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     // and the processor (with Firebase identity deletion) completes later.
     const opsDeletion=path.match(/^\/ops\/users\/([^/]+)\/deletion-request$/);
     if(method==='POST' && opsDeletion) { await limited('ops-deletion:'+actor.id); return privacy.requestDeletionFor(actor,uuid(opsDeletion[1])); }
-    if(method==='POST' && path==='/bookings') {
-      invariant(!actor.needs_profile,'PROFILE_REQUIRED','Complete your passenger profile before booking.',409);
-      const booking=await body();
-      invariant(booking && Object.keys(booking).every(k=>['serviceId','origin','destination','seatNumber'].includes(k)),
-        'INVALID_BOOKING','Unexpected booking fields.');
-      return domain.hold(actor,booking,req.headers.get('idempotency-key'));
+    // Adopting a guest purchase. The token proves the purchase; the account
+    // supplies the identity. Neither alone would be enough, which is why this is
+    // the only way a newly created account becomes a passenger account.
+    if(method==='POST' && path==='/me/claim') {
+      await limited('claim:'+actor.id,20);
+      const input=await body();
+      invariant(input && Object.keys(input).every(k=>['guestToken'].includes(k)),'INVALID_CLAIM','Unexpected claim fields.');
+      return claimGuestPurchase(db,actor,input.guestToken);
     }
     if(method==='GET' && path==='/me/bookings') return domain.passengerBookings(actor);
     // In-app notification centre. Role-aware by construction: a user only ever
@@ -912,7 +958,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     const booking=path.match(/^\/bookings\/([^/]+)(?:\/(confirm|cancel|board|alight|payments))?$/);
     if(booking) {
       const id=uuid(booking[1]),action=booking[2];
-      if(method==='GET' && !action) return domain.booking(actor,id);
+      if(method==='GET' && !action) return domain.subject(actor,id);
       if(method==='POST' && action==='payments') return domain.recordPayment(actor,id,await body(),req.headers.get('idempotency-key'));
       if(method==='POST' && action) return domain.transition(actor,id,action,['board','alight'].includes(action)?(await body()).stopSequence:undefined);
     }
@@ -1048,8 +1094,10 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       return db.transaction(async tx=>{
         const scope=actor.operator_id;
         const rows=(await tx.query(`SELECT
-          (SELECT count(*) FROM payments p JOIN bookings b ON b.id=p.booking_id JOIN services s ON s.id=b.service_id
-            WHERE p.status='failed' AND ($1::uuid IS NULL OR s.operator_id=$1))::integer AS failed_payments,
+          (SELECT count(*) FROM payments p
+            LEFT JOIN bookings b ON b.id=p.booking_id LEFT JOIN booking_groups g ON g.id=p.group_id
+            LEFT JOIN services s ON s.id=b.service_id LEFT JOIN services gs ON gs.id=g.service_id
+            WHERE p.status='failed' AND ($1::uuid IS NULL OR coalesce(s.operator_id,gs.operator_id)=$1))::integer AS failed_payments,
           (SELECT count(*) FROM payout_requests r JOIN driver_profiles dp ON dp.user_id=r.driver_id
             WHERE r.status='failed' AND ($1::uuid IS NULL OR dp.operator_id=$1))::integer AS failed_payouts,
           (SELECT count(*) FROM payout_requests r JOIN driver_profiles dp ON dp.user_id=r.driver_id

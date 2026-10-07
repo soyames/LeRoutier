@@ -18,6 +18,8 @@ async function operatorFor(tx, aggregateId, input = {}) {
     UNION SELECT operator_id FROM parcels WHERE id=ANY($1::uuid[])
     UNION SELECT s.operator_id FROM bookings b JOIN services s ON s.id=b.service_id WHERE b.id=ANY($1::uuid[])
     UNION SELECT s.operator_id FROM payments p JOIN bookings b ON b.id=p.booking_id JOIN services s ON s.id=b.service_id WHERE p.id=ANY($1::uuid[])
+    UNION SELECT s.operator_id FROM payments p JOIN booking_groups g ON g.id=p.group_id JOIN services s ON s.id=g.service_id WHERE p.id=ANY($1::uuid[])
+    UNION SELECT s.operator_id FROM booking_groups g JOIN services s ON s.id=g.service_id WHERE g.id=ANY($1::uuid[])
     UNION SELECT operator_id FROM driver_profiles WHERE user_id=ANY($1::uuid[])
     UNION SELECT d.operator_id FROM payout_requests p JOIN driver_profiles d ON d.user_id=p.driver_id WHERE p.id=ANY($1::uuid[])
   ) tenants WHERE operator_id IS NOT NULL`,[ids]);

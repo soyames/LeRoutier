@@ -24,7 +24,11 @@ export function journeyPlanning(db,{boardingBufferS=600,positionFreshSeconds=FRE
     if(input.destinationStopId)uuid(input.destinationStopId);else if(input.destination)invariant(Number.isFinite(input.destination.latitude)&&Number.isFinite(input.destination.longitude)&&Math.abs(input.destination.latitude)<=90&&Math.abs(input.destination.longitude)<=180,'INVALID_JOURNEY','Destination coordinates are invalid.');else invariant(false,'INVALID_JOURNEY','An origin and a destination are required.',409);
     const departureAt=input.departureAt?Date.parse(input.departureAt):Date.now();invariant(Number.isFinite(departureAt),'INVALID_JOURNEY','Departure time is invalid.',409);
     const includeDemo=input.includeDemo===true,now=Date.now(),journeyStart=Math.max(now,departureAt);
-    const stops=await db.transaction(async tx=>(await tx.query(`SELECT s.id,s.name,s.latitude,s.longitude,p.name AS city FROM stops s JOIN places p ON p.id=s.place_id WHERE s.latitude IS NOT NULL AND s.longitude IS NOT NULL`)).rows);
+    // country_code rides along so the checkout can offer the passenger the right
+    // phone country by default: somebody boarding in Togo almost always has a
+    // Togolese number, and guessing Benin there is a number nobody can be
+    // reached on.
+    const stops=await db.transaction(async tx=>(await tx.query(`SELECT s.id,s.name,s.latitude,s.longitude,p.name AS city,p.country_code FROM stops s JOIN places p ON p.id=s.place_id WHERE s.latitude IS NOT NULL AND s.longitude IS NOT NULL`)).rows);
     const originMatch=stops.find(s=>s.id===input.originStopId);
     const originCoords=input.origin??(originMatch?{latitude:originMatch.latitude,longitude:originMatch.longitude}:null);invariant(originCoords,'INVALID_JOURNEY','Origin stop is unknown.',404);
     const destinationStop=stops.find(s=>s.id===input.destinationStopId);
@@ -50,7 +54,7 @@ export function journeyPlanning(db,{boardingBufferS=600,positionFreshSeconds=FRE
               AND bs.sequence >= (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$1)
               AND bs.sequence < (SELECT sequence FROM service_stops WHERE service_id=s.id AND stop_id=$2))) AS available,
           (SELECT duration_s FROM route_geometries WHERE route_id=s.route_id LIMIT 1) AS route_duration_s,
-          (SELECT json_agg(json_build_object('sequence',g.sequence,'stopId',g.stop_id,'name',st.name,'city',pl.name,'latitude',st.latitude,'longitude',st.longitude) ORDER BY g.sequence)
+          (SELECT json_agg(json_build_object('sequence',g.sequence,'stopId',g.stop_id,'name',st.name,'city',pl.name,'latitude',st.latitude,'longitude',st.longitude,'countryCode',pl.country_code) ORDER BY g.sequence)
             FROM service_stops g JOIN stops st ON st.id=g.stop_id JOIN places pl ON pl.id=st.place_id WHERE g.service_id=s.id) AS service_stops,
           (SELECT coordinates FROM route_geometries WHERE route_id=s.route_id LIMIT 1) AS route_geometry,
           (SELECT json_build_object('latitude',vp.latitude,'longitude',vp.longitude,'observedAt',vp.observed_at) FROM vehicle_positions vp WHERE vp.service_id=s.id ORDER BY vp.observed_at DESC LIMIT 1) AS live_position
@@ -81,7 +85,7 @@ export function journeyPlanning(db,{boardingBufferS=600,positionFreshSeconds=FRE
             rating:publicRating(service),amenities:describeAmenities(service.vehicle_amenities),
             driver:independent?{name:service.driver_name??service.operator_name,photoUrl:service.driver_photo_url??null}:null,
             routeName:service.route_name,departureAt:service.departure_at,serviceStatus:service.status,originSequence:service.origin_seq,destinationSequence:service.destination_seq,
-            pickupStop:{id:origin.id,name:origin.name,city:origin.city,latitude:origin.latitude,longitude:origin.longitude},dropoffStop:{id:destination.id,name:destination.name,city:destination.city,latitude:destination.latitude,longitude:destination.longitude},
+            pickupStop:{id:origin.id,name:origin.name,city:origin.city,latitude:origin.latitude,longitude:origin.longitude,countryCode:origin.country_code},dropoffStop:{id:destination.id,name:destination.name,city:destination.city,latitude:destination.latitude,longitude:destination.longitude,countryCode:destination.country_code},
             vehicle:{registration:service.vehicle_registration??null,make:service.vehicle_make??null,model:service.vehicle_model??null,color:service.vehicle_color??null,year:service.vehicle_year??null,photoUrl:service.vehicle_photo_url??null},
             intermediateStops,routeGeometry:normalizeGeometry(service.route_geometry,origin,destination),livePosition:live,fare:{amountMinor:service.fare_minor,currency:'XOF'},available:service.available,capacity:service.capacity,feasible,
             firstMile,waitingS,intercity:{durationS:intercityS,etaAt:arrival?.toISOString()??null},lastMile,totalDurationS,etaAt:etaAt?.toISOString()??null,isTest:service.is_demo===true,

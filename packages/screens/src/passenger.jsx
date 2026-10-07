@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
-import { Card, Badge, SectionTitle, ApiState, ProfileForm, PasswordForm, ErrorState, SkeletonCards, PageHero, PAGE_HERO } from '@leroutier/ui';
+import { Card, Badge, SectionTitle, ApiState, ProfileForm, PasswordForm, ErrorState, SkeletonCards, PageHero, PAGE_HERO, SessionPanel } from '@leroutier/ui';
 import { status, fcfa, time, dayShort, dayLong, dateTime, duration, reference, mapLink, placeLabel } from '@leroutier/ui';
 import { QRCodeSVG } from 'qrcode.react';
 import { Armchair, Ticket, Building2, Navigation, UserRound, ArrowLeftRight, CreditCard, Package, Store, MapPin, QrCode, Search, Lock, Mail, Bell, ShieldCheck, KeyRound, LogOut } from 'lucide-react';
@@ -438,23 +438,46 @@ function LegacyServiceList({ originStopId, destinationStopId, day, choose }) {
 // One card per trip. The state drives exactly one primary action: pay, then
 // show the ticket. The QR leads once the trip is confirmed.
 export function Tickets({ focusId = null }) {
-  const { user, request, online } = useSession();
-  const bookings = useApi(user ? '/me/bookings' : null);
+  const { user, request, online, guestToken, claimPurchase } = useSession();
+  // WHICH IDENTITY A TICKET IS READ AS. A ticket belongs to a passenger
+  // identity: either a passenger account, or the guest link issued with the
+  // purchase. A signed-in account with an operator role — a driver, an
+  // operations user — is a SERVICE PROVIDER, not a passenger: the passenger
+  // endpoints refuse it by design, so it reads its own tickets through the
+  // guest link it bought them with, exactly as a visitor does. Reading it as
+  // the account instead showed a provider a 403 on a ticket it had paid for.
+  const asPassenger = Boolean(user) && user.role === 'passenger';
+  const seesTickets = asPassenger || Boolean(guestToken);
+  const bookings = useApi(seesTickets ? '/me/bookings' : null, asPassenger ? {} : { token: guestToken ?? null });
   const paymentsConfig = useApi('/payments/config');
   const navigate = useNavigate();
-  const [error, setError] = useState(''), [busy, setBusy] = useState('');
+  const [error, setError] = useState(''), [busy, setBusy] = useState(''), [notice, setNotice] = useState('');
   const [openedTicket, setOpenedTicket] = useState(null), [payStates, setPayStates] = useState({});
   const ticketOpener = useRef(null);
   const onlinePayments = paymentsConfig.data?.available === true;
+  // Every write on this screen carries whichever identity may open the booking:
+  // the passenger account, or the guest token that bought it.
+  const auth = asPassenger ? {} : { token: guestToken ?? null };
 
-  // Signing out on a shared handset must take every ticket code off the screen.
-  // The list is hidden behind the sign-in panel, but the opened QR used to stay
+  // Whoever is looking has changed — signing out, signing in, a different
+  // account, or a guest purchase arriving — so every ticket code comes off the
+  // screen. The list is hidden behind the panel, but the opened QR used to stay
   // rendered until the next sign-in because the state outlived the session.
+  //
+  // Keying on the reader rather than on "is anybody signed in" is what makes a
+  // guest purchase safe on a shared handset: the codes are cleared when the
+  // person looking stops being the person who bought them. The role is part of
+  // the key so that signing out of an operator account, or into one, counts as
+  // a change of reader even though the same guest link stays behind.
+  //
   // Adjusted during render rather than in an effect: React immediately
   // re-renders with the cleared state, and the guarded condition keeps the
   // adjustment from looping.
-  if (!user && (openedTicket || error || Object.keys(payStates).length > 0)) {
-    setOpenedTicket(null); setPayStates({}); setError('');
+  const reader = asPassenger ? `passenger:${user.id}` : user ? `provider:${user.id}` : guestToken ? 'guest' : 'none';
+  const [lastReader, setLastReader] = useState(reader);
+  if (lastReader !== reader) {
+    setLastReader(reader);
+    setOpenedTicket(null); setPayStates({}); setError(''); setNotice('');
   }
 
   // After returning from the payment page, poll trusted server state: only the
@@ -463,12 +486,15 @@ export function Tickets({ focusId = null }) {
   useEffect(() => { dataRef.current = bookings.data; reloadRef.current = bookings.reload; });
   const heldKey = (bookings.data || []).filter(b => b.status === 'held').map(b => b.id).sort().join(',');
   useEffect(() => {
-    if (!user || !heldKey) return;
+    if (!seesTickets || !heldKey) return;
     let cancelled = false;
     const timer = setInterval(async () => {
       try {
         for (const b of (dataRef.current || []).filter(x => x.status === 'held')) {
-          const payments = await request(`/bookings/${b.id}/payment-status`);
+          // A seat inside a purchase is settled by the purchase, so the poll that
+          // decides between "pay" and "confirm" has to ask about the thing the
+          // money was attached to.
+          const payments = await request(`/bookings/${b.group_id ?? b.id}/payment-status`, auth);
           const state = payments.some(p => p.status === 'succeeded') ? 'succeeded'
             : payments.some(p => p.status === 'pending') ? 'pending'
               : payments.some(p => p.status === 'failed' || p.status === 'cancelled') ? 'failed' : 'none';
@@ -478,17 +504,22 @@ export function Tickets({ focusId = null }) {
       } catch { /* transient polling failures stay silent */ }
     }, 5000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [user, heldKey, request]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seesTickets, heldKey, request, guestToken]);
 
   async function act(id, verb) {
     setBusy(id); setError('');
-    try { await request(`/bookings/${id}/${verb}`, { method: 'POST' }); bookings.reload(); }
+    try { await request(`/bookings/${id}/${verb}`, { method: 'POST', ...auth }); bookings.reload(); }
     catch (e) { setError(e.message); } finally { setBusy(''); }
   }
-  async function pay(id) {
+  async function pay(booking) {
+    // Keyed by the seat, because that is the card the state belongs to; paid
+    // through the purchase, because that is what a party is charged for.
+    const id = booking.id;
+    const target = booking.group_id ?? booking.id;
     setBusy(id); setError('');
     try {
-      const intent = await request(`/bookings/${id}/payment-intents`, { method: 'POST', key: 'pay-' + id, body: {} });
+      const intent = await request(`/bookings/${target}/payment-intents`, { method: 'POST', key: 'pay-' + target, body: {}, ...auth });
       setPayStates(prev => ({ ...prev, [id]: 'pending' }));
       if (intent.checkoutUrl) window.location.assign(intent.checkoutUrl);
       else setError('Le lien de paiement est indisponible. Réessayez dans un instant.');
@@ -500,8 +531,19 @@ export function Tickets({ focusId = null }) {
     ticketOpener.current = opener;
     setBusy(id); setError('');
     try {
-      const ticket = await request(`/bookings/${id}/ticket`, { method: 'POST', body: {} });
+      const ticket = await request(`/bookings/${id}/ticket`, { method: 'POST', body: {}, ...auth });
       setOpenedTicket(ticket);
+    } catch (e) { setError(e.message); } finally { setBusy(''); }
+  }
+  // Keeping the tickets. Offered, never required, and never in the way of
+  // reading them: the account is what makes a purchase follow somebody to
+  // another device, which is the only thing it is for here.
+  async function keepTickets() {
+    setBusy('claim'); setError(''); setNotice('');
+    try {
+      const result = await claimPurchase();
+      setNotice(result.tickets > 1 ? `${result.tickets} billets rattachés à votre compte.` : 'Votre billet est rattaché à votre compte.');
+      bookings.reload();
     } catch (e) { setError(e.message); } finally { setBusy(''); }
   }
 
@@ -516,8 +558,41 @@ export function Tickets({ focusId = null }) {
     {openedTicket?.document && <TicketDocuments ticket={openedTicket} onClose={() => { setOpenedTicket(null); requestAnimationFrame(() => ticketOpener.current?.focus()); }}/>}
     {openedTicket && !openedTicket.document && <div className="ticket-qr"><QRCodeSVG value={openedTicket.token} size={190} marginSize={4}/><span className="ticket-code">{openedTicket.manualCode}</span></div>}
     {error && <ErrorState title="Action impossible" text={error}/>}
-    {!user ? <ApiState resource={{ loading: false, error: null }} emptyTitle="Connectez-vous"
-      empty="Vos billets et réservations apparaissent ici une fois connecté."/>
+    {notice && <p className="notice" role="status">{notice}</p>}
+    {/* Keeping the tickets, offered once there is something to keep. Shown to a
+        guest — who has a purchase and no account — and to a passenger account
+        that has just signed in holding a guest purchase. Delivery already
+        happened; this is not a step in it.
+
+        A signed-in PROVIDER account is its own case, and says so rather than
+        offering a button the server would refuse: tickets belong to a passenger
+        identity, and claiming must never turn an operator account into one. */}
+    {guestToken && (asPassenger || !user ? <Card className="stack">
+      <div className="between wrap">
+        <div><strong>{asPassenger ? 'Rattachez ces billets à votre compte' : 'Gardez vos billets'}</strong>
+          <p className="small muted">{asPassenger
+            ? 'Cet achat a été fait sans compte. Rattachez-le pour le retrouver sur tous vos appareils.'
+            : 'Ils sont accessibles depuis cet appareil. Créez un compte ou connectez-vous pour les retrouver partout — c’est facultatif, et vos billets restent utilisables sans.'}</p></div>
+        {asPassenger && <Badge tone="success"><Lock size={12}/>Achat enregistré</Badge>}
+      </div>
+      {asPassenger ? <div className="controls">
+        <button className="btn btn-primary" disabled={!!busy || !online} onClick={keepTickets}>
+          {busy === 'claim' ? 'Rattachement…' : 'Rattacher mes billets'}</button>
+      </div> : <SessionPanel/>}
+    </Card> : <Card className="stack">
+      <strong>Ces billets restent liés à cet appareil</strong>
+      <p className="small muted">Cet achat a été fait sans compte voyageur. Votre compte professionnel ne peut pas les rattacher — les billets sont un compte voyageur, pas un compte opérateur — et ils restent utilisables depuis ce navigateur.</p>
+    </Card>)}
+    {!seesTickets ? <>
+      {/* A visitor with neither a session nor a purchase. The empty state says
+          what would appear here; the panel beside it is how they get it, and it
+          is rendered HERE rather than injected by the shell, because this screen
+          is reachable without an account and the shell no longer puts a sign-in
+          panel in front of it. */}
+      <ApiState resource={{ loading: false, error: null }} emptyTitle="Connectez-vous"
+        empty="Vos billets et réservations apparaissent ici une fois connecté, ou à la fin d’un achat."/>
+      <SessionPanel/>
+    </>
       : bookings.loading ? <SkeletonCards count={2} lines={5}/>
         : bookings.error ? <ErrorState text="Impossible de charger vos billets." onRetry={bookings.reload}/>
           : !list.length ? <Card className="stack">
@@ -557,7 +632,7 @@ export function Tickets({ focusId = null }) {
                     {pay$ === 'succeeded'
                       ? <button className="btn btn-primary" disabled={!!busy || !online} onClick={() => act(b.id, 'confirm')}>Confirmer ma réservation</button>
                       : onlinePayments
-                        ? <button className="btn btn-primary" disabled={!!busy || !online} onClick={() => pay(b.id)}>
+                        ? <button className="btn btn-primary" disabled={!!busy || !online} onClick={() => pay(b)}>
                           {busy === b.id ? 'Ouverture du paiement…' : pay$ === 'failed' ? 'Réessayer le paiement' : 'Payer en ligne'}</button>
                         : <p className="small muted" role="status">Le paiement en ligne est momentanément indisponible. Votre place sera libérée automatiquement : aucun billet n’est émis sans paiement.</p>}
                     {pay$ === 'pending' && <p className="small muted">Nous attendons la confirmation de votre paiement. Cette page se met à jour toute seule.</p>}
