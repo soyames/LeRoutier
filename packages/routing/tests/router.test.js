@@ -30,6 +30,10 @@ const osrmResponse = (overrides = {}) => ({
   }],
 });
 
+/**
+ * @param {any} payload the engine's answer
+ * @param {{ status?: number, throws?: any, onCall?: (call: { url: string, init: any }) => void }} [options]
+ */
 const jsonFetch = (payload, { status = 200, throws = null, onCall } = {}) => async (url, init) => {
   onCall?.({ url, init });
   if (throws) throw throws;
@@ -70,7 +74,7 @@ test('stops without coordinates are refused, not guessed', async () => {
 // ── what the engine says, and what is done about it ─────────────────────────
 
 test('a road route comes back with its geometry, distance, duration and legs', async () => {
-  let called = null;
+  /** @type {any} */ let called = null;
   const router = createRouter({ routing: { url: 'https://osrm.example.invalid/' } }, jsonFetch(osrmResponse(), { onCall: c => { called = c; } }));
   const result = await router.route(STOPS);
   assert.equal(result.coordinates.length, 3);
@@ -86,7 +90,7 @@ test('a road route comes back with its geometry, distance, duration and legs', a
 });
 
 test('the credential is a server-side header, never a public query parameter', async () => {
-  let called = null;
+  /** @type {any} */ let called = null;
   const router = createRouter({ routing: { url: 'https://osrm.example.invalid', apiKey: 'ROUTING-SECRET' } },
     jsonFetch(osrmResponse(), { onCall: c => { called = c; } }));
   await router.route(STOPS);

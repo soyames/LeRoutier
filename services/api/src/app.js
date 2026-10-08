@@ -91,7 +91,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   // endpoint and another is configuration rather than a user journey.
   const mediaBackend=config.mediaStore ?? selectMediaStore(config);
   const media=mediaService(db,mediaBackend,{bucket:config.mediaStorage?.bucket ?? 'media'});
-  const health=operationalHealth(db);
+  const health=operationalHealth(db,{routing:{configured:Boolean(config.routing?.url),provider:config.routing?.provider??null,timeoutMs:config.routing?.timeoutMs??null}});
   const secondFactor=totpService(db);
   const fares=fareIntelligence(db);
   const commerce=commercial(db);

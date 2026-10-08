@@ -115,7 +115,13 @@ async function adoptGuestPurchase(tx,accountId,guestToken) {
  * @param {string|null} [input.guestToken] the purchase, when there is one
  */
 export async function mapIdentity(db,{subject,issuer,notificationEmail=null,emailVerified=false,signInProvider=null,
-  intent='passenger',guestToken=null}) {
+  // THE DEFAULT MUST BE THE ONE THE CALLER USES. It was 'passenger' here while
+  // `auth.js` defaulted to 'provider', which is not a stricter default — it is
+  // two different rules for one decision, and the one you got depended on
+  // whether you came through HTTP or called this directly. A caller that says
+  // nothing is not opening a traveller's account; the ticket screen is the only
+  // door that claims to be, and it says so.
+  intent='provider',guestToken=null}) {
   invariant(typeof subject==='string' && subject.length>0 && subject.length<=255,'UNAUTHORIZED','Invalid identity.',401);
   // The verified-email gate. A password identity whose address has not been
   // confirmed is not a LeRoutier account yet: /me must refuse it, or the

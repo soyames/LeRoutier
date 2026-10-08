@@ -83,7 +83,13 @@ test('workflow approval and retry are tenant isolated, including direct known ID
  await assert.rejects(engine.retry(other,run.id),{code:'FORBIDDEN'});
 });
 test('operational health exposes aggregate signals only to Platform Ops',async()=>{
- const health=operationalHealth(db);await health.record('gps_anomaly');
+ const health=operationalHealth(db,{routing:{configured:false,provider:'osrm',timeoutMs:15000}});await health.record('gps_anomaly');
  await assert.rejects(health.read({role:'ops',operator_id:demo.operator}),{code:'FORBIDDEN'});
  const result=await health.read({role:'ops',platform_capabilities:GRANTABLE});assert.equal(result.migrations.matched,true);assert.ok(result.signals.some(s=>s.signal==='gps_anomaly'));
+ // Whether the engine EXISTS, not only how often it failed. Zero failures is
+ // what an unconfigured deployment reports, and a console showing only that
+ // number confirms the opposite of the truth.
+ assert.equal(result.routing.configured,false);assert.equal(result.routing.provider,'osrm');
+ // The url is configuration and may carry a key: it is never published.
+ assert.equal('url' in result.routing,false);assert.equal('apiKey' in result.routing,false);
 });

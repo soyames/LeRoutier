@@ -38,6 +38,17 @@ export function RouteScrollReset() {
   const navigationType = useNavigationType();
   const key = location.key;
   const positions = useRef(new Map());
+  // Where the reader arrived, not a "have I run yet" flag.
+  //
+  // It was a flag, and it was wrong in a way that took a failing accessibility
+  // test to see: an effect can run again on the same page — a re-render that
+  // satisfies its dependencies — and the second run took the flag as
+  // permission to focus the main landmark. On a cold load that is a page nobody
+  // navigated to, and focus landing in the middle of it is focus stolen from
+  // the top of the document, which is where a keyboard reader starts and where
+  // the skip link is.
+  const arrivedAt = useRef(/** @type {{here: string, key: string}|null} */ (null));
+  const here = `${location.pathname}${location.search}${location.hash}`;
 
   // Remember where the reader was, per history entry.
   useEffect(() => {
@@ -49,22 +60,29 @@ export function RouteScrollReset() {
     return () => { save(); window.removeEventListener('scroll', save); };
   }, [key]);
 
-  const first = useRef(true);
   useEffect(() => {
     const fragment = location.hash ? document.getElementById(location.hash.slice(1)) : null;
+    const previous = arrivedAt.current;
+    arrivedAt.current = { here, key };
 
-    if (first.current) {
-      first.current = false;
-      // A FRAGMENT IN THE ADDRESS IS HONOURED ON A COLD LOAD TOO, and it has to
-      // be done here rather than left to the browser: when the browser looks
-      // for the element, React has not drawn it yet, so a link somebody
-      // followed to `/quelque-chose#section` lands at the top of the page with
-      // nothing to say why. Everything else about the first render is left
-      // alone — nothing has been left behind, and taking focus on arrival
-      // would steal it from wherever the reader actually is.
+    if (previous === null) {
+      // A COLD LOAD, not a navigation. A fragment in the address is still the
+      // reader's and is honoured here — the browser looked for the element
+      // before React had drawn it, so a link somebody followed to
+      // `/quelque-chose#section` would otherwise land at the top with nothing
+      // to say why. Focus is left exactly where it is: at the top of the
+      // document, which is what the skip link is the first stop of.
       if (fragment) fragment.scrollIntoView({ block: 'start' });
       return;
     }
+    // The same page again, AND the same history entry. Both halves are needed:
+    // the address alone would call a link to the page you are already on a
+    // non-arrival — but following such a link is a navigation, and the browser
+    // does it by reloading and landing at the top, so a reader who clicked it
+    // expects the top. The entry alone would call a re-render an arrival. A
+    // re-render is what has to be excluded, and it is the case where neither
+    // has moved.
+    if (previous.here === here && previous.key === key) return;
 
     const main = document.getElementById('lr-content');
 
@@ -82,8 +100,7 @@ export function RouteScrollReset() {
 
     if (navigationType === 'POP') {
       const remembered = positions.current.get(key);
-      if (remembered !== undefined) window.scrollTo({ top: remembered, behavior: 'instant' });
-      else window.scrollTo({ top: 0, behavior: 'instant' });
+      window.scrollTo({ top: remembered ?? 0, behavior: 'instant' });
     } else {
       // `instant` and not `auto`: the stylesheet sets `scroll-behavior:smooth`
       // on <html>, which is right for a link within a page and wrong for
@@ -96,7 +113,7 @@ export function RouteScrollReset() {
     // navigation is the top of the page anyway — but after a Back it is not,
     // and the reader's restored position must not be moved by taking focus.
     main?.focus({ preventScroll: true });
-  }, [key, navigationType, location.hash]);
+  }, [here, key, navigationType, location.hash]);
 
   return null;
 }

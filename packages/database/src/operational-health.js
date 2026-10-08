@@ -14,7 +14,7 @@ import {requirePlatform, holds, isPlatformIdentity} from './platform-access.js';
 // a console can never enable "verify" for a dossier the server will refuse.
 import {requiredEvidence} from './onboarding.js';
 
-export function operationalHealth(db) {
+export function operationalHealth(db, deployment = {}) {
   return {
     async record(signal) {
       if(!['api_error','webhook_rejected','gps_anomaly'].includes(signal))return;
@@ -154,6 +154,21 @@ export function operationalHealth(db) {
           signals,counts:visibleCounts,pool:can('system')?(db.poolStats?.()??null):null,
           alertTransport:'internal_ops_only',
           storage:capacity,
+          // WHETHER THE ENGINE EXISTS, beside the count of times it failed.
+          // `routing_failed: 0` reads as "routing is fine" and is exactly what
+          // an unconfigured deployment reports — nothing has ever been
+          // attempted, so nothing has ever failed. That is the same defect the
+          // storage gate had: an unplugged smoke alarm is silent, and a console
+          // showing only the silence confirms the opposite of the truth.
+          //
+          // The URL is deliberately absent. It is configuration, it may carry a
+          // key, and "is there an engine, and who is it" is the whole of what an
+          // operator acts on.
+          routing:can('system')?{
+            configured:deployment.routing?.configured===true,
+            provider:deployment.routing?.provider??null,
+            timeoutMs:deployment.routing?.timeoutMs??null,
+          }:null,
           objectStorage,
           capabilities:actor.platform_capabilities??[],
           kycQueue,paymentAnomalies,payoutAnomalies,incidents};
