@@ -72,7 +72,50 @@ export const managesOperator = user =>
   user?.role === 'ops' ||
   (user?.role === 'driver' && user?.operator_type === 'independent' && user?.owner_user_id === user?.id);
 
-export async function mapIdentity(db,{subject,issuer,notificationEmail=null,emailVerified=false,signInProvider=null}) {
+/**
+ * Move a proven guest purchase onto an account, inside the caller's transaction.
+ *
+ * Split out of `claimGuestPurchase` so the SAME move can happen at the moment
+ * an account is created, rather than only after it. There is exactly one
+ * implementation of "the tickets change hands" because there is exactly one
+ * way that is allowed to happen.
+ *
+ * @param {any} tx an open transaction
+ * @param {string} accountId the account taking the tickets
+ * @param {string} guestToken the raw token, exactly as issued
+ * @returns {Promise<{guestId:string,tickets:number}>}
+ */
+async function adoptGuestPurchase(tx,accountId,guestToken) {
+  const session=await one(tx,`SELECT s.user_id FROM api_sessions s JOIN users u ON u.id=s.user_id
+    WHERE s.token_hash=$1 AND s.kind='guest' AND s.expires_at>now() AND u.active AND u.auth_subject IS NULL`,
+  [tokenHash(guestToken)]);
+  invariant(session,'CLAIM_INVALID','Ce lien de récupération n’est plus valide. Demandez-en un nouveau depuis votre billet.',401);
+  const guestId=session.user_id;
+  // Holding the token says who they are. It does not say they paid, so the
+  // purchase is what is checked before anything moves.
+  const paid=await one(tx,`SELECT count(*)::integer AS n FROM bookings
+    WHERE passenger_id=$1 AND status IN ('confirmed','boarded','completed')`,[guestId]);
+  invariant(paid.n>0,'CLAIM_NOTHING_TO_KEEP','Aucun billet payé n’est rattaché à ce lien.',409);
+  // The account needs a passenger profile before tickets can point at it: the
+  // booking table references one, exactly as it does for every other passenger.
+  await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING',[accountId]);
+  await tx.query('UPDATE bookings SET passenger_id=$2,updated_at=now() WHERE passenger_id=$1',[guestId,accountId]);
+  await tx.query('UPDATE booking_passengers SET passenger_id=$2 WHERE passenger_id=$1',[guestId,accountId]);
+  await tx.query('UPDATE booking_groups SET purchaser_id=$2,updated_at=now() WHERE purchaser_id=$1',[guestId,accountId]);
+  // The purchase is what makes this a passenger account.
+  await tx.query('UPDATE users SET passenger_activated_at=coalesce(passenger_activated_at,now()),updated_at=now() WHERE id=$1',[accountId]);
+  await tx.query('DELETE FROM api_sessions WHERE user_id=$1',[guestId]);
+  await tx.query('UPDATE users SET active=false,updated_at=now() WHERE id=$1 AND auth_subject IS NULL',[guestId]);
+  return {guestId,tickets:paid.n};
+}
+
+/**
+ * @param {object} input the verified identity claims, plus how it is arriving
+ * @param {'passenger'|'provider'} [input.intent] what this sign-in is for
+ * @param {string|null} [input.guestToken] the purchase, when there is one
+ */
+export async function mapIdentity(db,{subject,issuer,notificationEmail=null,emailVerified=false,signInProvider=null,
+  intent='passenger',guestToken=null}) {
   invariant(typeof subject==='string' && subject.length>0 && subject.length<=255,'UNAUTHORIZED','Invalid identity.',401);
   // The verified-email gate. A password identity whose address has not been
   // confirmed is not a LeRoutier account yet: /me must refuse it, or the
@@ -90,7 +133,31 @@ export async function mapIdentity(db,{subject,issuer,notificationEmail=null,emai
     // this transaction under an advisory lock so concurrent first sign-ins
     // cannot each read the same "still under threshold" and overshoot it.
     const known=(await tx.query('SELECT id FROM users WHERE auth_subject=$1',[subject])).rows[0];
-    if(!known) await assertRegistrationOpen(tx);
+    if(!known) {
+      await assertRegistrationOpen(tx);
+      // A PASSENGER ACCOUNT BEGINS WITH A TICKET, and this is where that is
+      // enforced rather than on the screen that offered it. Signing in is the
+      // only moment a LeRoutier account comes into being, so a rule about
+      // opening one has to live here or it lives nowhere.
+      //
+      // WHAT IS ASKED FOR IS THE PURCHASE ITSELF, not a promise of one: the
+      // token issued with a booking that was actually paid for, checked below
+      // against its stored hash and its confirmed bookings. Hiding the button
+      // would leave the rule resting on a screen; this is the call the screen
+      // eventually makes, and it is refused without one.
+      //
+      // ONLY THE TRAVELLER'S DOOR ASKS THIS QUESTION. `intent` is 'provider'
+      // for an account being created for professional use — onboarding, a
+      // driver, a company, their staff — and every one of those people is not
+      // buying anything and is let through exactly as before. That is also the
+      // default, so no caller is asked for a ticket unless it claimed to be
+      // opening a traveller's account. Nothing is loosened by it: an identity
+      // created either way is not a passenger account until a purchase has
+      // been adopted into it, which is the next thing that happens below.
+      invariant(intent!=='passenger' || (typeof guestToken==='string' && guestToken.length>=20 && guestToken.length<=200),
+        'PASSENGER_SIGNUP_REQUIRES_PURCHASE',
+        'Un compte voyageur s’ouvre avec un premier billet. Achetez votre billet sans compte : votre achat vous permettra ensuite de créer ce compte, et vos billets vous y suivront.',403);
+    }
     const inserted=(await tx.query(`INSERT INTO users(auth_subject,auth_issuer,display_name,role)
       VALUES($1,$2,'','passenger') ON CONFLICT(auth_subject) DO NOTHING RETURNING id`,[subject,issuer])).rows[0];
     const user=(await tx.query('SELECT id,auth_issuer FROM users WHERE auth_subject=$1',[subject])).rows[0];
@@ -106,6 +173,14 @@ export async function mapIdentity(db,{subject,issuer,notificationEmail=null,emai
     if(inserted) {
       await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1)',[user.id]);
       await audit(tx,user.id,'identity.onboarded',user.id);
+      // The purchase the account was created for changes hands in THIS
+      // transaction. Doing it later, as a separate call, is what left a window
+      // in which a brand new account existed holding nothing — and a failed
+      // second call left it that way for good.
+      if(intent!=='provider') {
+        const adopted=await adoptGuestPurchase(tx,user.id,guestToken);
+        await audit(tx,user.id,'identity.purchase_claimed',user.id,null,{guestId:adopted.guestId,tickets:adopted.tickets});
+      }
     }
     return activeIdentity(tx,user.id);
   });
@@ -122,10 +197,13 @@ export async function mapIdentity(db,{subject,issuer,notificationEmail=null,emai
  * none of them is asked for or accepted here. Nothing is adopted on the strength
  * of an identifier alone.
  *
- * WHAT ACTIVATES AN ACCOUNT. This is the one path that turns a newly signed-up
- * identity into a passenger account. It requires a CONFIRMED purchase, so an
- * account created through any direct call to the provisioning API is still not a
- * passenger account until something has actually been bought and adopted.
+ * WHAT ACTIVATES AN ACCOUNT, and the two moments it can happen. `mapIdentity`
+ * adopts the purchase while creating the account it was bought for, which is
+ * the ordinary path now; this function is the same move made later, for an
+ * account that already existed when the purchase was made — a passenger
+ * signing in again, or a guest who bought on a device where they were already
+ * registered. Both go through `adoptGuestPurchase`, so both are the same
+ * transaction and the same rule: a CONFIRMED purchase, or nothing moves.
  *
  * The token is spent in the same transaction: the guest's sessions are deleted
  * and the identity is deactivated, so a replay finds nothing and the row that
@@ -144,28 +222,9 @@ export async function claimGuestPurchase(db,actor,guestToken) {
   // account that cannot open them would lose them for both.
   invariant(actor.role==='passenger','FORBIDDEN','Seul un compte voyageur peut rattacher ces billets.',403);
   return db.transaction(async tx=>{
-    const session=await one(tx,`SELECT s.user_id FROM api_sessions s JOIN users u ON u.id=s.user_id
-      WHERE s.token_hash=$1 AND s.kind='guest' AND s.expires_at>now() AND u.active AND u.auth_subject IS NULL`,
-    [tokenHash(guestToken)]);
-    invariant(session,'CLAIM_INVALID','Ce lien de récupération n’est plus valide. Demandez-en un nouveau depuis votre billet.',401);
-    const guestId=session.user_id;
-    // Holding the token says who they are. It does not say they paid, so the
-    // purchase is what is checked before anything moves.
-    const paid=await one(tx,`SELECT count(*)::integer AS n FROM bookings
-      WHERE passenger_id=$1 AND status IN ('confirmed','boarded','completed')`,[guestId]);
-    invariant(paid.n>0,'CLAIM_NOTHING_TO_KEEP','Aucun billet payé n’est rattaché à ce lien.',409);
-    // The account needs a passenger profile before tickets can point at it: the
-    // booking table references one, exactly as it does for every other passenger.
-    await tx.query('INSERT INTO passenger_profiles(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING',[actor.id]);
-    await tx.query('UPDATE bookings SET passenger_id=$2,updated_at=now() WHERE passenger_id=$1',[guestId,actor.id]);
-    await tx.query('UPDATE booking_passengers SET passenger_id=$2 WHERE passenger_id=$1',[guestId,actor.id]);
-    await tx.query('UPDATE booking_groups SET purchaser_id=$2,updated_at=now() WHERE purchaser_id=$1',[guestId,actor.id]);
-    // The purchase is what makes this a passenger account.
-    await tx.query('UPDATE users SET passenger_activated_at=coalesce(passenger_activated_at,now()),updated_at=now() WHERE id=$1',[actor.id]);
-    await tx.query('DELETE FROM api_sessions WHERE user_id=$1',[guestId]);
-    await tx.query('UPDATE users SET active=false,updated_at=now() WHERE id=$1 AND auth_subject IS NULL',[guestId]);
-    await audit(tx,actor.id,'identity.purchase_claimed',actor.id,null,{guestId,tickets:paid.n});
-    return {activated:true,tickets:paid.n};
+    const adopted=await adoptGuestPurchase(tx,actor.id,guestToken);
+    await audit(tx,actor.id,'identity.purchase_claimed',actor.id,null,{guestId:adopted.guestId,tickets:adopted.tickets});
+    return {activated:true,tickets:adopted.tickets};
   });
 }
 

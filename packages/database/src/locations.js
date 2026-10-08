@@ -11,6 +11,11 @@ export const LOCATION_PURPOSES = ['passenger_boarding', 'passenger_alighting', '
 const publicPoint = r => ({ id: r.id, name: r.name, placeId: r.place_id, stopId: r.stop_id, type: r.type,
   description: r.description, latitude: r.latitude, longitude: r.longitude, purposes: r.purposes, status: r.status, city: r.city });
 
+/** More points than a viewport can usefully draw, so more is never asked for. */
+export const MAX_MAP_POINTS = 200;
+/** The largest viewport points are drawn for: Benin and its neighbours, no more. */
+export const MAX_VIEWPORT_SQUARE_DEGREES = 60;
+
 export function locations(db) {
   return {
     async search(actor, input) {
@@ -29,6 +34,72 @@ export function locations(db) {
         ORDER BY (b.status='verified') DESC,b.name LIMIT 100`,
       [q, input.placeId ?? null, input.purposes ? JSON.stringify(input.purposes) : null, includeProposed])).rows.map(publicPoint));
     },
+    /**
+     * Every published place a journey passes through, inside one viewport.
+     *
+     * WHAT THIS IS FOR. A map of Benin with a route drawn on it answers "where
+     * is the bus"; it does not answer "where do I get on", which is the
+     * question somebody actually has at a roadside. The answer already exists
+     * in LeRoutier's own registry — verified boarding points, stations and
+     * stops, each with coordinates a person walked to — and this is that
+     * registry, read for a map rather than for a form.
+     *
+     * WHY IT IS BOUNDED BY A VIEWPORT. "All the points in the country" is not
+     * a question a map asks; it is a question a scraper asks. A bounding box is
+     * the map's own unit of interest, a map that is zoomed out far enough to
+     * want everything is one where dots would be unreadable anyway, and the
+     * span is capped so the box cannot be widened until it means everything.
+     *
+     * WHAT IT WILL NOT RETURN. Only VERIFIED points: a proposal somebody typed
+     * is not a place until a person has accepted it. Only points with
+     * coordinates: a pin that cannot be drawn is not a point. And no operator,
+     * no contact and no moderation state — a map of where to board is not a
+     * directory of who owns the kerb.
+     *
+     * @param {{bbox: {minLongitude:number,minLatitude:number,maxLongitude:number,maxLatitude:number}, limit?: number}} input
+     */
+    async mapPoints(input) {
+      const box = input?.bbox;
+      invariant(box && ['minLongitude', 'minLatitude', 'maxLongitude', 'maxLatitude'].every(key => Number.isFinite(box[key])),
+        'INVALID_VIEWPORT', 'A map viewport is required.');
+      const { minLongitude, minLatitude, maxLongitude, maxLatitude } = box;
+      invariant(minLongitude >= -180 && maxLongitude <= 180 && minLatitude >= -90 && maxLatitude <= 90
+        && minLongitude < maxLongitude && minLatitude < maxLatitude,
+        'INVALID_VIEWPORT', 'A map viewport is required.');
+      // Roughly the whole of Benin with room to pan, and nothing larger. The
+      // cap is what stops "one viewport" from becoming "the world".
+      invariant((maxLongitude - minLongitude) * (maxLatitude - minLatitude) <= MAX_VIEWPORT_SQUARE_DEGREES,
+        'INVALID_VIEWPORT', 'This viewport is too large to draw points for.', 422);
+      const limit = Number.isInteger(input.limit) ? Math.min(Math.max(input.limit, 1), MAX_MAP_POINTS) : MAX_MAP_POINTS;
+      const bbox = [minLongitude, minLatitude, maxLongitude, maxLatitude];
+      return db.transaction(async tx => (await tx.query(
+        `SELECT id,kind,name,city,type,purposes,latitude,longitude FROM (
+           SELECT b.id,'boarding_point' AS kind,b.name,p.name AS city,b.type,b.purposes,
+             b.latitude,b.longitude
+           FROM boarding_points b JOIN places p ON p.id=b.place_id
+           WHERE b.status='verified' AND b.latitude IS NOT NULL AND b.longitude IS NOT NULL
+           UNION ALL
+           SELECT s.id,'stop' AS kind,s.name,p.name AS city,NULL AS type,'[]'::jsonb AS purposes,
+             s.latitude,s.longitude
+           FROM stops s JOIN places p ON p.id=s.place_id
+           WHERE s.latitude IS NOT NULL AND s.longitude IS NOT NULL AND NOT s.is_demo
+         ) points
+         WHERE longitude BETWEEN $1 AND $3 AND latitude BETWEEN $2 AND $4
+         ORDER BY (kind='boarding_point') DESC, city, name
+         LIMIT $5`, [...bbox, limit])).rows.map(row => ({
+        id: row.id,
+        kind: row.kind,
+        name: row.name,
+        city: row.city,
+        // The registry's own vocabulary, so a map label and a checkout screen
+        // never describe the same kerb two different ways.
+        type: row.type,
+        purposes: row.purposes ?? [],
+        latitude: Number(row.latitude),
+        longitude: Number(row.longitude),
+      })));
+    },
+
     // Any authenticated user may propose a missing point; proposals are
     // moderated — only verified points become trusted canonical locations.
     async propose(actor, input) {

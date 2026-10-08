@@ -14,7 +14,7 @@ const GOOGLE_MAP_HOSTS = new Set(['maps.googleapis.com', 'maps.google.com']);
 
 async function searchTrips(page, origin = 'Cotonou', destination = 'Parakou') {
   await page.goto(APP + '/trips');
-  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByRole('radio', { name: 'Choisir une ville' }).click();
   await page.getByLabel('Ville de départ').click();
   await page.getByLabel('Ville de départ').fill(origin);
   await page.getByLabel('Ville de départ').press('Enter');

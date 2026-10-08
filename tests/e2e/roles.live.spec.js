@@ -10,29 +10,49 @@ async function login(page,label){
   const landing=label==='Voyageur'?'/tickets':label==='Exploitation plateforme'?'/ops/platform':label.startsWith('Exploitation')?'/ops/today':'/work/today';
   await expect(page).toHaveURL(APP+landing);
 }
-// The passenger surface has no bottom navigation, so it is not reached the way
-// a task bar is: the header carries the destinations on a wide screen and the
-// drawer carries them on a phone. Whichever is on screen is the product's real
-// path, and that is what gets used.
+// The passenger's four destinations are a BAR on a phone and a header row on a
+// wide screen; everything else a traveller needs is in the drawer, which is
+// what the walk below uses — a drawer entry has to be reopened to read where it
+// says we are, and that is the difference the last element of each row records.
+// The bar itself is checked separately, because it is the passenger surface's
+// own navigation and not a walk through the menu.
+// Somebody who wants a traveller destination that is not one of the four tabs
+// — "Envoyer un colis", "Suivre un colis" — reaches it through the drawer, on
+// both widths. The four tabs use the bar on a phone and the header on a wide
+// screen, which is checked by its own test above.
 async function openPassengerDestination(page,name){
   const header=page.getByRole('navigation',{name:'Navigation principale'}).getByRole('link',{name,exact:true});
-  if(await header.count())return header.click();
+  if(await header.isVisible())return header.click();
+  const tab=page.getByRole('navigation',{name:'Navigation voyageur'}).getByRole('link',{name,exact:true});
+  if(await tab.isVisible())return tab.click();
   await page.getByRole('button',{name:'Ouvrir le menu'}).click();
   await page.getByRole('navigation',{name:'Menu principal'}).getByRole('link',{name,exact:true}).click();
 }
-// The last element says how the workspace's navigation is reached. Every
-// operational workspace has a task bar pinned to the bottom of the screen; the
-// passenger surface does not — its destinations are in the header on a wide
-// screen and in the drawer on a phone, so its row is walked through the menu.
 /** @type {Array<[string,string,string[],('bar'|'menu')?]>} */
 const profiles=[
-  ['Voyageur','/tickets',['Voyager','Envoyer un colis','Suivre un colis','Mes voyages','Notifications'],'menu'],
+  ['Voyageur','/tickets',['Réservations','Envoyer un colis','Suivre un colis','Mes voyages','Notifications'],'menu'],
   ['Chauffeur indépendant','/work/today',['Aujourd’hui','Manifeste','Scanner','Comptant','Colis','Véhicule','Points','Recettes','Profil']],
   ['Conducteur de compagnie','/work/today',['Aujourd’hui','Manifeste','Scanner','Comptant','Colis','Véhicule','Profil']],
   ['Convoyeur','/work/today',['Service','Manifeste','Scanner','Comptant','Colis','Profil']],
   ['Exploitation compagnie','/ops/today',['Aujourd’hui','Services','Flotte','Équipage','Stations','Colis','Paiements','Règlements','Incidents','Alertes','Paramètres']],
   ['Exploitation plateforme','/ops/platform',['Vue plateforme','Opérateurs','Vérifications','Utilisateurs','Services','Colis','Incidents','Finances','Système','Administration','Équipe']],
 ];
+test('TEST Voyageur: the four traveller tabs are on screen and lead where they say',async({page})=>{
+  test.setTimeout(90_000);
+  await page.setViewportSize({width:390,height:844});
+  await login(page,'Voyageur');
+  const bar=page.getByRole('navigation',{name:'Navigation voyageur'});
+  await expect(bar).toBeVisible();
+  await expect(bar.getByRole('link')).toHaveText(['Réservations','Trajets','Colis','Profil']);
+  // The professional door shares the product with travellers and does not take
+  // one of their four tabs.
+  await expect(bar.getByRole('link',{name:'Professionnels',exact:true})).toHaveCount(0);
+  for(const [name,path] of [['Trajets','/tracking'],['Colis','/parcels'],['Profil','/account'],['Réservations','/trips']]){
+    await bar.getByRole('link',{name,exact:true}).click();
+    await expect(page).toHaveURL(APP+path);
+    await expect(bar.getByRole('link',{name,exact:true})).toHaveAttribute('aria-current','page');
+  }
+});
 for(const [label,path,links,mode='bar'] of profiles) test(`TEST ${label}: mobile login, workspace and every navigation destination`,async({page})=>{
   test.setTimeout(120_000);
   await page.setViewportSize({width:390,height:844});

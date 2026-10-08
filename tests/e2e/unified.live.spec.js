@@ -10,12 +10,22 @@ test('the unified PWA carries a real database-backed journey across workspaces',
   const passenger = await browser.newPage(), ops = await browser.newPage(), crew = await browser.newPage();
   const errors = [];
   for (const page of [passenger, ops, crew]) page.on('pageerror', () => errors.push('browser error'));
+  // Every refusal the API sends back during the passenger's journey, kept so a
+  // failure names the call that was refused instead of only the screen it left
+  // behind. A live journey is the one place a fixture cannot hide a wrong
+  // request behind a right answer.
+  const refused = [];
+  passenger.on('response', response => {
+    if (response.status() >= 400 && response.url().includes('/api/v1')) {
+      refused.push(`${response.request().method()} ${new URL(response.url()).pathname} → ${response.status()}`);
+    }
+  });
 
   // 1. One public entry point, anonymous, backed by real data. The search
   //    runs over the live Benin geography, not the route inventory.
   await passenger.goto(APP + '/?testMode=1');
   await expect(passenger.getByRole('button', { name: 'Rechercher un trajet' })).toBeVisible();
-  await passenger.getByLabel('Départ', { exact: true }).selectOption('place');
+  await passenger.getByRole('radio', { name: 'Choisir une ville' }).click();
   // Each city is resolved by a real lookup against the live geography, and each
   // is waited for BEFORE touching the next field. Filling both and asserting
   // both afterwards raced: the departure lookup is the first API round trip
@@ -42,15 +52,32 @@ test('the unified PWA carries a real database-backed journey across workspaces',
   await expect(passenger.getByRole('button', { name: 'Choisir' }).first()).toBeEnabled();
   await expect(passenger.getByText(/espèces/i)).toHaveCount(0);
 
-  // 2. Login happens at the action, and books against the real domain.
+  // 2. Choosing an offer leads to the ANONYMOUS checkout, and the purchase is
+  //    made against the real domain without an account: a name and a phone are
+  //    what a booking needs, and a login is not asked for at any point. This
+  //    was a sign-in gate until the guest checkout replaced it, which is what
+  //    this step now holds — if the gate returns, the payment button never
+  //    becomes enabled and nothing is bought.
   await passenger.getByRole('button', { name: 'Choisir' }).first().click();
   await expect(passenger).toHaveURL(/\/checkout/);
-  await passenger.getByRole('button', { name: 'Continuer vers le paiement' }).click();
-  await signIn(passenger, 'passenger');
-  // Booking lands on that booking, not on a generic list.
-  await expect(passenger).toHaveURL(/\/tickets\//);
+  await passenger.getByLabel('Nom et prénom du voyageur principal').fill('Passager Démo');
+  await passenger.getByLabel('Numéro de téléphone').fill('97000042');
+  await passenger.getByRole('button', { name: /Continuer vers le paiement/ }).click();
+  // The TEST offer takes the simulated payment path — no provider, no real
+  // money — and lands on that booking, not on a generic list.
+  try {
+    await expect(passenger).toHaveURL(/\/tickets\//, { timeout: 30000 });
+  } catch (error) {
+    // The checkout states its own refusal on the page. Reporting only "the URL
+    // did not change" sends the next person to read the wrong code, so the
+    // message it actually showed travels with the failure.
+    const shown = await passenger.getByRole('alert').allTextContents();
+    const notices = await passenger.getByRole('status').allTextContents();
+    throw new Error(`${error.message}\nCheckout said: ${[...shown, ...notices].filter(Boolean).join(' | ') || '(nothing)'}`
+      + `\nRefused by the API: ${refused.join(' | ') || '(none)'}`, { cause: error });
+  }
 
-  // 3. The demo payment is simulated and produces the confirmed booking.
+  // 3. The operations console is the same product and the same database.
   await ops.goto(APP + '/ops/payments');
   await signIn(ops, 'ops');
 

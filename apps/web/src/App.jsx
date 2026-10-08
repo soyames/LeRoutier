@@ -41,7 +41,7 @@ import { NotificationCentre, useUnreadCount } from '@leroutier/screens/notificat
 import { Home } from './home.jsx';
 import { LegalFooter } from './legal.jsx';
 import { ProfessionalEntry } from './professional.jsx';
-import { publicLinks, publicMenu } from './public-nav.js';
+import { publicLinks, publicMenu, passengerTabs } from './public-nav.js';
 import { PASSENGER, WORK, OPS, workspacesFor, capabilities, workspaceOf, isAuthorized } from './workspaces.js';
 import {
   UserRound, Package, Bell, Ticket, Home as HomeIcon, Route, Users, QrCode,
@@ -196,8 +196,12 @@ export default function App() {
     // on", shown in the header on desktop and in the role strip on a phone.
     // The brand name answers a question nobody asked and is already on screen
     // twice in the logo and the subtitle.
-    '': 'Accueil', trips: 'Voyager', tickets: 'Mes billets', stations: 'Gares & arrêts',
-    parcels: 'Colis', tracking: 'Suivi', account: 'Mon compte', onboarding: 'Travailler avec LeRoutier',
+    // The four the header carries are named for what a traveller is doing
+    // there: searching for a departure is booking one, and following a bus is
+    // the journey itself. Both names are used on the phone too, so the two
+    // screens never call the same destination two different things.
+    '': 'Accueil', trips: 'Réservations', tickets: 'Mes billets', stations: 'Gares & arrêts',
+    parcels: 'Colis', tracking: 'Trajets', account: 'Mon compte', onboarding: 'Travailler avec LeRoutier',
     professionnel: 'Espace professionnel',
     checkout: 'Paiement', notifications: 'Notifications',
   };
@@ -296,6 +300,11 @@ export default function App() {
     variant={isPublicSurface ? 'public' : 'app'}
     bleed={isPublicSurface && page === ''}
     links={publicLinks(page)}
+    // The traveller's four destinations, drawn only on a phone, where the
+    // header's row of links has nowhere to go. The operational workspaces get
+    // no such bar on the passenger surface: their own task bars are below and
+    // are a different thing entirely.
+    bottomNav={isPublicSurface ? passengerTabs(page) : []}
     menu={isPublicSurface ? publicMenu({ unread, signedIn: Boolean(user), pathname }) : []}
     menuTitle="Menu LeRoutier"
     footer={isPublicSurface && FOOTER_PAGES.has(page) ? <LegalFooter/> : null}>
@@ -345,7 +354,16 @@ export default function App() {
   // purchase, and offers the search — and a purchase no longer implies an
   // account, so a sign-in wall here would lock somebody out of a ticket they had
   // already paid for.
+  // Sending a parcel needs an account; reading the send page does not. It used
+  // to, because the shell put a sign-in panel above the whole journey — so a
+  // sender met an account form before they had read what sending involves, and
+  // the panel took the top of the screen from the task underneath it. The
+  // requirement is stated beside the action now, on the screen that has it.
+  // Operator onboarding joins them for the same reason: a driver or a company
+  // arriving from the professional page is about to CREATE an account, and the
+  // screen that explains which dossier they are opening has to be above the
+  // form that opens it rather than below a sign-in panel that says neither.
   const fullyPublic = workspace === PASSENGER && (page === '' || page === 'trips' || page === 'professionnel' ||
-    page === 'tracking' || page === 'tickets' || (page === 'parcels' && segments[1] === 'track') || page === 'checkout');
+    page === 'tracking' || page === 'tickets' || page === 'parcels' || page === 'onboarding' || page === 'checkout');
   return shell(<>{user?.is_demo && <div className="notice" role="status">Espace TEST · données de démonstration · aucun paiement réel</div>}{!fullyPublic && <SessionPanel onWorkspace={navigate}/>}{privacySub ? <PrivacyCenter/> : scoped.screens[page]}</>);
 }

@@ -8,7 +8,7 @@ test('Passenger, Ops and Driver complete a real database-backed journey with rea
   //    before any authentication.
   await passenger.goto('http://127.0.0.1:4173/trips?testMode=1');
   await expect(passenger.getByText('Trouvez votre départ.')).toBeVisible();
-  await passenger.getByLabel('Départ',{exact:true}).selectOption('place');
+  await passenger.getByRole('radio', { name: 'Choisir une ville' }).click();
   await passenger.getByLabel('Ville de départ').click();await passenger.getByLabel('Ville de départ').fill('Cotonou');await passenger.getByLabel('Ville de départ').press('Enter');
   await passenger.getByLabel('Destination').click();await passenger.getByLabel('Destination').fill('Parakou');await passenger.getByLabel('Destination').press('Enter');
   await expect(passenger.getByRole('button',{name:/Ville de départ : Cotonou/})).toBeVisible();

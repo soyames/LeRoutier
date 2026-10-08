@@ -52,7 +52,7 @@ test('an account that has never bought is asked for contact details, never for a
   await page.goto(APP + '/trips');
   // Search and selection are anonymous-safe: no sign-in anywhere first.
   await expect(page.getByText('Bienvenue sur LeRoutier')).toHaveCount(0);
-  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByRole('radio', { name: 'Choisir une ville' }).click();
   await page.getByLabel('Ville de départ').click(); await page.getByLabel('Ville de départ').fill('Cotonou'); await page.getByLabel('Ville de départ').press('Enter');
   await page.getByLabel('Destination').click(); await page.getByLabel('Destination').fill('Parakou'); await page.getByLabel('Destination').press('Enter');
   await page.getByRole('button', { name: 'Rechercher un trajet' }).click();

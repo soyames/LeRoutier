@@ -6,14 +6,39 @@ import {
 // There are four and not six: every extra entry makes the four that matter
 // smaller, and anything left over has a home in the drawer.
 export const PUBLIC_LINKS = [
-  { label: 'Voyager', to: '/trips', page: 'trips' },
+  { label: 'Réservations', to: '/trips', page: 'trips' },
   { label: 'Colis', to: '/parcels', page: 'parcels' },
-  { label: 'Suivi', to: '/tracking', page: 'tracking' },
+  { label: 'Trajets', to: '/tracking', page: 'tracking' },
   { label: 'Professionnels', to: '/professionnel', page: 'professionnel' },
 ];
 
 /** @param {string} page the active passenger section, as App.jsx derives it */
 export const publicLinks = page => PUBLIC_LINKS.map(link => ({ label: link.label, to: link.to, current: page === link.page }));
+
+// The four destinations a traveller gets on a phone, in the bar at the bottom
+// of the screen. Three of them are the header's own — same label, same route,
+// so moving between a phone and a laptop never moves a destination — and the
+// fourth is the account, which the header keeps behind the avatar.
+//
+// PROFESSIONNELS IS NOT ONE OF THE FOUR, deliberately. A traveller bar that
+// spends a quarter of itself on a door for people who work in transport is a
+// bar that has four items and three traveller destinations. That door is not
+// lost: it is in the drawer, on the page the header links to, and in the
+// footer.
+//
+// "Réservations" covers bought tickets as well as the search for one: a ticket
+// IS a reservation, they are two halves of one errand, and a bar with nothing
+// lit while somebody reads their own tickets answers "where am I" with silence.
+export const PASSENGER_TABS = [
+  { label: 'Réservations', to: '/trips', page: 'trips', pages: ['trips', 'tickets'], icon: Search },
+  { label: 'Trajets', to: '/tracking', page: 'tracking', pages: ['tracking'], icon: Navigation },
+  { label: 'Colis', to: '/parcels', page: 'parcels', pages: ['parcels'], icon: Package },
+  { label: 'Profil', to: '/account', page: 'account', pages: ['account'], icon: UserRound },
+];
+
+/** @param {string} page the active passenger section, as App.jsx derives it */
+export const passengerTabs = page => PASSENGER_TABS.map(tab =>
+  ({ label: tab.label, to: tab.to, current: tab.pages.includes(page || ''), icon: tab.icon }));
 
 /**
  * Everything the header does not carry.
@@ -29,7 +54,7 @@ export const publicLinks = page => PUBLIC_LINKS.map(link => ({ label: link.label
  * @param {{ unread?: number, signedIn?: boolean, pathname?: string }} state
  */
 export const publicMenu = ({ unread = 0, signedIn = false, pathname = '' } = {}) => [
-  { label: 'Voyager', to: '/trips', icon: Search },
+  { label: 'Réservations', to: '/trips', icon: Search },
   { label: 'Mes voyages', to: '/tickets', icon: Ticket },
   { label: 'Envoyer un colis', to: '/parcels', icon: Package },
   { label: 'Suivre un colis', to: '/parcels/track', icon: Navigation },

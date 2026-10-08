@@ -27,6 +27,34 @@ const GUEST_TOKEN='leroutier:guest-access';
 const readGuest=()=>{try{return window.localStorage.getItem(GUEST_TOKEN)||null;}catch{return null;}};
 const writeGuest=value=>{try{value?window.localStorage.setItem(GUEST_TOKEN,value):window.localStorage.removeItem(GUEST_TOKEN);}catch{/* private mode */}};
 
+// The one surface that offers to open a TRAVELLER'S account.
+//
+// A passenger account is opened with a first ticket, so this is the door that
+// has to present one — and the door the API refuses without it. Everywhere
+// else an account may be created without a purchase, because everywhere else
+// the people arriving are not buying anything: the account screen and operator
+// onboarding are shared with drivers, companies and their staff, and a
+// transport professional must never be asked for a ticket to exist.
+const PASSENGER_SIGNUP_DOOR=/^\/tickets(\/|$)/;
+
+/**
+ * Whether the account being created is a traveller's or a transport
+ * professional's.
+ *
+ * Read from the ADDRESS rather than stored, deliberately. A stored answer
+ * outlives the page that gave it: somebody who looked at the professional page
+ * and then went to buy a ticket would carry the wrong one into a signup made
+ * somewhere else entirely. The address is what is true right now, and it
+ * survives the round trip a Google redirect makes, because that returns to the
+ * page it started from.
+ *
+ * Saying "provider" grants nothing by itself — it only exempts a signup from a
+ * requirement, it does not confer a role, and an identity created that way is
+ * not a passenger account and cannot buy or hold anything. Every provider role
+ * is still assigned by reviewed onboarding afterwards.
+ */
+const signupIntentFor=pathname=>PASSENGER_SIGNUP_DOOR.test(pathname||'')?'passenger':'provider';
+
 const Context=createContext(null);
 const subscribe=callback=>{window.addEventListener('online',callback);window.addEventListener('offline',callback);return()=>{window.removeEventListener('online',callback);window.removeEventListener('offline',callback);};};
 
@@ -78,7 +106,12 @@ export function ApiProvider({baseUrl='',role,children}) {
   // show a guest their tickets have to re-render when the token arrives, and a
   // ref would leave them showing the sign-in prompt they rendered a moment ago.
   const [guestToken,setGuestToken]=useState(readGuest);
-  const rememberGuest=useCallback(token=>{setGuestToken(token||null);writeGuest(token||null);},[]);
+  // The same value in a ref, because `request` reads it and must not be
+  // rebuilt every time it changes: `useApi` re-fetches whenever `request`'s
+  // identity changes, so a token arriving mid-screen would restart every
+  // request on it rather than the one that needed the new value.
+  const guestRef=useRef(guestToken);
+  const rememberGuest=useCallback(token=>{guestRef.current=token||null;setGuestToken(token||null);writeGuest(token||null);},[]);
   // Bumped to re-run the config fetch. A retry is the only recovery path this
   // state has: nothing else re-reads it.
   const [configAttempt,setConfigAttempt]=useState(0);
@@ -114,7 +147,15 @@ export function ApiProvider({baseUrl='',role,children}) {
     if(!base) throw new Error('API non configurée.');
     if(!navigator.onLine) throw new Error('Hors ligne. Réessayez après reconnexion.');
     const bearer=await authorization(token);
-    const response=await fetch(base+'/api/v1'+path,{method,signal,cache:'no-store',headers:{'content-type':'application/json','x-request-id':crypto.randomUUID(),...(bearer?{authorization:'Bearer '+bearer}:{}),...(key?{'idempotency-key':key}:{}),...(totpRef.current?{'x-totp':totpRef.current}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+    // `/me` is where an account is created, so it is the only call that has to
+    // say what the account is for and, for a traveller, which purchase it was
+    // created for. Both ride on the request rather than on a stored flag, so
+    // the answer is always about the sign-in happening now.
+    const signup=path==='/me'?{
+      'x-signup-intent':signupIntentFor(typeof window==='undefined'?'':window.location.pathname),
+      ...(guestRef.current?{'x-guest-token':guestRef.current}:{}),
+    }:{};
+    const response=await fetch(base+'/api/v1'+path,{method,signal,cache:'no-store',headers:{'content-type':'application/json','x-request-id':crypto.randomUUID(),...signup,...(bearer?{authorization:'Bearer '+bearer}:{}),...(key?{'idempotency-key':key}:{}),...(totpRef.current?{'x-totp':totpRef.current}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
     let payload;
     try { payload=await response.json(); } catch { throw new Error('Le service est indisponible.'); }
     if(!response.ok){

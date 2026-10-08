@@ -24,15 +24,21 @@ let api;
 
 /**
  * A request as a bearer token, as a guest token, or as nobody at all.
+ *
+ * `headers` carries the two things `/me` needs to know when it is the call that
+ * CREATES an account: whether the sign-in is a traveller's or a transport
+ * professional's, and — for a traveller — the purchase the account is being
+ * created for. The client sends both; a test has to as well.
+ *
  * @param {string|null} token
  * @param {string} path
- * @param {{ method?: string, body?: unknown, key?: string }} [options]
+ * @param {{ method?: string, body?: unknown, key?: string, headers?: Record<string,string> }} [options]
  */
-const call = async (token, path, { method = 'GET', body, key } = {}) => {
+const call = async (token, path, { method = 'GET', body, key, headers = {} } = {}) => {
   const response = await api(new Request('http://localhost/api/v1' + path, {
     method,
     headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}),
-      ...(key ? { 'idempotency-key': key } : {}) },
+      ...(key ? { 'idempotency-key': key } : {}), ...headers },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   }));
   return { status: response.status, ...(await response.json()) };
@@ -40,6 +46,14 @@ const call = async (token, path, { method = 'GET', body, key } = {}) => {
 
 /** @param {string} path @param {{ method?: string, body?: unknown, key?: string }} [options] */
 const asVisitor = (path, options) => call(null, path, options);
+
+// What the ticket screen's sign-in says about itself: this is a traveller's
+// account being opened. It is the ONLY door that says so, and therefore the
+// only one the API asks for a purchase from.
+const asTraveller = guestToken => ({
+  'x-signup-intent': 'passenger',
+  ...(guestToken ? { 'x-guest-token': guestToken } : {}),
+});
 const trip = { serviceId: demo.service, origin: 0, destination: 3 };
 const buy = (quantity, extra = {}) => asVisitor('/bookings', { method: 'POST', key: randomUUID(),
   body: { ...trip, quantity, passengerName: 'Awa Sossou', passengerPhone: '+229 97 00 00 42', ...extra } });
@@ -140,15 +154,75 @@ test('a fare that moved since the quote is refused, and the seats are not held',
 
 // ── an account is what comes after ──────────────────────────────────────────
 
-test('a brand-new account cannot buy as itself, and is told what to do instead', async () => {
-  const token = await identity.sign('newcomer-' + randomUUID());
+test('opening a traveller account before any ticket has been bought is refused', async () => {
+  const subject = 'newcomer-' + randomUUID();
+  const token = await identity.sign(subject);
+  // The ticket screen's sign-in says it is opening a traveller's account, and
+  // presents nothing to open it with. Hiding the button would leave the rule
+  // resting on a screen; this is the call the screen eventually makes, and it
+  // is the API that refuses it.
+  const refused = await call(token, '/me', { headers: asTraveller(null) });
+  assert.equal(refused.status, 403);
+  assert.equal(refused.error.code, 'PASSENGER_SIGNUP_REQUIRES_PURCHASE');
+  // A refused signup leaves no account behind.
+  const rows = await db.transaction(async tx => (await tx.query(
+    "SELECT count(*)::integer AS n FROM users WHERE auth_subject=$1", [subject])).rows[0]);
+  assert.equal(rows.n, 0, 'nothing was created by the attempt');
+});
+
+test('an account created without a ticket is not a passenger account and buys nothing', async () => {
+  // The other doors — the account screen, operator onboarding, the provider
+  // workspaces — are shared with people who are not buying anything, and none
+  // of them is asked for a ticket. What they get is an identity, not a
+  // passenger account: it cannot buy as one and cannot hold a ticket.
+  const token = await identity.sign('provider-newcomer-' + randomUUID());
   const me = await call(token, '/me');
-  assert.equal(me.status, 200);
-  assert.equal(me.data.passenger_activated, false, 'it is an account, not yet a passenger account');
-  const refused = await call(token, '/bookings', { method: 'POST', key: randomUUID(),
-    body: { ...trip, quantity: 1 } });
+  assert.equal(me.status, 200, 'these doors open without a purchase');
+  assert.equal(me.data.role, 'passenger', 'the identity starts as it always has');
+  assert.equal(me.data.passenger_activated, false, 'and is not a passenger account');
+  const refused = await call(token, '/bookings', { method: 'POST', key: randomUUID(), body: { ...trip, quantity: 1 } });
   assert.equal(refused.status, 403);
   assert.equal(refused.error.code, 'PASSENGER_NOT_ACTIVATED');
+});
+
+test('a traveller account opened with a purchase is created with its tickets already in it', async () => {
+  const booked = await buy(2);
+  assert.equal((await call(booked.data.guestToken, `/bookings/${booked.data.id}/payments/test`,
+    { method: 'POST', key: randomUUID(), body: {} })).status, 200);
+
+  // One call: the account is created AND the purchase is adopted, in the same
+  // transaction. There is no moment in which the account exists empty, and no
+  // second step that a failure could skip.
+  const token = await identity.sign('buyer-signup-' + randomUUID());
+  const me = await call(token, '/me', { headers: asTraveller(booked.data.guestToken) });
+  assert.equal(me.status, 200, JSON.stringify(me));
+  assert.equal(me.data.passenger_activated, true, 'the purchase is what makes it a passenger account');
+  const mine = await call(token, '/me/bookings');
+  assert.equal(mine.data.length, 2, 'and the tickets came with it');
+  assert.equal(mine.data.every(b => b.status === 'confirmed'), true);
+
+  // The link is spent by the signup that used it.
+  const spent = await call(token, '/me/claim', { method: 'POST', body: { guestToken: booked.data.guestToken } });
+  assert.equal(spent.status, 401);
+});
+
+test('a traveller signup presenting a purchase that was never paid for is refused', async () => {
+  const booked = await buy(1);
+  const token = await identity.sign('unpaid-signup-' + randomUUID());
+  // The seats are only held. Holding them is not buying them, so there is no
+  // ticket for an account to be opened with yet.
+  const refused = await call(token, '/me', { headers: asTraveller(booked.data.guestToken) });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.error.code, 'CLAIM_NOTHING_TO_KEEP');
+  // And the purchase is untouched, still readable with the link that bought it.
+  assert.equal((await call(booked.data.guestToken, '/me/bookings')).data.length, 1);
+});
+
+test('a made-up purchase token is not a purchase', async () => {
+  const token = await identity.sign('forged-signup-' + randomUUID());
+  const refused = await call(token, '/me', { headers: asTraveller('not-a-token-that-was-ever-issued-ok') });
+  assert.equal(refused.status, 401);
+  assert.equal(refused.error.code, 'CLAIM_INVALID');
 });
 
 test('adopting a purchase is what turns the account into a passenger account', async () => {
@@ -224,6 +298,7 @@ const COMPANY = { displayName: 'Compagnie Test', legalName: 'Compagnie Test SARL
 /** A fresh identity, signed in and with a completed profile, ready to onboard. */
 async function newProvider(subject, plate) {
   const token = await identity.sign(subject + '-' + randomUUID());
+  // The professional door declares itself, and is never asked for a ticket.
   assert.equal((await call(token, '/me')).status, 200);
   assert.equal((await call(token, '/me', { method: 'PATCH', body: { displayName: 'Chauffeur Test', phone: '+229 97110022' } })).status, 200);
   return { token, dossier: { ...INDEPENDENT, vehicleRegistration: plate } };

@@ -11,7 +11,7 @@ const APP = 'http://127.0.0.1:4173';
 async function toResults(page) {
   await mockApi(page);
   await page.goto(APP + '/trips');
-  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByRole('radio', { name: 'Choisir une ville' }).click();
   const from = page.getByLabel('Ville de départ');
   await from.click(); await from.fill('Cotonou'); await from.press('Enter');
   const to = page.getByLabel('Destination');

@@ -187,9 +187,22 @@ function CheckoutFlow({ intent }) {
   // reads as a guest buyer — deliberately not the session's token, or a
   // signed-in account that cannot yet buy would have the purchase attributed to
   // it anyway.
-  const [buyToken, setBuyToken] = useState(guestToken ?? null);
+  //
+  // A REF, AND NOT A PIECE OF STATE, because the hold MINTS this token and the
+  // payment that follows belongs to the same click: a state update has not
+  // re-rendered by the time the next request is built, so a payment reading
+  // state would go out carrying the null this browser held a moment earlier.
+  // That was a real refusal — a guest's first purchase held its seats and was
+  // then told to sign in to pay for them, with the token it had just been given
+  // sitting unused. Nothing renders this value, so nothing needs to re-render
+  // when it arrives; `rememberGuest` already updates the session, which does
+  // re-render every screen that shows a guest their tickets.
+  const buyTokenRef = useRef(guestToken ?? null);
   const buyingAsSelf = Boolean(user?.passenger_activated && !user?.needs_profile);
-  const authOptions = buyingAsSelf ? {} : { token: buyToken };
+  // A function rather than a value, so every request reads the token that is
+  // true when IT is built — including the one built microseconds after the hold
+  // issued it.
+  const authOptions = () => (buyingAsSelf ? {} : { token: buyTokenRef.current });
 
   const backToResults = () => {
     clearIntent();
@@ -221,11 +234,11 @@ function CheckoutFlow({ intent }) {
         ...(availability.data ? { expectedAmountMinor: total } : {}),
         ...(quantity === 1 && seat ? { seatNumber: seat } : {}),
         ...(buyingAsSelf ? {} : { passengerName: name.trim(), passengerPhone: composePhone(country, phone) }) };
-      const held = await request('/bookings', { method: 'POST', key, body, ...authOptions });
+      const held = await request('/bookings', { method: 'POST', key, body, ...authOptions() });
       // The purchase mints an access token the first time this browser buys
       // without an account. It is kept so the tickets survive the payment
       // redirect and the tab being closed.
-      if (held.guestToken) { rememberGuest(held.guestToken); setBuyToken(held.guestToken); }
+      if (held.guestToken) { rememberGuest(held.guestToken); buyTokenRef.current = held.guestToken; }
       // The add-on attaches to the booking that now exists. Deliberately
       // outside the try that governs the booking: an insurance request that
       // fails must never cost somebody their seat. It is reported as itself
@@ -233,7 +246,7 @@ function CheckoutFlow({ intent }) {
       if (cover) {
         try {
           await request(`/bookings/${firstBookingId(held)}/insurance`, { method: 'POST', key: 'cover-' + held.id,
-            body: { productId: cover.productId, consentVersion: cover.consentVersion }, ...authOptions });
+            body: { productId: cover.productId, consentVersion: cover.consentVersion }, ...authOptions() });
         } catch {
           setCoverNotice('Votre réservation est enregistrée. La demande d’assurance n’a pas pu être envoyée : '
             + 'vous pourrez la refaire depuis votre billet.');
@@ -278,14 +291,14 @@ function CheckoutFlow({ intent }) {
     // and the same confirmation flow as a real payment.
     if (option.isTest) {
       try {
-        await request(`/bookings/${held.id}/payments/test`, { method: 'POST', key, body: {}, ...authOptions });
+        await request(`/bookings/${held.id}/payments/test`, { method: 'POST', key, body: {}, ...authOptions() });
         clearIntent();
         navigate(`/tickets/${anchor}`);
       } catch (e) { setError(e.message); setStep('review'); }
       return;
     }
     try {
-      const payment = await request(`/bookings/${held.id}/payment-intents`, { method: 'POST', key: 'pay-' + held.id, body: {}, ...authOptions });
+      const payment = await request(`/bookings/${held.id}/payment-intents`, { method: 'POST', key: 'pay-' + held.id, body: {}, ...authOptions() });
       if (payment.checkoutUrl) window.location.assign(payment.checkoutUrl);
       else { setError('Le lien de paiement est indisponible. Réessayez dans un instant.'); setStep('review'); }
     } catch (e) {

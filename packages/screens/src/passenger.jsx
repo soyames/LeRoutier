@@ -10,7 +10,7 @@ import { JourneySearchResults } from './journey-results.jsx';
 import { useGeolocation, nearestPlace } from './geolocation.js';
 import { rememberCheckout } from './checkout.jsx';
 import { JourneyTimeline } from './journey.jsx';
-import { JourneyTracking } from './tracking.jsx';
+import { JourneyTracking, TicketLookup, TrackingPrivacyNote } from './tracking.jsx';
 import { TicketDocuments, ParcelDocuments } from './documents.jsx';
 import { QrCapture } from './qr-capture.jsx';
 import { InsuranceOffer, InsurancePolicy } from './insurance.jsx';
@@ -98,16 +98,25 @@ export function JourneySearchFields({ originMode, setOriginMode, originPlace, se
     <div className="trip-row">
       <div className="trip-endpoints">
         <div className="endpoint-cell">
-          <label className="field" htmlFor="trip-origin"><span>Départ</span>
-            <select id="trip-origin" className="control" aria-label="Départ" value={originMode} onChange={e => setOriginMode(e.target.value)}>
-              {/* "Ma position", not "Ma position actuelle": this cell is 120px on
-                  a phone and a <select> truncates its own option, so the longer
-                  label rendered as "Ma position" with the tail cut off anyway.
-                  Same meaning, no visible amputation. */}
-              <option value="current">Ma position</option>
-              <option value="place">Choisir une ville…</option>
-            </select>
-          </label>
+          {/* Two visible alternatives, not one label over a hidden list.
+              This was a <select>, which on a phone shows only the answer it
+              already holds — "Ma position" — so "choose a city" existed for
+              exactly the people who thought to tap a control that looked
+              answered. Both ways to say where you are starting from are on
+              screen now, and the one in force is the one that looks in force. */}
+          <div className="field">
+            <span id="trip-origin-label">Départ</span>
+            <div className="origin-toggle" role="radiogroup" aria-labelledby="trip-origin-label">
+              <button type="button" role="radio" id="trip-origin-current" aria-checked={originMode === 'current'}
+                className={originMode === 'current' ? 'active' : ''} onClick={() => setOriginMode('current')}>
+                <MapPin size={13} aria-hidden="true"/>Ma position
+              </button>
+              <button type="button" role="radio" id="trip-origin-place-mode" aria-checked={originMode === 'place'}
+                className={originMode === 'place' ? 'active' : ''} onClick={() => setOriginMode('place')}>
+                <Search size={13} aria-hidden="true"/>Choisir une ville
+              </button>
+            </div>
+          </div>
           {/* An example, not a restatement of the label above it. These cells are
               120px wide on a phone, where "Rechercher une ville ou une localité"
               rendered as "Rechercher une" and stopped mid-sentence. A city name
@@ -173,7 +182,13 @@ export function JourneySearch({ onSearched = null }) {
   }
   return <section className="search-panel" aria-labelledby="journey-search-title">
     <h2 id="journey-search-title">Où allez-vous ?</h2>
-    <p className="search-hint">Aucun compte nécessaire pour chercher. Une seule place par réservation.</p>
+    {/* What a booking covers, said where the booking starts. It used to read
+        "une seule place par réservation", which was true before a purchase
+        could carry a party — and which told a family travelling together that
+        the app could not sell them seats. A purchase has covered up to ten
+        people since group bookings shipped; the number of them is chosen at
+        checkout, and the whole party is paid for once. */}
+    <p className="search-hint">Aucun compte nécessaire pour chercher. Réservez jusqu’à 10 places en une seule fois.</p>
     <JourneySearchFields originMode={originMode} setOriginMode={setOriginMode}
       originPlace={originPlace} setOriginPlace={setOriginPlace}
       destinationPlace={destinationPlace} setDestinationPlace={setDestinationPlace}
@@ -248,6 +263,25 @@ function Leg({ city, point, landmark, end = false }) {
 // the requested origin for both current-position and place searches.
 
 const IS_UUID = v => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v ?? '');
+
+// A way back to tickets already bought, for the two kinds of reader who can
+// have some: a passenger account, and a browser that bought without one and
+// still holds the guest link.
+//
+// It asks nothing of the API. Who may read tickets is already known on the
+// client — it is the same pair of facts the tickets screen itself branches on
+// — and a search page should not spend a request finding out whether to draw
+// one line.
+function HasTickets() {
+  const navigate = useNavigate();
+  const { user, guestToken } = useSession();
+  const mayHoldTickets = (Boolean(user) && user.role === 'passenger') || Boolean(guestToken);
+  if (!mayHoldTickets) return null;
+  return <div className="ticket-shortcut between wrap">
+    <span className="small muted">Vous avez déjà des billets ?</span>
+    <button className="btn btn-soft" onClick={() => navigate('/tickets')}><Ticket size={15}/>Voir mes billets</button>
+  </div>;
+}
 
 export function Trips() {
   const navigate = useNavigate();
@@ -356,15 +390,29 @@ export function Trips() {
     {/* The same photographic band the other public entry pages open with.
         Its heading is this page's only <h1>, so the search panel below carries
         its own question as a heading of a lower rank. */}
-    <PageHero media={PAGE_HERO.trips} eyebrow="Voyager" title="Trouvez votre départ."
+    <PageHero media={PAGE_HERO.trips} eyebrow="Réservations" title="Trouvez votre départ."
       lead="Recherchez librement. Le compte n’est demandé qu’au moment de réserver."/>
+
+    {/* Somebody who already holds tickets is not here to search for one, and
+        "where are my tickets" is the first question this page gets asked by
+        anybody who has bought before. It is a single line above the search
+        rather than a section: the tab is named Réservations, and a reservation
+        already bought belongs to the same word.
+
+        Shown only to somebody there is something to show — a guest who bought
+        on this browser, or a signed-in passenger. A visitor sees only the
+        search, which is what they came for. */}
+    <HasTickets/>
 
     <div id="trip-search" className="search-panel">
       <JourneySearchFields originMode={originMode} setOriginMode={setOriginMode}
         originPlace={originPlace} setOriginPlace={setOriginPlace}
         destinationPlace={destinationPlace} setDestinationPlace={setDestinationPlace}
         day={day} setDay={setDay} onSearch={search} onSwap={swap} submitLabel="Rechercher un trajet"/>
-      <span className="search-note">1 place par réservation · paiement en ligne sécurisé</span>
+      {/* The ceiling is on the seat picker too, and for the same reason: how
+          many places one booking carries is a fact a group decides on before
+          it searches, not a surprise at the payment step. */}
+      <span className="search-note">Jusqu’à 10 places par réservation · un seul paiement pour tout le groupe</span>
     </div>
 
     {searched && (destinationPlace || legacyStopDest) && (legacyStops
@@ -449,6 +497,13 @@ export function Tickets({ focusId = null }) {
   const asPassenger = Boolean(user) && user.role === 'passenger';
   const seesTickets = asPassenger || Boolean(guestToken);
   const bookings = useApi(seesTickets ? '/me/bookings' : null, asPassenger ? {} : { token: guestToken ?? null });
+  // Whether the account a visitor could create would have anything in it.
+  //
+  // A HELD purchase is not one: the seats are not paid for, the booking can
+  // still expire, and the reference the account would be opened against is not
+  // yet a ticket. Only a confirmed journey — paid for, or already travelled —
+  // is what a passenger account is opened with, here and on the server.
+  const hasConfirmed = (bookings.data || []).some(b => ['confirmed', 'boarded', 'completed'].includes(b.status));
   const paymentsConfig = useApi('/payments/config');
   const navigate = useNavigate();
   const [error, setError] = useState(''), [busy, setBusy] = useState(''), [notice, setNotice] = useState('');
@@ -578,20 +633,33 @@ export function Tickets({ focusId = null }) {
       {asPassenger ? <div className="controls">
         <button className="btn btn-primary" disabled={!!busy || !online} onClick={keepTickets}>
           {busy === 'claim' ? 'Rattachement…' : 'Rattacher mes billets'}</button>
-      </div> : <SessionPanel/>}
+      </div> : <SessionPanel allowRegistration={hasConfirmed}/>}
     </Card> : <Card className="stack">
       <strong>Ces billets restent liés à cet appareil</strong>
       <p className="small muted">Cet achat a été fait sans compte voyageur. Votre compte professionnel ne peut pas les rattacher — les billets sont un compte voyageur, pas un compte opérateur — et ils restent utilisables depuis ce navigateur.</p>
     </Card>)}
     {!seesTickets ? <>
-      {/* A visitor with neither a session nor a purchase. The empty state says
-          what would appear here; the panel beside it is how they get it, and it
-          is rendered HERE rather than injected by the shell, because this screen
-          is reachable without an account and the shell no longer puts a sign-in
-          panel in front of it. */}
-      <ApiState resource={{ loading: false, error: null }} emptyTitle="Connectez-vous"
-        empty="Vos billets et réservations apparaissent ici une fois connecté, ou à la fin d’un achat."/>
-      <SessionPanel/>
+      {/* A visitor with neither a session nor a purchase — which is where
+          every first-time traveller starts, and which is therefore a place to
+          sell a ticket from rather than a wall to stop at.
+
+          Signing in stays on the screen, because a returning passenger who
+          lands here has to be able to open tickets they already own. Creating
+          an account does NOT: a passenger account is opened by a first ticket,
+          so offering one before there is anything to put in it asks for a signup
+          the API would refuse. */}
+      <Card className="stack">
+        <strong>Aucun billet pour le moment</strong>
+        <p className="small muted" style={{ margin: 0 }}>
+          Vos billets apparaissent ici dès la fin d’un achat, et ils restent
+          accessibles sans compte. Un compte, créé après votre premier billet,
+          sert seulement à les retrouver sur tous vos appareils.
+        </p>
+        <div className="controls">
+          <button className="btn btn-primary" onClick={() => navigate('/trips')}><Search size={15}/>Rechercher un trajet</button>
+        </div>
+      </Card>
+      <SessionPanel allowRegistration={hasConfirmed}/>
     </>
       : bookings.loading ? <SkeletonCards count={2} lines={5}/>
         : bookings.error ? <ErrorState text="Impossible de charger vos billets." onRetry={bookings.reload}/>
@@ -676,36 +744,67 @@ export function Stations() {
 }
 
 export function Tracking() {
-  const { user } = useSession();
+  const { user, guestToken } = useSession();
   const navigate = useNavigate();
-  const bookings = useApi(user ? '/me/bookings' : null);
-  const booking = bookings.data?.find(b => ['confirmed', 'boarded'].includes(b.status));
+  // The screen answers the same question for two very different callers.
+  //
+  // A PASSENGER ACCOUNT, or a guest browser that bought here, is shown its own
+  // journeys the moment the page opens — asking somebody to retype a reference
+  // for a trip the app already knows about is asking them to prove something
+  // it can see for itself.
+  //
+  // EVERYBODY ELSE — a visitor, a traveller on a borrowed phone, anybody whose
+  // purchase happened on another device — gets the ticket-number field below
+  // and nothing in the way of it. That is not a fallback: buying without an
+  // account is the ordinary way to buy, so this is the ordinary way to follow
+  // the journey afterwards.
+  const asPassenger = Boolean(user) && user.role === 'passenger';
+  const seesTickets = asPassenger || Boolean(guestToken);
+  const bookings = useApi(seesTickets ? '/me/bookings' : null, asPassenger ? {} : { token: guestToken ?? null });
+  // Current and upcoming only. A journey that has finished or been cancelled
+  // is still a ticket, but it is not something to watch.
+  const journeys = (bookings.data || []).filter(b => ['confirmed', 'boarded'].includes(b.status));
+  const leading = journeys[0] ?? null;
+
   return <>
-    <PageHero media={PAGE_HERO.tracking} eyebrow="Suivi" title="Suivi de mon trajet"
+    <PageHero media={PAGE_HERO.tracking} eyebrow="Trajets" title="Suivez votre trajet."
       lead="La position du véhicule et les étapes confirmées, quand le service les transmet."/>
-    {/* The screen is reachable without an account — "Suivi" is one of the four
-        public header destinations — so its anonymous state has to offer the
-        way in, rather than telling somebody to connect with no door. */}
-    {!user ? <ApiState resource={{ loading: false, error: null }} emptyTitle="Connectez-vous"
-      empty="Le suivi s’affiche pour vos trajets confirmés."
-      action={<button className="btn btn-primary" onClick={() => navigate('/account')}>Se connecter</button>}/>
-      : bookings.loading ? <SkeletonCards count={1} lines={3}/>
-        : !booking ? <Card className="stack">
-          <strong>Aucun trajet en cours</strong>
-          <p className="small muted">Le suivi du véhicule s’active une fois votre réservation confirmée.</p>
-          <div className="controls"><button className="btn btn-primary" onClick={() => navigate('/trips')}>Rechercher un trajet</button></div>
-        </Card>
-          : <div className="stack">
-            <Card className="stack">
-              <div className="between wrap">
-                <div><h2>{booking.departure_city} → {booking.arrival_city}</h2><span className="small muted">{dateTime(booking.departure_at)}</span></div>
-                <Badge tone={status('booking', booking.status).tone}>{status('booking', booking.status).label}</Badge>
-              </div>
-              <button className="btn btn-soft" onClick={() => navigate(`/tickets/${booking.id}`)}>Ouvrir mon trajet complet</button>
-            </Card>
-            <JourneyTracking bookingId={booking.id}/>
-            <JourneyTimeline bookingId={booking.id}/>
-          </div>}
+
+    {seesTickets && <div className="stack">
+      {bookings.loading ? <SkeletonCards count={1} lines={3}/>
+        : bookings.error ? <ErrorState title="Suivi indisponible" text="Impossible de charger vos trajets." onRetry={bookings.reload}/>
+          : !journeys.length ? <Card className="stack">
+            <strong>Aucun trajet en cours</strong>
+            <p className="small muted">Le suivi du véhicule s’active une fois votre réservation confirmée.</p>
+            <div className="controls"><button className="btn btn-primary" onClick={() => navigate('/trips')}>Rechercher un trajet</button></div>
+          </Card>
+            : <>
+              {journeys.map(journey => <Card key={journey.id} className="stack">
+                <div className="between wrap">
+                  <div>
+                    <h2>{journey.departure_city} → {journey.arrival_city}</h2>
+                    <span className="small muted">{dateTime(journey.departure_at)}</span>
+                  </div>
+                  <Badge tone={status('booking', journey.status).tone}>{status('booking', journey.status).label}</Badge>
+                </div>
+                <button className="btn btn-soft" onClick={() => navigate(`/tickets/${journey.id}`)}>Ouvrir mon trajet complet</button>
+              </Card>)}
+              {/* One live picture, for the journey that is actually next. The
+                  others are one tap away on their own pages, which is also
+                  what keeps this screen from opening a poll per booking. */}
+              <JourneyTracking bookingId={leading.id}/>
+              <JourneyTimeline bookingId={leading.id}/>
+              {journeys.length > 1 && <p className="small muted">
+                {journeys.length - 1} autre{journeys.length > 2 ? 's' : ''} trajet{journeys.length > 2 ? 's' : ''} confirmé{journeys.length > 2 ? 's' : ''} :
+                ouvrez-le{journeys.length > 2 ? 's' : ''} depuis sa carte ci-dessus pour voir son suivi.</p>}
+            </>}
+    </div>}
+
+    {/* The ticket-number door, on the same page, for everybody — including a
+        signed-in passenger helping somebody else, and anybody who bought on a
+        different device. */}
+    <TicketLookup/>
+    <TrackingPrivacyNote/>
   </>;
 }
 
@@ -1118,8 +1217,22 @@ export function Parcels() {
       <div className="controls"><button className="btn btn-soft" onClick={() => { setLabel(null); setStep(0); }}>Envoyer un autre colis</button></div>
     </Card> : <Card className="stack">
       <Steps current={step} labels={['Trajet', 'Personnes', 'Colis & prix']}/>
-      {!user && <p className="small muted" role="status">Connectez-vous pour créer un envoi.</p>}
-      {user && <form className="stack" onSubmit={create}>
+      {/* The account, asked for where the sending starts.
+          It used to be a panel the shell put ABOVE this screen, so the first
+          thing a sender met was a name, a phone, an e-mail and a password —
+          before they had read what sending a parcel involves, and taking the
+          top of the page from the task underneath. What a sender needs first is
+          the shape of the job, which is what the steps above are; the
+          requirement is stated here, beside the action it applies to, with the
+          one thing that IS public about parcels said out loud so nobody assumes
+          the tracking they came for is behind the same wall. */}
+      {!user ? <>
+        <p className="small muted" role="status">
+          Créer un envoi demande un compte : c’est lui qui porte le suivi de votre colis et permet de le
+          retrouver plus tard. Le suivi d’un colis, lui, reste public — il ne demande ni compte ni connexion.
+        </p>
+        <SessionPanel/>
+      </> : <form className="stack" onSubmit={create}>
         {step === 0 && <>
           <CityPicker label="Ville de départ" stops={stops} selected={originPick}
             onPick={p => { setOriginPick(p); setOrigin(p?.stopId || ''); }}/>

@@ -21,6 +21,35 @@ const publicPosition = row => (row ? {
   // Device speed and heading are operational detail, not passenger content.
 } : null);
 
+/**
+ * The ticket number a passenger actually holds.
+ *
+ * "Référence" on a ticket is the first eight characters of the booking's
+ * identifier, and the printed document prefixes the same eight with `LRB-`.
+ * Both spellings name the same ticket, so both are accepted and folded to one
+ * canonical form here — the ONE place that decides what a ticket number is.
+ *
+ * @param {unknown} value the raw field text, exactly as typed
+ * @returns {string|null} eight upper-case hex characters, or null
+ */
+export function parseTicketReference(value) {
+  if (typeof value !== 'string') return null;
+  const match = value.trim().replace(/\s+/g, '').toUpperCase().match(/^(?:LRB-)?([0-9A-F]{8})$/);
+  return match ? match[1] : null;
+}
+
+/**
+ * The identifier range eight hex characters stand for.
+ *
+ * The reference is a PREFIX of the booking id, so the lookup is an inclusive
+ * range on the primary key rather than a `LIKE` over a cast: the index does the
+ * work, and the range is exact (nothing above `FFFFFFFF-…` exists to be missed).
+ */
+function referenceBounds(reference) {
+  const head = `${reference.slice(0, 4)}-${reference.slice(4, 8)}`;
+  return { low: `${head}-0000-0000-0000-000000000000`, high: `${head}-ffff-ffff-ffff-ffffffffffff` };
+}
+
 export function tracking(db, config = {}) {
   const thresholds = config.freshness ?? FRESHNESS;
 
@@ -161,6 +190,112 @@ export function tracking(db, config = {}) {
           'FORBIDDEN', 'An active ticket is required.', 403);
         const result = await serviceTracking(tx, booking.service_id, { destinationSequence: booking.destination_sequence, now });
         return { ...result, bookingId: booking.id, boardingSequence: booking.origin_sequence, destinationSequence: booking.destination_sequence };
+      });
+    },
+
+    /**
+     * Tracking for somebody holding a ticket number and nothing else.
+     *
+     * A passenger who bought without an account has a reference and no login,
+     * and reading their own journey's progress must not require either. Holding
+     * the ticket number is what the counter accepts for the same journey, so it
+     * is what this accepts — and it is the WHOLE of what it accepts.
+     *
+     * WHAT COMES BACK, and what never does. The answer is the same operational
+     * picture a signed-in passenger sees, built by the same `serviceTracking`,
+     * plus the route facts printed on the ticket. It is assembled field by
+     * field from a whitelist: no name, no phone, no seat, no payments, no
+     * account, no other traveller on board, and no device speed or heading.
+     * Nothing here is derived from who is asking, because nothing knows.
+     *
+     * THE TICKET NUMBER IS GUESSABLE, and that is handled by the caller, not
+     * here: this function is only ever reached through a route that meters each
+     * client address. Eight hex characters is four billion possibilities, which
+     * is not a secret — the rate limit is what makes enumeration hopeless, and
+     * it has to hold on every deployment rather than in this module.
+     *
+     * @param {string} reference the eight-hex ticket reference, or `LRB-` + it
+     * @param {{ now?: number }} [options]
+     */
+    async publicTicketTracking(reference, { now = Date.now() } = {}) {
+      const ticket = parseTicketReference(reference);
+      // A malformed number is answered as its own case rather than as "not
+      // found": "that is not a ticket number" and "no such ticket" are
+      // different things to say to somebody who mistyped one character.
+      invariant(ticket, 'INVALID_REFERENCE', 'Ce numéro de billet n’est pas valide.', 400);
+      const { low, high } = referenceBounds(ticket);
+      return db.transaction(async tx => {
+        // A reference is eight characters of a random identifier, so a collision
+        // is possible in principle and the reader has to resolve one anyway. A
+        // journey in progress leads, then the next departure, then the most
+        // recent one: that is the order somebody opening this screen is asking
+        // in. Anything held, expired or abandoned is not a ticket and is not
+        // offered.
+        const candidates = await rows(tx, `SELECT b.id,b.status,b.origin_sequence,b.destination_sequence,b.service_id,
+          s.departure_at,s.arrival_at,s.status AS service_status,s.is_demo,
+          r.name AS route_name,o.name AS operator_name,
+          coalesce(op.name,(SELECT p.name FROM service_stops ss JOIN stops st ON st.id=ss.stop_id
+            JOIN places p ON p.id=st.place_id WHERE ss.service_id=s.id AND ss.sequence=b.origin_sequence)) AS departure_city,
+          coalesce(ap.name,(SELECT p.name FROM service_stops ss JOIN stops st ON st.id=ss.stop_id
+            JOIN places p ON p.id=st.place_id WHERE ss.service_id=s.id AND ss.sequence=b.destination_sequence)) AS arrival_city
+          FROM bookings b
+          JOIN services s ON s.id=b.service_id
+          JOIN routes r ON r.id=s.route_id
+          JOIN operators o ON o.id=s.operator_id
+          LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id AND bdp.place_id=(SELECT st.place_id
+            FROM service_stops ss JOIN stops st ON st.id=ss.stop_id WHERE ss.service_id=s.id AND ss.sequence=b.origin_sequence)
+          LEFT JOIN places op ON op.id=bdp.place_id
+          LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id AND bap.place_id=(SELECT st.place_id
+            FROM service_stops ss JOIN stops st ON st.id=ss.stop_id WHERE ss.service_id=s.id AND ss.sequence=b.destination_sequence)
+          LEFT JOIN places ap ON ap.id=bap.place_id
+          WHERE b.id BETWEEN $1::uuid AND $2::uuid
+            AND b.status IN ('confirmed','boarded','completed','cancelled')`, [low, high]);
+        invariant(candidates.length, 'NOT_FOUND', 'Aucun billet ne correspond à ce numéro.', 404);
+        // Boarded first, then the next departure, then the most recent one.
+        const rank = row => row.status === 'boarded' ? 0 : row.status === 'confirmed' ? 1
+          : row.status === 'completed' ? 2 : 3;
+        const booking = candidates.sort((a, b) =>
+          rank(a) - rank(b) || new Date(b.departure_at).getTime() - new Date(a.departure_at).getTime())[0];
+        // A cancelled ticket has no journey left to describe, and saying so is
+        // the honest answer rather than a progress bar on a service that will
+        // not run.
+        const tracking = booking.status === 'cancelled' || booking.service_status === 'cancelled'
+          ? null
+          : await serviceTracking(tx, booking.service_id, { destinationSequence: booking.destination_sequence, now });
+        return {
+          reference: ticket,
+          ticket: {
+            status: booking.status,
+            serviceStatus: booking.service_status,
+            routeName: booking.route_name,
+            operatorName: booking.operator_name,
+            departureCity: booking.departure_city,
+            arrivalCity: booking.arrival_city,
+            departureAt: booking.departure_at,
+            arrivalAt: booking.arrival_at,
+            boardingSequence: booking.origin_sequence,
+            destinationSequence: booking.destination_sequence,
+            // Synthetic inventory is labelled here exactly as it is everywhere
+            // else, so a demonstration never reads as a real departure.
+            isTest: booking.is_demo === true,
+          },
+          // The whole picture, or the honest absence of one. Never a substitute.
+          tracking: tracking && {
+            serviceStatus: tracking.serviceStatus,
+            isTest: tracking.isTest,
+            route: tracking.route,
+            position: tracking.position,
+            signal: tracking.signal,
+            signalAgeSeconds: tracking.signalAgeSeconds,
+            progress: tracking.progress,
+            stops: tracking.stops,
+            nextStop: tracking.nextStop,
+            nextEta: tracking.nextEta,
+            eta: tracking.eta,
+            boardingSequence: tracking.boardingSequence ?? booking.origin_sequence,
+            destinationSequence: tracking.destinationSequence ?? booking.destination_sequence,
+          },
+        };
       });
     },
 

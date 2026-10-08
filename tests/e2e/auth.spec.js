@@ -149,7 +149,7 @@ test('a passenger completes their profile and signs out leaving nothing behind',
   // it for nothing at all. The search is run from the home page rather than a
   // nav link, because on a phone those links live behind the drawer.
   await page.getByRole('button', { name: 'Accueil LeRoutier' }).click();
-  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByRole('radio', { name: 'Choisir une ville' }).click();
   await page.getByLabel('Ville de départ').fill('Cotonou'); await page.getByLabel('Ville de départ').press('Enter');
   await page.getByLabel('Destination').fill('Parakou'); await page.getByLabel('Destination').press('Enter');
   await page.getByRole('button', { name: 'Rechercher un trajet' }).click();

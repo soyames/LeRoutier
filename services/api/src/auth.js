@@ -69,7 +69,33 @@ export function authentication(db, config, keyResolver = undefined) {
           return activeIdentity(tx,row.id);
         });
       }
-      return mapIdentity(db,await verify(token));
+      const claims=await verify(token);
+      // WHAT THIS SIGN-IN IS FOR, and the purchase behind it.
+      //
+      // `/me` is where a LeRoutier account comes into being, so a rule about
+      // opening one has to be enforced here. The rule is about PASSENGER
+      // accounts: a traveller's account is opened with a first ticket, so the
+      // door that offers one says so and must present the purchase the account
+      // is being created for.
+      //
+      // WHICH DOOR IS WHICH, and why the default is not "passenger". The
+      // account screen, the professional page and operator onboarding are
+      // reached by people who are not buying anything — a driver, a company,
+      // their staff — and are the same screen for both. Treating an unstated
+      // intent as a traveller's would lock providers out of their own signup,
+      // which is exactly what must not happen. Only the ticket surface claims
+      // to be opening a traveller's account, and it is the only one refused
+      // without a purchase. Nothing is weakened by the default: an identity
+      // created without one is not a passenger account, cannot buy as one, and
+      // cannot hold a ticket — which is what a passenger account is.
+      //
+      // Both headers are bounded before they are read, and neither is trusted
+      // for anything except this one decision: the guest token is checked
+      // against its stored hash and its paid bookings in the database.
+      const intent=request.headers.get('x-signup-intent')==='passenger'?'passenger':'provider';
+      const raw=request.headers.get('x-guest-token');
+      const guestToken=typeof raw==='string' && raw.length>=20 && raw.length<=200 ? raw : null;
+      return mapIdentity(db,{...claims,intent,guestToken});
     },
     async demoSession(role, profile) {
       invariant(config.demoLogin, 'NOT_FOUND', 'Endpoint not found.', 404);

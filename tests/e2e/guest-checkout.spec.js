@@ -20,7 +20,7 @@ const APP = 'http://127.0.0.1:4173';
  * signed in has to reach the search through the app's own navigation.
  */
 async function runSearch(page) {
-  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByRole('radio', { name: 'Choisir une ville' }).click();
   await page.getByLabel('Ville de départ').click();
   await page.getByLabel('Ville de départ').fill('Cotonou');
   await page.getByLabel('Ville de départ').press('Enter');
@@ -164,6 +164,60 @@ test('keeping the tickets is offered, and only after there is something to keep'
   await expect(page.getByText('Gardez vos billets')).toBeVisible();
   await expect(page.getByText(/facultatif/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Afficher mon billet' })).toBeVisible();
+});
+
+// The published sign-in configuration, as production serves it: e-mail and
+// password available. Without it the panel cannot render a registration form
+// at all, and a test asserting the form's absence would pass for the wrong
+// reason — it would be measuring a missing feature rather than a closed door.
+const CAN_SIGN_IN = { demoLogin: true, firebase: { apiKey: 'browser-test-api-key',
+  authDomain: 'example.firebaseapp.com', projectId: 'example-project', appId: '1:1:web:test', providers: [] } };
+
+test('before anything is bought, the tickets screen sells a ticket instead of an account', async ({ page }) => {
+  await mockApi(page);
+  await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: CAN_SIGN_IN } }));
+  await page.goto(APP + '/tickets');
+
+  // A traveller's account is opened by a first ticket, so there is nothing to
+  // offer one for yet — and the screen says what to do instead rather than
+  // showing a form that would be refused.
+  await expect(page.getByRole('button', { name: 'Pas encore de compte ? Créer un compte' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Créer un compte' })).toHaveCount(0);
+  await expect(page.getByText('Aucun billet pour le moment')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rechercher un trajet' })).toBeVisible();
+  // Signing IN is still here: a passenger who already has an account has to be
+  // able to open the tickets in it.
+  await expect(page.getByLabel('Adresse e-mail')).toBeVisible();
+  await expect(page.getByText(/Un compte voyageur s’ouvre avec un premier billet/)).toBeVisible();
+  // The professional door is named, so nobody working in transport is stranded
+  // behind a rule aimed at travellers.
+  await expect(page.getByRole('link', { name: 'Créez votre compte professionnel' })).toBeVisible();
+});
+
+test('after a ticket is bought, keeping the account is offered and the ticket never waits for it', async ({ page }) => {
+  await mockApi(page);
+  await page.route('**/api/v1/auth/config', r => r.fulfill({ json: { data: CAN_SIGN_IN } }));
+  await searchTrips(page);
+  await page.getByRole('button', { name: 'Chauffeurs indépendants' }).click();
+  await page.getByRole('button', { name: 'Choisir' }).first().click();
+  await expect(page).toHaveURL(/\/checkout/);
+  await page.getByLabel('Nom et prénom du voyageur principal').fill('Awa Sossou');
+  await page.getByLabel('Numéro de téléphone').fill('97000042');
+  await page.getByRole('button', { name: /Continuer vers le paiement/ }).click();
+  await expect(page).toHaveURL(/\/tickets\//, { timeout: 15000 });
+
+  // The purchase exists, so the offer exists — beside the tickets, never in
+  // front of them. The card leads, because it is the purchase that makes the
+  // offer possible and what is being asserted is the order between them.
+  await expect(page.getByText('Gardez vos billets')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Afficher mon billet' })).toBeVisible();
+  // The offer is read from the bookings, which arrive after the purchase does,
+  // so this waits for them rather than for the paint.
+  await expect(page.getByRole('button', { name: 'Pas encore de compte ? Créer un compte' }))
+    .toBeVisible({ timeout: 15_000 });
+  // Following the journey does not need the account either.
+  await page.goto(APP + '/tracking');
+  await expect(page.getByLabel('Référence du billet')).toBeVisible();
 });
 
 test('a signed-in driver buys a personal ticket as a guest, and can still open it', async ({ page }) => {

@@ -80,7 +80,12 @@ export function ProfessionalEntry() {
           <p style={{ margin: 0 }}>{path.summary}</p>
           <p className="small muted" style={{ margin: 0 }}>{path.detail}</p>
           {path.cta && <div className="controls">
-            <button className="btn btn-primary" onClick={() => navigate('/onboarding')}>{path.cta}</button>
+            {/* The role travels with the click. It used to be chosen twice —
+                once here, once on the next screen — and the next screen only
+                ever showed the generic choice, so a company that had just
+                pressed "Enregistrer ma compagnie" arrived at a page asking it
+                to say what it was again. */}
+            <button className="btn btn-primary" onClick={() => navigate(`/onboarding?profil=${path.id}`)}>{path.cta}</button>
           </div>}
         </Card>;
       })}

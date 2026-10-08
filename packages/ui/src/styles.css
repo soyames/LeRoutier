@@ -306,6 +306,47 @@ a{color:var(--primary-strong)}
   .lr-bottom-nav button.active{background:var(--primary-soft)}
 }
 
+/* ── Shell: the traveller's four destinations ────────────────────────────────
+   Below the width where the header can hold a row of links, the passenger app
+   keeps its navigation at the bottom of the screen, the way a phone app does:
+   four places, always reachable with one thumb, never behind a menu.
+
+   Links, not buttons. They are destinations, and the difference matters more
+   here than anywhere: a tab a traveller cannot open in a new tab, bookmark, or
+   reach with the Back button is a tab that has been replaced by a picture of
+   one.
+
+   IT STOPS AT 900px, which is exactly where .lr-nav appears in the header —
+   the same four destinations, in the same order, in the place a wide screen
+   keeps navigation. One bar is always on screen and the other never is, so
+   there is no width at which both are drawn or neither is. */
+.lr-bottom-nav-public a{
+  height:66px;min-width:64px;flex:1 1 0;white-space:nowrap;
+  color:var(--text-muted);text-decoration:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  font-size:10.5px;font-weight:700;position:relative;
+  transition:color var(--dur-fast) var(--ease)
+}
+.lr-bottom-nav-public a:active{transform:scale(.97)}
+.lr-bottom-nav-public a.active{color:var(--primary-strong)}
+.lr-bottom-nav-public a.active:before{content:'';position:absolute;top:4px;width:24px;height:3px;border-radius:var(--radius-pill);background:var(--primary)}
+.lr-bottom-nav-public a:focus-visible{outline:2px solid var(--primary);outline-offset:-3px}
+/* "Réservations" is the longest of the four, and at 320px it is the label that
+   decides whether the row fits. A hair smaller down there keeps the whole word
+   on screen, which matters more than two points of type. */
+@media(max-width:359px){.lr-bottom-nav-public a{font-size:9.5px}}
+@media(min-width:900px){.lr-bottom-nav.lr-bottom-nav-public{display:none}}
+
+/* The bar is fixed, so the page has to end above it — on the container rather
+   than on <main>, because these pages carry a footer and the last thing on
+   them is a legal link somebody may need to reach. Padding on <main> alone
+   would leave the footer sitting underneath the bar at the bottom of the
+   scroll, which is the same defect as covering content, one screen further
+   down. */
+.lr-app[data-nav="public"]{padding-bottom:calc(78px + env(safe-area-inset-bottom))}
+@media(min-width:720px){.lr-app[data-nav="public"]{padding-bottom:calc(104px + env(safe-area-inset-bottom))}}
+@media(min-width:900px){.lr-app[data-nav="public"]{padding-bottom:0}}
+
 /* ── Cards ─────────────────────────────────────────────────────────────────
    A card is a raised surface, so it gets one line and the softest shadow that
    still separates it. The old layer gave every card a 1px border AND a
@@ -543,6 +584,15 @@ picture{display:contents}
 .hero-search{padding-top:0;position:relative;z-index:5}
 @media(min-width:720px){.hero-search{margin-top:-46px}}
 
+/* The one line above the search panel that leads back to tickets already
+   bought. It keeps the container's gutter so it lines up with the panel
+   below it rather than with the full-bleed hero above. */
+.ticket-shortcut{
+  width:100%;max-width:1180px;margin:16px auto 0;gap:10px;
+  padding:0 max(var(--gutter),env(safe-area-inset-right)) 0 max(var(--gutter),env(safe-area-inset-left));
+}
+.ticket-shortcut .btn{flex:none}
+
 /* ── Search panel ──────────────────────────────────────────────────────────
    The hero task, in one container. Horizontal on a wide screen, a clean
    stack on a phone — never a cramped two-column pair of pickers. */
@@ -554,6 +604,19 @@ picture{display:contents}
 .search-panel .search-hint{font-size:12.5px;color:var(--text-muted)}
 .trip-search{display:flex;flex-direction:column;gap:14px}
 .trip-endpoints{display:grid;grid-template-columns:minmax(0,1fr) 48px minmax(0,1fr);gap:10px;align-items:end}
+/* Where the journey starts: two answers, both on screen. They wrap rather than
+   shrink, because "Choisir une ville" cut to "Choisir une" is the label doing
+   the work of the control's own name, and a traveller on a phone reads the
+   label. */
+.origin-toggle{display:flex;flex-wrap:wrap;gap:4px}
+.origin-toggle button{
+  display:inline-flex;align-items:center;gap:5px;min-height:32px;padding:5px 10px;
+  border:1px solid var(--border-strong);border-radius:var(--radius-pill);background:var(--surface-raised);
+  color:var(--text-muted);font:inherit;font-size:12px;font-weight:700;cursor:pointer;
+}
+.origin-toggle button:hover{color:var(--text)}
+.origin-toggle button.active{background:var(--primary-soft);border-color:var(--primary);color:var(--primary-deep)}
+.origin-toggle button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 .trip-endpoints .endpoint-cell{display:flex;flex-direction:column;gap:8px;min-width:0}
 .swap-btn{
   width:48px;height:48px;border:1px solid var(--border-strong);border-radius:50%;background:var(--surface-raised);
@@ -734,7 +797,22 @@ picture{display:contents}
 .map-preview .lr-map{border-radius:var(--radius-card);overflow:hidden}
 .map-preview-btn{position:absolute;right:10px;top:10px;z-index:500;box-shadow:var(--shadow-card)}
 .map-full{position:relative}
-.lr-map{border-radius:var(--radius-block);overflow:hidden;border:1px solid var(--border-soft);background:var(--surface-soft)}
+.lr-map{position:relative;border-radius:var(--radius-block);overflow:hidden;border:1px solid var(--border-soft);background:var(--surface-soft)}
+/* The points-of-interest layer is a choice the reader makes about their own
+   map, so it is a real control with a pressed state rather than a setting
+   somewhere else. It sits above Leaflet's panes (markerPane is 600) and level
+   with its own controls, in the corner the scale and the zoom buttons do not
+   use. */
+.map-layer-toggle{
+  position:absolute;left:10px;bottom:10px;z-index:800;
+  min-height:44px;padding:9px 14px;border:1px solid var(--border-soft);
+  border-radius:var(--radius-pill);background:rgba(255,255,255,.94);
+  backdrop-filter:blur(8px);color:var(--text);font:inherit;font-size:12px;font-weight:700;
+  cursor:pointer;box-shadow:var(--shadow-raised);
+}
+.map-layer-toggle:hover{background:#fff}
+.map-layer-toggle[aria-pressed="true"]{color:var(--primary-strong)}
+.map-layer-toggle:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 .lr-map .leaflet-container{font:inherit;background:var(--surface-soft)}
 .lr-map .leaflet-control-attribution{font-size:10px;background:rgba(255,255,255,.85)}
 .lr-vehicle-marker span{display:block;width:22px;height:22px;border-radius:50%;background:var(--primary);border:3px solid #fff;box-shadow:0 2px 8px rgba(15,23,42,.35)}
@@ -1091,6 +1169,10 @@ picture{display:contents}
    and the corner is free again. */
 body[data-nav="bottom"] .assistant-launcher{bottom:calc(88px + max(16px,env(safe-area-inset-bottom)))}
 @media(min-width:980px){body[data-nav="bottom"] .assistant-launcher{bottom:max(16px,env(safe-area-inset-bottom))}}
+/* The traveller's bar, and the help button that must not sit on top of it.
+   Reset at 900px, where that bar stops being drawn. */
+body[data-nav="public"] .assistant-launcher{bottom:calc(92px + max(16px,env(safe-area-inset-bottom)))}
+@media(min-width:900px){body[data-nav="public"] .assistant-launcher{bottom:max(16px,env(safe-area-inset-bottom))}}
 .assistant-panel{
   position:fixed;right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));
   z-index:80;width:min(390px,calc(100vw - 32px));max-height:min(580px,calc(100dvh - 32px));

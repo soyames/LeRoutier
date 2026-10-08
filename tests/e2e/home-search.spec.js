@@ -30,7 +30,8 @@ test('the homepage search form renders with zero routes and no /routes dependenc
   await page.goto(APP + '/');
   await expect(page.getByRole('heading', { name: 'Où allez-vous ?' })).toBeVisible();
   await expect(page.getByLabel('Départ', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Départ', { exact: true }).locator('option[value="current"]')).toHaveCount(1);
+  await expect(page.getByRole('radio', { name: 'Ma position' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('radio', { name: 'Choisir une ville' })).toHaveAttribute('aria-checked', 'false');
   await expect(page.getByLabel('Destination')).toBeVisible();
   await expect(page.getByLabel('Date')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Rechercher un trajet' })).toBeVisible();
@@ -84,7 +85,7 @@ test('all 77 communes are searchable, including accent-free spellings', async ({
 test('manual origin works; the search navigates to /trips with geography params, no login needed', async ({ page }) => {
   await mockGeography(page, CITIES);
   await page.goto(APP + '/');
-  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByRole('radio', { name: 'Choisir une ville' }).click();
   await choose(page, 'Ville de départ', 'Cotonou');
   await choose(page, 'Destination', 'Parakou');
   await page.getByRole('button', { name: 'Rechercher un trajet' }).click();
@@ -98,7 +99,7 @@ test('manual origin works; the search navigates to /trips with geography params,
 test('swapping exchanges the two selected places', async ({ page }) => {
   await mockGeography(page, CITIES);
   await page.goto(APP + '/');
-  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByRole('radio', { name: 'Choisir une ville' }).click();
   await choose(page, 'Ville de départ', 'Cotonou');
   await choose(page, 'Destination', 'Parakou');
   await page.getByRole('button', { name: 'Inverser départ et arrivée' }).click();
@@ -173,7 +174,7 @@ test('the position is disclosed where it is asked for, not only in a policy', as
   await page.goto(APP + '/');
   await expect(page.getByText(/Votre position sert uniquement à trouver la ville de départ la plus proche/)).toBeVisible();
   // And the passenger who prefers not to share it keeps a way to search.
-  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByRole('radio', { name: 'Choisir une ville' }).click();
   await expect(page.getByText(/Votre position sert uniquement/)).toHaveCount(0);
 });
 

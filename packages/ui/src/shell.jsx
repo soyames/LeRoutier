@@ -93,6 +93,7 @@ function Drawer({ open, onClose, title, items, linkComponent, footer }) {
  *   onNotifications?: () => void, unread?: number, onHome?: () => void,
  *   variant?: 'public'|'app', links?: { label: string, to: string, current?: boolean }[],
  *   menu?: { label: string, to?: string, icon?: Icon, badge?: number, onSelect?: () => void }[],
+ *   bottomNav?: { label: string, to: string, icon: Icon, current?: boolean }[],
  *   menuTitle?: string, menuFooter?: ReactNode, footer?: ReactNode, linkComponent?: any, bleed?: boolean,
  * }} props
  */
@@ -100,6 +101,7 @@ export function AppShell({
   role, title, subtitle, nav = [], active, onNavigate, children,
   online = true, actions, avatar = null, onNotifications, unread = 0, onHome,
   variant = 'app', links = [], menu = [], menuTitle = 'Menu', menuFooter = null, footer = null, linkComponent, bleed = false,
+  bottomNav = [],
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const isPublic = variant === 'public';
@@ -108,8 +110,16 @@ export function AppShell({
   // going when somebody moves between pages. So it cannot be found with a
   // descendant selector from here, and it has to be told in a way that outlives
   // a selector: the body carries the fact that the bottom of the screen is
-  // already occupied by task navigation.
-  useEffect(() => { document.body.dataset.nav = nav.length > 0 ? 'bottom' : 'none'; }, [nav.length]);
+  // already occupied by navigation.
+  //
+  // TWO KINDS OF BOTTOM BAR, and the difference is not cosmetic. `nav` is a
+  // task bar: the same screen swapping between four jobs, driven by a callback.
+  // `bottomNav` is a destination bar: four places, each a real URL a traveller
+  // can open in a new tab, bookmark, or come back to. A traveller's navigation
+  // has to be the second kind, which is why it is a separate prop rather than
+  // the same one rendered differently.
+  const bar = nav.length > 0 ? 'bottom' : bottomNav.length > 0 ? 'public' : 'none';
+  useEffect(() => { document.body.dataset.nav = bar; }, [bar]);
   const roleKey = String(role || 'public').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-');
   const pageKey = String(active || title || 'home').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-');
   const closeMenu = useCallback(() => setMenuOpen(false), []);
@@ -120,7 +130,7 @@ export function AppShell({
 
   // `data-nav` is how the floating assistant knows whether the bottom of the
   // screen is already occupied by task navigation it must not cover.
-  return <div className="lr-app" data-role={roleKey} data-page={pageKey} data-variant={isPublic ? 'public' : 'app'} data-nav={nav.length > 0 ? 'bottom' : 'none'}>
+  return <div className="lr-app" data-role={roleKey} data-page={pageKey} data-variant={isPublic ? 'public' : 'app'} data-nav={bar}>
     <a className="skip-link" href="#lr-content">Aller au contenu</a>
     <header className="lr-header">
       <div className="lr-header-main">
@@ -168,10 +178,23 @@ export function AppShell({
         of destination remounts this element, which restarts one 240ms fade and
         rise. Keyed on the page rather than the URL, so refining a search on
         the results screen does not re-animate the page underneath the user. */}
-    <main key={active} className={`${bleed ? 'lr-main is-public' : 'lr-main'} lr-enter`} id="lr-content">{children}</main>
+    {/* `tabIndex={-1}` so the region can take focus: it is where a route change
+        hands the reader next, and it is what the skip link at the top of the
+        page has always pointed at. Without it that link moves a browser's
+        attention and nothing else. */}
+    <main key={active} className={`${bleed ? 'lr-main is-public' : 'lr-main'} lr-enter`} id="lr-content" tabIndex={-1}>{children}</main>
 
     {footer}
     {nav.length > 0 && <nav className="lr-bottom-nav" aria-label={`Navigation ${role}`}>{nav.map(item => { const Icon = item.icon; const selected = active === item.id; return <button key={item.id} className={selected ? 'active' : ''} onClick={() => onNavigate?.(item.id)} aria-current={selected ? 'page' : undefined}><Icon size={22}/><span>{item.label}</span></button>; })}</nav>}
+    {/* The traveller's four destinations, on the phones where a header row of
+        links has nowhere to go. Links rather than buttons for the same reason
+        the header uses them: these are places, and a place has an address. */}
+    {bottomNav.length > 0 && <nav className="lr-bottom-nav lr-bottom-nav-public" aria-label="Navigation voyageur">
+      {bottomNav.map(item => { const Icon = item.icon; return <ShellLink key={item.to} to={item.to} component={linkComponent}
+        className={item.current ? 'active' : ''} aria-current={item.current ? 'page' : undefined}>
+        <Icon size={22} aria-hidden="true"/><span>{item.label}</span>
+      </ShellLink>; })}
+    </nav>}
     {hasDrawer && <Drawer open={menuOpen} onClose={closeMenu} title={menuTitle} items={menu} linkComponent={linkComponent} footer={menuFooter}/>}
   </div>;
 }

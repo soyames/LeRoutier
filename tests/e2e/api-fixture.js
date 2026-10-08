@@ -57,6 +57,22 @@ export const trackingFixture=(overrides={})=>({
   eta:{at:'2026-09-16T13:40:00Z',confidence:'live',speedMps:19.4,roundedToMinutes:5},
   ...overrides});
 
+/**
+ * One ticket, looked up by its number, with nobody signed in.
+ *
+ * Shaped exactly like the API's public projection — the route facts printed on
+ * a ticket plus the same tracking payload a signed-in passenger gets — because
+ * the point of the screen is that the two answers are the same answer.
+ */
+export const PUBLIC_REFERENCE='A1B2C3D4';
+export const ticketTrackingFixture=(overrides={})=>({
+  reference:PUBLIC_REFERENCE,
+  ticket:{status:'confirmed',serviceStatus:'scheduled',routeName:'DEMO Cotonou → Parakou',operatorName:'Opérateur démo',
+    departureCity:'Cotonou',arrivalCity:'Parakou',departureAt:DEPARTURE_AT,arrivalAt:ARRIVAL_AT,
+    boardingSequence:0,destinationSequence:3,isTest:true},
+  tracking:trackingFixture(),
+  ...overrides});
+
 const TILE_HOSTS=new Set(['tile.openstreetmap.org','basemaps.cartocdn.com']);
 
 export async function mockApi(page) {
@@ -87,6 +103,15 @@ export async function mockApi(page) {
   await page.route('**/api/v1/me',r=>{const role=(r.request().headers()['authorization']||'').replace('Bearer ','').split('-').at(-1)||'passenger';
     return r.fulfill({json:{data:{id:id(2),role,display_name:'Compte Démo',operator_id:role==='passenger'?null:id(1),
       passenger_activated:role==='passenger',needs_profile:false}}});});
+  // The map's points of interest: LeRoutier's own published places, one
+  // boarding point and one stop, at real Cotonou coordinates inside any
+  // viewport the fixture's own route is framed on.
+  await page.route('**/api/v1/map/points*',r=>r.fulfill({json:{data:[
+    {id:id(500),kind:'boarding_point',name:'Gare centrale Cotonou',city:'Cotonou',type:'company_station',
+      purposes:['passenger_boarding'],latitude:6.3654,longitude:2.4183},
+    {id:id(501),kind:'stop',name:'Gare de Bohicon',city:'Bohicon',type:null,purposes:[],
+      latitude:7.1783,longitude:2.0667},
+  ]}}));
   await page.route('**/api/v1/routes',r=>r.fulfill({json:{data:[{id:id(10),stops}]}}));
   await page.route('**/api/v1/stops',r=>r.fulfill({json:{data:stops}}));
   // Benin geography: the parcel city picker reads communes, independent of routes.
@@ -133,6 +158,16 @@ export async function mockApi(page) {
     return r.fulfill({json:{data:{...purchase,guestToken:body.passengerName?'fixture-guest-token':'fixture-account'}}});
   });
   await page.route('**/api/v1/bookings/*/payments/test',r=>{
+    // A caller the API cannot identify is refused, here as there. A fixture
+    // that answered 200 for everybody would let the checkout pay with no
+    // credential at all and still look correct — which is exactly the fault
+    // the live journey found: the hold mints the guest's token and the payment
+    // in the same click read a stale null instead of it, so a guest's first
+    // purchase held its seats and was then refused. Faking the refusal is what
+    // keeps the browser suite able to see it.
+    if(!r.request().headers().authorization){
+      return r.fulfill({status:401,json:{error:{code:'UNAUTHORIZED',message:'Sign in to continue.'}}});
+    }
     // The simulated payment confirms the party, exactly as the real one does, so
     // the tickets that come back are boardable tickets and not held seats.
     for(const seat of bought) seat.status='confirmed';
@@ -211,6 +246,10 @@ export async function mockApi(page) {
   // Maps, routing geometry and live vehicle tracking. Declared here so no spec
   // reaches the network for them; tracking.spec.js overrides them per case.
   await page.route('**/api/v1/journeys/*/tracking',r=>r.fulfill({json:{data:trackingFixture()}}));
+  // Following a ticket by its number, with no account anywhere. Specs override
+  // this per case for the refusals — an unknown number, a malformed one, a
+  // spent allowance — which are the states the screen has to get right.
+  await page.route('**/api/v1/public/ticket-tracking/*',r=>r.fulfill({json:{data:ticketTrackingFixture()}}));
   await page.route('**/api/v1/services/*/tracking',r=>r.fulfill({json:{data:trackingFixture()}}));
   await page.route('**/api/v1/ops/fleet-tracking',r=>r.fulfill({json:{data:[trackingFixture()]}}));
   await page.route('**/api/v1/routes/*/geometry',r=>r.fulfill({json:{data:{available:true,coordinates:RNIE2,

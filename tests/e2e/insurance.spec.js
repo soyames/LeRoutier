@@ -29,7 +29,7 @@ const withPolicy = (page, policy) =>
 /** Reach the checkout the way a passenger does: search, then choose an offer. */
 async function toCheckout(page) {
   await page.goto(APP + '/trips');
-  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByRole('radio', { name: 'Choisir une ville' }).click();
   await page.getByLabel('Ville de départ').click();
   await page.getByLabel('Ville de départ').fill('Cotonou');
   await page.getByLabel('Ville de départ').press('Enter');

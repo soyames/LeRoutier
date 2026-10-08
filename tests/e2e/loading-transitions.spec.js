@@ -27,7 +27,7 @@ const slowDown = (page, pattern, ms) => page.route(pattern, async route => {
 async function chooseTestOffer(page) {
   await mockApi(page);
   await page.goto(APP + '/trips');
-  await page.getByLabel('Départ', { exact: true }).selectOption('place');
+  await page.getByRole('radio', { name: 'Choisir une ville' }).click();
   await page.getByLabel('Ville de départ').click();
   await page.getByLabel('Ville de départ').fill('Cotonou');
   await page.getByLabel('Ville de départ').press('Enter');
@@ -133,6 +133,32 @@ test('reduced motion keeps the mark and removes the movement', async ({ page }) 
   expect(motion.duration).toBeLessThanOrEqual(0.01);
   expect(motion.opacity).toBe(1);
   await expect(page).toHaveURL(/\/tickets\//, { timeout: 15000 });
+});
+
+test('the first thing anybody meets on a cold load is the mark, not a sentence', async ({ page }) => {
+  await mockApi(page);
+  // The wait before a sign-in surface can be drawn at all: the published
+  // sign-in providers have not answered yet, so nothing can be offered and
+  // nothing is known. It used to be the words "Connexion en cours…" with
+  // nothing above them.
+  await slowDown(page, '**/api/v1/auth/config', 2500);
+  await page.goto(APP + '/account');
+  await expect(page.locator(`${MARK}[data-visible]`)).toHaveCount(1, { timeout: 3000 });
+  // The words are still there, for the people who need them — as the label of
+  // a status region rather than as a paragraph.
+  await expect(page.locator('.lr-loader[role="status"] .sr-only')).toHaveText('Connexion en cours…');
+  // And the mark is the app's own logo at its own aspect ratio.
+  const box = await page.locator('.lr-loader-logo').boundingBox();
+  expect(Math.abs(box.width - box.height)).toBeLessThan(1.5);
+});
+
+test('the bootstrap mark never flashes on a fast load', async ({ page }) => {
+  await mockApi(page);
+  await page.goto(APP + '/account');
+  // The config answers immediately here, so the sign-in form is what appears —
+  // and the mark must not have blinked on the way past.
+  await expect(page.getByText('Bienvenue sur LeRoutier')).toBeVisible();
+  await expect(page.locator(`${MARK}[data-visible]`)).toHaveCount(0);
 });
 
 test('a route change is one short entrance on the page container', async ({ page }) => {

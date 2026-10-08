@@ -222,6 +222,29 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     // payment data, ever. Rate limited per client address.
     const publicTracking=path.match(/^\/public\/parcel-tracking\/(LRP-[0-9A-Fa-f]{8})$/);
     if(method==='GET' && publicTracking) {await limited('public-tracking:'+((req.headers.get('x-forwarded-for')||'').split(',')[0]||'local'));return parcel.publicTracking(publicTracking[1]);}
+    // Public ticket tracking: the passenger holds a ticket number and nothing
+    // else — no account, no session, and often no app install. This is the one
+    // read that turns that number into the progress of the journey it was
+    // bought for, and it sits ABOVE the identity gate for the same reason the
+    // guest checkout does: for this caller, having no identity is the ordinary
+    // case rather than a failure.
+    //
+    // It is also the only public route that answers a question about ONE
+    // specific ticket, which makes it the only one worth guessing at. The
+    // number is eight hex characters — four billion — so the ceiling below is
+    // the entire defence and is set for a person retyping a reference, not for
+    // a script walking the space. The projection itself is whitelisted in the
+    // database module and carries no passenger, contact or payment field.
+    // The segment is deliberately NOT shape-checked in the pattern. Tightening
+    // it here would turn a mistyped number into a 404 from the router, which
+    // says "no such ticket" to somebody who actually mistyped a character.
+    // The module validates and answers 400 with that distinction, and the
+    // length bound is what keeps a long segment out of the query.
+    const publicTicketTracking=path.match(/^\/public\/ticket-tracking\/([^/]{1,64})$/);
+    if(method==='GET' && publicTicketTracking) {
+      await limited('public-ticket-tracking:'+((req.headers.get('x-forwarded-for')||'').split(',')[0].trim()||'local'),30);
+      return track.publicTicketTracking(publicTicketTracking[1]);
+    }
     // Dedicated LeRoutier FedaPay webhook. Signature is verified exactly per
     // FedaPay's official spec before anything is correlated or mutated;
     // uncorrelatable events are safely ignored with a 200 response.
@@ -340,6 +363,32 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     // Authenticated traffic is metered per identity further down.
     const meterAnonymous=()=>limited('public-catalogue:'+((req.headers.get('x-forwarded-for')||'').split(',')[0].trim()||'local'));
     if(method==='GET' && ['/stops','/places','/routes','/services'].includes(path)) await meterAnonymous();
+    // The map's points of interest: LeRoutier's own published places — verified
+    // boarding points, stations and stops — inside one viewport.
+    //
+    // Public, because a map is what somebody looks at before buying anything
+    // and an account is not asked for until a booking is; metered per client
+    // address, because one viewport is a question and a swept sequence of them
+    // is a copy of the registry. What the answer may contain is bounded in the
+    // database module, not here.
+    if(method==='GET' && path==='/map/points') {
+      // Sixty a minute. The client asks once per settled viewport rather than
+      // per frame, so this is far more than a person panning a map can spend,
+      // and far less than a sweep of the registry.
+      await limited('map-points:'+((req.headers.get('x-forwarded-for')||'').split(',')[0].trim()||'local'),60);
+      const box=(url.searchParams.get('bbox')||'').split(',').map(Number);
+      invariant(box.length===4 && box.every(Number.isFinite),'INVALID_VIEWPORT','A map viewport is required.');
+      const [minLongitude,minLatitude,maxLongitude,maxLatitude]=box;
+      // An ABSENT limit is not a limit of zero. `Number(null)` is 0 and
+      // `Number.isInteger(0)` is true, so reading the parameter this way
+      // silently capped every default request at one point — a map that drew
+      // a single boarding point for the whole of Cotonou and looked, for all
+      // the world, like a place that only had one.
+      const requested=url.searchParams.get('limit');
+      const limit=requested===null?undefined:Number(requested);
+      return loc.mapPoints({bbox:{minLongitude,minLatitude,maxLongitude,maxLatitude},
+        limit:Number.isInteger(limit)?limit:undefined});
+    }
     const testInventoryVisible = async () => {
       if (url.searchParams.get('testMode') !== '1') return false;
       const tester = await auth.authenticate(req).catch(() => null);

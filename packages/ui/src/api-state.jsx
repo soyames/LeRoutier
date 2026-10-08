@@ -1,14 +1,23 @@
 import { useState } from 'react';
 import { useSession } from '@leroutier/config/client';
 import { Card } from './shell.jsx';
-import { SkeletonCards, ErrorState } from './states.jsx';
+import { SkeletonCards, ErrorState, BrandLoader } from './states.jsx';
 
 function isDriverApp(role){return Array.isArray(role)?role.includes('driver')||role.includes('convoyeur'):role==='driver';}
 
 // One authentication entry for every workspace: Google or email/password,
 // both converging on the same LeRoutier identity. Passwords live in Firebase
 // only — the LeRoutier API never sees them.
-export function SessionPanel({onWorkspace=undefined}) {
+//
+// `allowRegistration` is how a surface says whether creating an account is
+// something it may offer yet. A PASSENGER account is opened with a first
+// ticket, so the screens a purchase is made on offer it only once that
+// purchase exists; the professional doors — onboarding and the two provider
+// workspaces — keep offering it from the start, because a driver or a company
+// is not buying anything. The prop decides what is OFFERED; the API decides
+// what is ALLOWED, and refuses a passenger signup with no purchase behind it
+// whatever the screen happened to render.
+export function SessionPanel({onWorkspace=undefined,allowRegistration=true}) {
   const {user,identity,role,login,loginDemo,logout,demoLogin,configured,online,authLoading,authError,canSignin,
     googleAuth,createAccount,loginEmail,resetPassword,verifyEmail,configStatus,retryConfig,totpRequired}=useSession();
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
@@ -58,6 +67,12 @@ export function SessionPanel({onWorkspace=undefined}) {
   const devSignIn = import.meta.env.VITE_DEVELOPMENT_SIGN_IN && demoLogin;
   if(verifyEmail) return <VerificationPanel/>;
   if(totpRequired) return <TotpPanel/>;
+  // A register form that may no longer be offered is not merely hidden: a
+  // surface that stops offering it while that form is open — a guest whose
+  // purchase was just adopted by another tab, say — falls back to the sign-in
+  // form rather than leaving an abandoned one on screen with nothing behind it.
+  const showRegister = canSignin && allowRegistration;
+  const effectiveMode = allowRegistration ? mode : 'signin';
   if(!configured) return <Card><p role="status">Connexion au service indisponible. Réessayez ultérieurement.</p></Card>;
   return <Card className="stack">
     {!online && <p role="status">Hors ligne : les actions nécessitent une connexion.</p>}
@@ -72,8 +87,16 @@ export function SessionPanel({onWorkspace=undefined}) {
       {user?.needs_profile && <ProfileForm/>}</> : <>
       <h3>Bienvenue sur LeRoutier</h3>
       {/* A retry puts the config back into 'loading', so progress has to
-          follow configStatus and not only the session's own loading flag. */}
-      {(authLoading || configStatus==='loading') ? <p role="status">Connexion en cours…</p> : <>
+          follow configStatus and not only the session's own loading flag.
+
+          This is the wait before a sign-in surface can be drawn at all — the
+          first thing somebody meets on a cold load of a page they have to sign
+          in to — and it is a real wait, because the published sign-in
+          providers have not answered yet. It used to be a sentence with
+          nothing above it; it is now the same mark the rest of the app shows
+          while it waits, which is what belongs where the product is still
+          unknown. */}
+      {(authLoading || configStatus==='loading') ? <BrandLoader label="Connexion en cours…"/> : <>
         {/* The Google entry exists only when the published provider list says
             so — one flag decides the whole surface, button and separator. */}
         {googleAuth && <button type="button" className="btn btn-primary" disabled={busy || !online || !canSignin} onClick={()=>run(login)}>
@@ -96,17 +119,28 @@ export function SessionPanel({onWorkspace=undefined}) {
           ].map(([profile,label,path])=><button type="button" key={profile} className="btn btn-soft" disabled={busy || !online}
             onClick={()=>run(async()=>{await loginDemo({profile});onWorkspace?.(path);})}>TEST : {label}</button>)}</div>
         </details>}
-        {canSignin && mode==='signin' && <form className="stack" onSubmit={submitSignin}>
+        {canSignin && effectiveMode==='signin' && <form className="stack" onSubmit={submitSignin}>
           {googleAuth && <p className="small muted">ou</p>}
           <label>Adresse e-mail<input name="email" className="control" type="email" autoComplete="email" inputMode="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>
           <label>Mot de passe<input name="password" className="control" type="password" autoComplete="current-password" required minLength={6} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)}/></label>
           <button type="submit" className="btn btn-soft" disabled={busy || !online}>{busy?'Connexion en cours…':'Se connecter avec mon adresse e-mail'}</button>
           <div className="between wrap">
             <button type="button" className="footer-link" onClick={()=>{setMode('reset');setNotice('');setError('');}}>Mot de passe oublié ?</button>
-            <button type="button" className="footer-link" onClick={()=>{setMode('register');setNotice('');setError('');}}>Pas encore de compte ? Créer un compte</button>
+            {/* Where an account is not offered yet, the way to one is still
+                named rather than left as a dead end: the purchase opens a
+                traveller's account, and the professional door opens the
+                other. A provider is never stuck behind a rule aimed at
+                travellers. */}
+            {showRegister
+              ? <button type="button" className="footer-link" onClick={()=>{setMode('register');setNotice('');setError('');}}>Pas encore de compte ? Créer un compte</button>
+              : <a className="footer-link" href="/trips">Pas encore de compte ? Acheter un billet</a>}
           </div>
+          {!showRegister && <p className="small muted" role="status">
+            Un compte voyageur s’ouvre avec un premier billet : achetez sans compte, vos billets vous suivront.
+            Vous travaillez dans le transport ? <a href="/professionnel">Créez votre compte professionnel</a>.
+          </p>}
         </form>}
-        {canSignin && mode==='register' && <form className="stack" onSubmit={submitRegister}>
+        {showRegister && effectiveMode==='register' && <form className="stack" onSubmit={submitRegister}>
           <h3>Créer un compte</h3>
           <label>Nom complet<input name="displayName" className="control" autoComplete="name" required minLength={2} maxLength={100} value={regName} onChange={e=>setRegName(e.target.value)}/></label>
           <label>Téléphone<input name="phone" className="control" type="tel" autoComplete="tel" maxLength={30} value={regPhone} onChange={e=>setRegPhone(e.target.value)}/></label>
@@ -116,7 +150,7 @@ export function SessionPanel({onWorkspace=undefined}) {
           <button type="button" className="footer-link" onClick={()=>{setMode('signin');setNotice('');setError('');}}>J’ai déjà un compte</button>
           <p className="small muted">En créant un compte, vous acceptez nos <a href="/terms">conditions d’utilisation</a> et notre <a href="/privacy">politique de confidentialité</a>.</p>
         </form>}
-        {canSignin && mode==='reset' && <form className="stack" onSubmit={submitReset}>
+        {canSignin && effectiveMode==='reset' && <form className="stack" onSubmit={submitReset}>
           <h3>Mot de passe oublié ?</h3>
           <p className="small muted">Nous vous enverrons un lien de réinitialisation à cette adresse.</p>
           <label>Adresse e-mail<input name="email" className="control" type="email" autoComplete="email" inputMode="email" required maxLength={255} value={email} onChange={e=>setEmail(e.target.value)}/></label>
@@ -125,7 +159,7 @@ export function SessionPanel({onWorkspace=undefined}) {
         </form>}
       </>}
       {notice && <p role="status">{notice}</p>}
-      {configStatus==='unconfigured' && !demoLogin && mode==='signin' && <p className="small muted">Connectez-vous pour réserver un trajet, suivre vos billets et envoyer des colis.</p>}
+      {configStatus==='unconfigured' && !demoLogin && effectiveMode==='signin' && <p className="small muted">Connectez-vous pour réserver un trajet, suivre vos billets et envoyer des colis.</p>}
     </>}
     {(error || authError) && <p role="alert">{error || authError}</p>}
     {/* The failure is recoverable and the user is the only one who can trigger

@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
-import { Badge, Card, EmptyState, SectionTitle, SkeletonCards } from '@leroutier/ui';
+import { Badge, Card, EmptyState, SectionTitle, SkeletonCards, SessionPanel } from '@leroutier/ui';
 import { Building2, CarFront, ShieldCheck, UserRound } from 'lucide-react';
 
 const field=(label,value,setValue,props={})=><label className="field">{label}<input className="control" value={value} onChange={e=>setValue(e.target.value)} {...props}/></label>;
@@ -88,7 +88,15 @@ export function VerificationDossier(){
 export function OnboardingPage(){
   const {user,request,refresh,online}=useSession();
   const navigate=useNavigate();
-  const [path,setPath]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+  // The role the reader already chose, carried in the address. This is a
+  // PROFESSIONAL dossier — a company's or an independent driver's — and it is
+  // the only door in the product that opens an account without a passenger
+  // ticket, so the screen has to say which dossier it is about to open rather
+  // than asking again.
+  const [params]=useSearchParams();
+  const asked=params.get('profil');
+  const [path,setPath]=useState(asked==='company'||asked==='independent'?asked:null),
+    [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [displayName,setDisplayName]=useState(user?.display_name||''),[phone,setPhone]=useState(user?.phone||''),[country,setCountry]=useState('BJ');
   const [legalName,setLegalName]=useState(''),[registrationRef,setRegistrationRef]=useState(''),[taxReference,setTaxReference]=useState('');
   const [representativeName,setRepresentativeName]=useState(''),[representativeIdReference,setRepresentativeIdReference]=useState('');
@@ -102,7 +110,20 @@ export function OnboardingPage(){
   const [driverPhotoUrl,setDriverPhotoUrl]=useState(''),[vehicleRegistration,setVehicleRegistration]=useState(''),[vehicleRegistrationDocumentUrl,setVehicleRegistrationDocumentUrl]=useState('');
   const [vehicleCapacity,setVehicleCapacity]=useState(''),[vehicleMake,setVehicleMake]=useState(''),[vehicleModel,setVehicleModel]=useState(''),[vehicleColor,setVehicleColor]=useState(''),[vehicleYear,setVehicleYear]=useState(''),[vehiclePhotoUrl,setVehiclePhotoUrl]=useState('');
 
-  if(!user)return <EmptyState icon={UserRound} title="Connexion requise" text="Connectez-vous avant de demander un espace opérateur."/>;
+  // What this account is FOR, said before the form that creates it. A provider
+  // arrives here from a page that promised a dossier; being handed a generic
+  // sign-in box with no mention of the dossier is the screen answering a
+  // different question than the one that was asked. Registration stays open
+  // for every role on this screen — a driver or a company is not buying a
+  // ticket and is never asked for one.
+  if(!user)return <div className="stack">
+    <EmptyState icon={UserRound}
+      title={path==='company'?'Dossier de compagnie de transport':path==='independent'?'Dossier de chauffeur indépendant':'Travailler avec LeRoutier'}
+      text={path
+        ? 'Votre dossier est prêt à être rempli. Créez votre compte professionnel — ou connectez-vous si vous en avez déjà un — puis décrivez votre activité et transmettez vos pièces. LeRoutier vérifie chaque preuve avant d’activer l’espace.'
+        : 'Choisissez votre situation, puis créez votre compte professionnel. LeRoutier vérifie chaque preuve avant d’activer l’espace.'}/>
+    <SessionPanel/>
+  </div>;
   if(user.role!=='passenger')return <Card className="stack"><SectionTitle title="Espace opérateur déjà créé" icon={ShieldCheck}/><p>Votre compte possède déjà un rôle opérationnel.</p><button className="btn btn-primary" onClick={()=>navigate(user.role==='ops'?'/ops/today':'/work/today')}>Ouvrir mon espace</button></Card>;
 
   async function submit(e){

@@ -17,6 +17,7 @@ import { Seo } from './seo.jsx';
 import { VerifyEmail } from './verify-email.jsx';
 import { BusBeninPage, RoutePage, ColisBeninPage, StationsBeninPage, TransporteursBeninPage } from './seo-pages.jsx';
 import { PageChrome } from './page-chrome.jsx';
+import { RouteScrollReset } from './scroll.jsx';
 import { CORRIDORS } from './corridors.js';
 // Imported for its side effect and imported EARLY: it listens for
 // `beforeinstallprompt`, which Chromium fires once, soon after load. Miss it
@@ -39,6 +40,12 @@ createRoot(document.getElementById('root')).render(
     <ApiProvider baseUrl={apiUrl} role={['passenger', 'driver', 'convoyeur', 'ops']}>
       <PwaUpdate/>
       <Seo/>
+      {/* Above <Routes>, not inside one of its branches. The pages that carry
+          the footer — the legal pages, the topic pages — are mounted by
+          PageChrome while the app's own routes are mounted by <App>, so a
+          scroll manager belonging to either would unmount at exactly the
+          navigation it exists to handle. */}
+      <RouteScrollReset/>
       {/* The first paint, before any screen exists. The application bundle is
           small and this is over almost immediately, which is exactly why it is
           the brand mark rather than a screenful of placeholder: it reserves its
