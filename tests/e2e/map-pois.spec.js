@@ -46,9 +46,15 @@ async function openTracking(page, tracking, watchPoints) {
  * it is what these tests do rather than what they assume.
  */
 async function zoomIn(page, steps = 4) {
+  const control = page.locator('.leaflet-control-zoom-in');
+  // Leaflet builds its controls when the map is created, which is after the
+  // container is visible. Clicking before that is a click on nothing, and under
+  // a loaded CI runner that is a real race: four clicks that do not land leave
+  // the map below the density gate and the layer looking broken when it is not.
+  await expect(control).toBeVisible();
   for (let i = 0; i < steps; i++) {
-    await page.locator('.leaflet-control-zoom-in').click();
-    await page.waitForTimeout(150);
+    await control.click();
+    await page.waitForTimeout(250);
   }
 }
 
@@ -69,10 +75,12 @@ test('zoomed to a city, the points are drawn under the route and its stops', asy
   await openTracking(page, trackingFixture(), url => asked.push(url));
   await zoomIn(page);
 
-  // The request follows the viewport, and names it.
-  await expect.poll(() => asked.length).toBeGreaterThan(0);
+  // The request follows the viewport, and names it. Generous, because it waits
+  // for a debounce AND a round trip on a machine running the rest of the suite
+  // beside it.
+  await expect.poll(() => asked.length, { timeout: 15_000 }).toBeGreaterThan(0);
   expect(asked[0]).toMatch(/bbox=-?[\d.]+,-?[\d.]+,-?[\d.]+,-?[\d.]+/);
-  await expect(page.getByText(/point(s)? utile(s)? affiché(s)? sur la carte/)).toBeAttached();
+  await expect(page.getByText(/point(s)? utile(s)? affiché(s)? sur la carte/)).toBeAttached({ timeout: 15_000 });
 
   // They are drawn in a pane below the one the route and its stops are in, so
   // a boarding point can never cover the stop somebody is looking for. Leaflet
@@ -93,7 +101,7 @@ test('the layer is a control with a state, and turning it off draws nothing', as
   const toggle = page.getByRole('button', { name: /les points utiles/ });
   await expect(toggle).toBeVisible();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText(/point(s)? utile(s)? affiché(s)? sur la carte/)).toBeAttached();
+  await expect(page.getByText(/point(s)? utile(s)? affiché(s)? sur la carte/)).toBeAttached({ timeout: 15_000 });
 
   await toggle.click();
   // Turning it off is stated in words, not only by the markers disappearing —

@@ -27,6 +27,18 @@ const APP = 'http://127.0.0.1:4173';
 const footerLink = (page, name) => page.locator('footer.site-footer').getByRole('link', { name, exact: true });
 
 /**
+ * Where the page is, once it has settled.
+ *
+ * The reset happens in an effect — one render after the address changes — so
+ * reading `scrollY` the instant the URL matches is a race. A quiet machine
+ * always loses it, and a loaded CI runner wins it, which is how a passing
+ * suite and a failing pipeline described the same behaviour. Polling asserts
+ * the property that matters (the reader ends at the top) instead of the
+ * instant at which it became true.
+ */
+const atTop = page => expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 5000 }).toBeLessThan(4);
+
+/**
  * True when the element is where a reader would say it is: on screen, and not
  * under the fold.
  *
@@ -60,7 +72,7 @@ test('a footer link from the bottom of a long page starts the new page at its to
   const heading = page.getByRole('heading', { name: 'Conditions d’utilisation et de réservation' });
   await expect(heading).toBeVisible();
   expect(await isInViewport(heading), 'the new page starts at its top').toBe(true);
-  expect(await page.evaluate(() => window.scrollY), 'and not where the last one ended').toBeLessThan(4);
+  await atTop(page);
 });
 
 test('every footer route link lands at the top, not at the previous page’s bottom', async ({ page }) => {
@@ -73,7 +85,7 @@ test('every footer route link lands at the top, not at the previous page’s bot
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await footerLink(page, name).click();
     await expect(page).toHaveURL(APP + path);
-    expect(await page.evaluate(() => window.scrollY), `${path} starts at the top`).toBeLessThan(4);
+    await atTop(page);
   }
 });
 
@@ -98,7 +110,7 @@ test('going back returns the reader to where they were', async ({ page }) => {
 
   await footerLink(page, 'Conditions d’utilisation').click();
   await expect(page).toHaveURL(APP + '/terms');
-  expect(await page.evaluate(() => window.scrollY), 'the new page starts at the top').toBeLessThan(4);
+  await atTop(page);
 
   await page.goBack();
   await expect(page).toHaveURL(APP + '/about');
@@ -118,7 +130,7 @@ test('focus follows the page, so a keyboard reader is not left in the old one', 
   // the top of every page has always pointed at.
   await expect(page.locator('#lr-content')).toBeFocused();
   // And taking focus did not scroll somewhere else: the top is still the top.
-  expect(await page.evaluate(() => window.scrollY)).toBeLessThan(4);
+  await atTop(page);
 });
 
 test('a route that changes the page title also starts at the top', async ({ page }) => {
