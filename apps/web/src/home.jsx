@@ -1,15 +1,14 @@
 import { Link } from 'react-router';
-import { JourneySearch, PopularCorridors } from '@leroutier/screens/passenger';
+import { JourneySearch } from '@leroutier/screens/passenger';
 import { MEDIA, Photo } from '@leroutier/ui';
 import { ArrowRight, Search, Ticket, QrCode, Navigation, Package } from 'lucide-react';
-import { CORRIDORS, CORRIDOR_NOTE } from './corridors.js';
 
 // The public homepage.
 //
-// Eight sections, one job each, and the page is built so that the reader is
+// Six sections, one job each, and the page is built so that the reader is
 // never asked to hold two ideas at once:
 //
-//   hero → search → services → corridors → how → tracking → professionals
+//   hero → search → services → how → tracking → professionals
 //
 // What used to be here: a hero card carrying an eyebrow, a title, a subtitle,
 // the search form, a corridor row, a note about fares and a note about
@@ -99,11 +98,7 @@ export function Home() {
       </div>
     </section>
 
-    {/* 4 — POPULAR CORRIDORS. Real geography, no photographs: six destination
-        pictures would be exactly the density this redesign is removing. */}
-    <PopularCorridors corridors={CORRIDORS} note={CORRIDOR_NOTE}/>
-
-    {/* 5 — HOW IT WORKS. */}
+    {/* 4 — HOW IT WORKS. */}
     <section className="lr-section" aria-labelledby="how-title">
       <div className="steps-band">
         <div className="section-head">
@@ -120,7 +115,7 @@ export function Home() {
       </div>
     </section>
 
-    {/* 6 — LIVE TRACKING. Deliberately has no photograph: the tracking picture
+    {/* 5 — LIVE TRACKING. Deliberately has no photograph: the tracking picture
         is already on the screen above, in the Suivre service card, and the
         brief is explicit that the same large image may not appear twice on one
         page. The section carries its weight with one sentence and one action. */}
@@ -140,7 +135,7 @@ export function Home() {
       </div>
     </section>
 
-    {/* 7 — PROFESSIONALS. Last, and quieter than the search: it is a real
+    {/* 6 — PROFESSIONALS. Last, and quieter than the search: it is a real
         product path, but nobody came here for it. */}
     <section className="lr-section" aria-labelledby="pro-title">
       <div className="feature-band media-right">
