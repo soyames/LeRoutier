@@ -347,6 +347,7 @@ test('queued offline actions replay by themselves when the app reopens with a co
 });
 
 test('no ticket code stays on screen after signing out of a shared handset', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page);
   const booking = { id: id(40), status: 'confirmed', departure_city: 'Cotonou', arrival_city: 'Parakou',
     route_name: 'DEMO Cotonou → Parakou', departure_at: DEPARTURE_AT, departure_point_name: 'Godomey – Carrefour',
