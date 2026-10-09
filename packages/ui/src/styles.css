@@ -238,7 +238,7 @@ a{color:var(--primary-strong)}
 .lr-menu-btn:hover{background:var(--surface-soft)}
 @media(min-width:900px){.lr-menu-btn{display:none}}
 /* On phones the bottom tabs replace the top account and combined-menu controls. */
-@media(max-width:899px){.lr-header-actions>.account-menu-wrap,.lr-menu-btn{display:none}}
+@media(max-width:899px){.lr-app[data-variant="public"] .lr-header-actions>.account-menu-wrap,.lr-app[data-variant="public"] .lr-menu-btn{display:none}}
 
 .lr-drawer-scrim{position:fixed;inset:0;z-index:90;background:rgba(15,23,42,.45);animation:lr-fade var(--dur) var(--ease) both}
 .lr-drawer{
