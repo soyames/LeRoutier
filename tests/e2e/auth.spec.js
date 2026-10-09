@@ -77,7 +77,11 @@ async function signedIn(page, { role = 'passenger', needsProfile = false, routes
   const path = role === 'ops' ? '/ops/today' : role === 'driver' ? '/work/today' : '/';
   await page.goto(`http://127.0.0.1:4173${path}`);
   if (role === 'passenger') {
-    await page.getByRole('button', { name: 'Se connecter' }).click();
+    if ((page.viewportSize()?.width ?? 1280) < 900) {
+      await page.getByRole('navigation', { name: 'Navigation voyageur' }).getByRole('link', { name: 'Profil' }).click();
+    } else {
+      await page.getByRole('button', { name: 'Se connecter' }).click();
+    }
     await page.getByRole('button', { name: 'Connexion de développement' }).click();
     await page.getByRole('button', { name: 'Accueil LeRoutier' }).click();
   } else {
