@@ -80,9 +80,8 @@ test('a disabled provider leaves no Google entry and no orphan separator', async
   await page.getByLabel('Mot de passe').fill('secret-mot-de-passe');
   await page.getByRole('button', { name: 'Se connecter avec mon adresse e-mail' }).click();
   await expect(page.getByText('Test Identity').first()).toBeVisible({ timeout: 15000 });
-  // Logout returns to the same e-mail-only entry.
-  await page.getByRole('button', { name: 'Compte de Test Identity' }).click();
-  await page.getByRole('menuitem', { name: 'Déconnexion' }).click();
+  // Logout remains in Mon compte; mobile no longer duplicates it in the header.
+  await page.getByRole('button', { name: 'Se déconnecter' }).click();
   await expect(page.getByText('Bienvenue sur LeRoutier')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Continuer avec Google' })).toHaveCount(0);
 });

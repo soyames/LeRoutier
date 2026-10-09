@@ -21,8 +21,7 @@ async function signedIn(page) {
 
 test('the account menu privacy link opens the real Privacy Center on a stable route', async ({ page }) => {
   await signedIn(page);
-  await page.getByRole('button', { name: `Compte de ${PASSENGER.display_name}` }).click();
-  await page.getByRole('menuitem', { name: 'Confidentialité et données' }).click();
+  await page.getByRole('button', { name: 'Ouvrir confidentialité et données' }).click();
   await expect(page).toHaveURL(/\/account\/privacy/);
   await expect(page.getByText('Confidentialité et données').first()).toBeVisible();
   await expect(page.getByText('Mes données', { exact: true })).toBeVisible();
@@ -62,14 +61,9 @@ test('in-app notification centre and unread badge work end to end', async ({ pag
   await page.route('**/api/v1/notifications', r => r.fulfill({ json: { data: notifications } }));
   await page.goto(APP + '/account');
   await page.getByRole('button', { name: 'Connexion de développement' }).click();
-  // The unread count is no longer a bell in the header of every passenger
-  // screen — that header now carries four destinations and an account button —
-  // so the count is on the account button and named on the menu item behind it.
-  const account = page.getByRole('button', { name: `Compte de ${PASSENGER.display_name}` });
-  await expect(account.locator('.icon-badge')).toHaveText('1');
-  await account.click();
-  const centre = page.getByRole('menuitem', { name: 'Notifications (1 non lues)' });
-  await expect(centre).toBeVisible();
-  await centre.click();
+  // On mobile, account actions live in Mon compte rather than under the
+  // duplicated header icon. Notifications remain one tap away there.
+  await expect(page.locator('.lr-header .account-menu-wrap')).toBeHidden();
+  await page.getByRole('button', { name: 'Mes notifications' }).click();
   await expect(page.getByRole('heading', { name: /Notifications/ })).toBeVisible();
 });

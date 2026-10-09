@@ -28,6 +28,25 @@ async function isolateProvider(page) {
   });
 }
 
+/** Reach the passenger account using the navigation available at this width. */
+async function openPassengerProfile(page) {
+  if ((page.viewportSize()?.width ?? 1280) < 900) {
+    await openPassengerProfile(page);
+  } else {
+    await page.getByRole('button', { name: /^Compte de/ }).click();
+    await page.getByRole('menuitem', { name: 'Mon profil' }).click();
+  }
+}
+async function signOutPassenger(page) {
+  if ((page.viewportSize()?.width ?? 1280) < 900) {
+    await openPassengerProfile(page);
+    await page.getByRole('button', { name: 'Se déconnecter' }).click();
+  } else {
+    await page.getByRole('button', { name: /^Compte de / }).click();
+    await page.getByRole('menuitem', { name: 'Déconnexion' }).click();
+  }
+}
+
 /** Signs in through the development path: the same /me and the same role gating. */
 async function signedIn(page, { role = 'passenger', needsProfile = false, routes = null } = {}) {
   await mockApi(page);
@@ -58,7 +77,11 @@ async function signedIn(page, { role = 'passenger', needsProfile = false, routes
   const path = role === 'ops' ? '/ops/today' : role === 'driver' ? '/work/today' : '/';
   await page.goto(`http://127.0.0.1:4173${path}`);
   if (role === 'passenger') {
-    await page.getByRole('button', { name: 'Se connecter' }).click();
+    if ((page.viewportSize()?.width ?? 1280) < 900) {
+      await page.getByRole('navigation', { name: 'Navigation voyageur' }).getByRole('link', { name: 'Profil' }).click();
+    } else {
+      await page.getByRole('button', { name: 'Se connecter' }).click();
+    }
     await page.getByRole('button', { name: 'Connexion de développement' }).click();
     await page.getByRole('button', { name: 'Accueil LeRoutier' }).click();
   } else {
@@ -137,8 +160,7 @@ test('a passenger completes their profile and signs out leaving nothing behind',
   //
   // Reached through the app's own navigation, never `page.goto`: a reload would
   // end the demonstration session this test just established.
-  await page.getByRole('button', { name: /^Compte de/ }).click();
-  await page.getByRole('menuitem', { name: 'Mon profil' }).click();
+  await openPassengerProfile(page);
   await expect(page.getByRole('heading', { name: 'Complétez votre profil' })).toBeVisible();
   await page.getByLabel('Nom complet').fill('Voyageur Test');
   await page.getByLabel('Téléphone', { exact: true }).fill('');
@@ -147,7 +169,7 @@ test('a passenger completes their profile and signs out leaving nothing behind',
 
   // With a completed profile the account buys as itself, and the checkout asks
   // it for nothing at all. The search is run from the home page rather than a
-  // nav link, because on a phone those links live behind the drawer.
+  // nav link, because passenger destinations stay in the bottom tabs on a phone.
   await page.getByRole('button', { name: 'Accueil LeRoutier' }).click();
   await page.getByRole('radio', { name: 'Choisir une ville' }).click();
   await page.getByLabel('Ville de départ').fill('Cotonou'); await page.getByLabel('Ville de départ').press('Enter');
@@ -162,11 +184,9 @@ test('a passenger completes their profile and signs out leaving nothing behind',
   await page.getByRole('button', { name: 'Continuer vers le paiement' }).click();
   await expect(page).toHaveURL(/\/tickets\//, { timeout: 15000 });
 
-  // Signing out through the account menu, which is the documented way and the
-  // one that exists on every screen — /tickets is reachable without an account,
-  // so the shell no longer puts a session panel in front of it.
-  await page.getByRole('button', { name: /^Compte de / }).click();
-  await page.getByRole('menuitem', { name: 'Déconnexion' }).click();
+  // Signing out from Mon compte keeps the shared handset's session action in
+  // the passenger destination where its profile tab leads.
+  await signOutPassenger(page);
   // The development fixture has no configured identity provider: the entry
   // after sign-out is the local demo entry, never a dead Google button.
   await expect(page.getByRole('button', { name: 'Connexion de développement' })).toBeVisible();
@@ -182,11 +202,9 @@ test('a passenger completes their profile and signs out leaving nothing behind',
 });
 
 // ------------------------------------------------------------- mon compte --
-test('the profile icon leads to Mon compte, and Mon compte is where the settings live', async ({ page }) => {
+test('the bottom Profil tab leads to Mon compte and its settings', async ({ page }) => {
   await signedIn(page);
-  // The avatar is the documented way in: open it, choose the account entry.
-  await page.getByRole('button', { name: /^Compte de / }).click();
-  await page.getByRole('menuitem', { name: 'Mon profil' }).click();
+  await openPassengerProfile(page);
   await expect(page).toHaveURL(/\/account/);
   // Each thing a person can actually configure, in one place.
   await expect(page.getByRole('heading', { name: 'Adresse e-mail' })).toBeVisible();
@@ -200,10 +218,8 @@ test('the profile icon leads to Mon compte, and Mon compte is where the settings
 
 test('the second factor is turned on from Mon compte, and its recovery codes are shown once', async ({ page }) => {
   await signedIn(page);
-  // Through the avatar, not a reload: the development session lives in memory,
-  // so a fresh document would sign the test out again.
-  await page.getByRole('button', { name: /^Compte de / }).click();
-  await page.getByRole('menuitem', { name: 'Mon profil' }).click();
+  // Reach the profile through its bottom tab without reloading the session.
+  await openPassengerProfile(page);
   await expect(page).toHaveURL(/\/account/);
   await page.getByRole('button', { name: 'Activer la double authentification' }).click();
   // The code to scan, and — underneath — the key for anyone whose camera will

@@ -347,6 +347,7 @@ test('queued offline actions replay by themselves when the app reopens with a co
 });
 
 test('no ticket code stays on screen after signing out of a shared handset', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await mockApi(page);
   const booking = { id: id(40), status: 'confirmed', departure_city: 'Cotonou', arrival_city: 'Parakou',
     route_name: 'DEMO Cotonou → Parakou', departure_at: DEPARTURE_AT, departure_point_name: 'Godomey – Carrefour',
@@ -362,9 +363,9 @@ test('no ticket code stays on screen after signing out of a shared handset', asy
   await expect(page.locator('.ticket-qr')).toBeVisible();
   await expect(page.getByText(code, { exact: true })).toBeVisible();
 
-  // Sign out: the sign-in panel takes over and nothing of the ticket remains.
-  await page.getByRole('button', { name: 'Compte de Compte Démo' }).click();
-  await page.getByRole('menuitem', { name: 'Déconnexion' }).click();
+  // Sign out from Mon compte: the sign-in panel takes over and the ticket clears.
+  await page.getByRole('navigation', { name: 'Navigation voyageur' }).getByRole('link', { name: 'Profil' }).click();
+  await page.getByRole('button', { name: 'Se déconnecter' }).click();
   await expect(page.getByRole('button', { name: 'Connexion de développement' })).toBeVisible();
   await expect(page.locator('.ticket-qr')).toHaveCount(0);
   await expect(page.getByText(code, { exact: true })).toHaveCount(0);

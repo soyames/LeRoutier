@@ -74,6 +74,7 @@ async function mockIdentity(page, { needsProfile = true } = {}) {
 }
 
 test('a new user creates an account, is asked to verify the address, then lands connected and complete', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await mockFirebase(page, { signUp: { email: 'nouveau@example.com' }, signIn: { email: 'nouveau@example.com' } });
   await mockIdentity(page);
   await page.goto(APP + '/account');
@@ -109,8 +110,9 @@ test('a new user creates an account, is asked to verify the address, then lands 
   await page.getByRole('button', { name: 'Se connecter avec mon adresse e-mail' }).click();
   await expect(page.getByRole('button', { name: 'Déconnexion' })).toBeVisible();
   await expect(page.getByText('Yao Sossou').first()).toBeVisible();
-  // The avatar now shows the user's initials, never "LR".
-  await expect(page.getByText('YS')).toBeVisible();
+  // The bottom Profil tab replaces a duplicated account icon on mobile.
+  await expect(page.locator('.lr-header .account-menu-wrap')).toBeHidden();
+  await expect(page.getByRole('navigation', { name: 'Navigation voyageur' }).getByRole('link', { name: 'Profil' })).toBeVisible();
 });
 
 test('signing in before confirming the address shows the confirm-email panel, never a session', async ({ page }) => {
@@ -159,28 +161,30 @@ test('password reset asks for the email and confirms the send without leaking pr
   expect(panel).not.toMatch(/identitytoolkit|firebase|oob/i);
 });
 
-test('the anonymous header shows a neutral account action, never "LR"', async ({ page }) => {
+test('the anonymous mobile header leaves account access to the bottom Profil tab', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await mockFirebase(page);
   await page.goto(APP + '/account');
-  await expect(page.getByRole('button', { name: 'Se connecter', exact: true })).toBeVisible();
+  await expect(page.locator('.lr-header .account-menu-wrap')).toBeHidden();
   const header = await page.locator('.lr-header').innerText();
   expect(header).not.toContain('LR');
-  // Tapping it leads to the account screen with the full entry experience.
-  await page.getByRole('button', { name: 'Se connecter', exact: true }).click();
+  const profile = page.getByRole('navigation', { name: 'Navigation voyageur' }).getByRole('link', { name: 'Profil' });
+  await expect(profile).toBeVisible();
+  await profile.click();
   await expect(page.getByText('Bienvenue sur LeRoutier')).toBeVisible();
 });
 
-test('the account menu offers profile, privacy and logout', async ({ page }) => {
+test('Mon compte keeps profile, privacy and logout actions available on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await mockFirebase(page, { signIn: { email: 'nouveau@example.com' } });
   await mockIdentity(page, { needsProfile: false });
   await page.goto(APP + '/account');
   await page.getByLabel('Adresse e-mail').fill('nouveau@example.com');
   await page.getByLabel('Mot de passe').fill('secret-mot-de-passe');
   await page.getByRole('button', { name: 'Se connecter avec mon adresse e-mail' }).click();
-  await page.getByRole('button', { name: 'Compte de Test Identity' }).click();
-  await expect(page.getByRole('menuitem', { name: 'Mon profil' })).toBeVisible();
-  await expect(page.getByRole('menuitem', { name: 'Confidentialité et données' })).toBeVisible();
-  await page.getByRole('menuitem', { name: 'Déconnexion' }).click();
+  await expect(page.getByRole('heading', { name: 'Mon compte' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Ouvrir confidentialité et données' })).toBeVisible();
+  await page.getByRole('button', { name: 'Se déconnecter' }).click();
   await expect(page.getByText('Bienvenue sur LeRoutier')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Se connecter', exact: true })).toBeVisible();
 });
