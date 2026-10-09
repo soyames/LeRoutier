@@ -142,12 +142,13 @@ test.describe('on a wide screen', () => {
     await expect(bottomBar(page)).toHaveCount(0);
   });
 
-  test('the professional door is still one click away on a phone', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
+  test('the top account and combined-menu controls are hidden on a phone', async ({ page }) => {
     await mockApi(page);
     await page.goto(APP + '/trips');
-    await page.getByRole('button', { name: 'Ouvrir le menu' }).click();
-    await page.getByRole('navigation', { name: 'Menu principal' }).getByRole('link', { name: 'Espace professionnel' }).click();
-    await expect(page).toHaveURL(APP + '/professionnel');
+
+    await expect(page.locator('.account-menu-wrap')).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Ouvrir le menu' })).toBeHidden();
+    await expect(bottomBar(page)).toBeVisible();
+    await expect(bottomBar(page).getByRole('link')).toHaveText(TABS);
   });
 });
