@@ -143,6 +143,7 @@ test.describe('on a wide screen', () => {
   });
 
   test('the top account and combined-menu controls are hidden on a phone', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     await mockApi(page);
     await page.goto(APP + '/trips');
 
