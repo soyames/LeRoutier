@@ -146,26 +146,21 @@ test('loading and error states are announced, not just drawn', async ({ page }) 
   await expect(announced.first()).toContainText('Impossible de charger les villes');
 });
 
-// The primary navigation is two different things at two widths: a drawer on a
-// phone and a header row on a desktop. Both are aimed at with a thumb, so both
-// are measured.
+// Passenger navigation uses four bottom tabs on a phone and a header row on
+// desktop. Both are aimed at with a thumb, so both are measured.
 test('touch targets on the primary navigation are large enough to hit', async ({ page }) => {
   await open(page, '/trips');
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: 'Ouvrir le menu' }).click();
-  const drawerItems = page.getByRole('navigation', { name: 'Menu principal' }).getByRole('link');
-  const drawerCount = await drawerItems.count();
-  expect(drawerCount).toBeGreaterThan(0);
-  for (let i = 0; i < drawerCount; i++) {
-    const box = await drawerItems.nth(i).boundingBox();
+  const bottomItems = page.getByRole('navigation', { name: 'Navigation voyageur' }).getByRole('link');
+  const bottomCount = await bottomItems.count();
+  expect(bottomCount).toBe(4);
+  for (let i = 0; i < bottomCount; i++) {
+    const box = await bottomItems.nth(i).boundingBox();
     if (!box) continue;
-    // 44 px is the WCAG 2.1 AAA target; 24 px is the AA floor. A bus station
-    // is not a desk, so this asserts the AA floor with room to spare.
-    expect(box.height, `menu item ${i} is only ${Math.round(box.height)}px tall`).toBeGreaterThanOrEqual(36);
-    expect(box.width, `menu item ${i} is only ${Math.round(box.width)}px wide`).toBeGreaterThanOrEqual(36);
+    expect(box.height, `bottom tab ${i} is only ${Math.round(box.height)}px tall`).toBeGreaterThanOrEqual(36);
+    expect(box.width, `bottom tab ${i} is only ${Math.round(box.width)}px wide`).toBeGreaterThanOrEqual(36);
   }
-  await page.keyboard.press('Escape');
 
   await page.setViewportSize({ width: 1280, height: 800 });
   const headerItems = page.getByRole('navigation', { name: 'Navigation principale' }).getByRole('link');
