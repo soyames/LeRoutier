@@ -247,8 +247,7 @@ test('a Firebase session survives a full app relaunch, with one /me per sign-in'
 
   // Explicit logout ends it: the sign-in entry returns, nothing provider-side
   // is left behind for the next person on the handset.
-  await page.getByRole('button', { name: 'Compte de Test Identity' }).click();
-  await page.getByRole('menuitem', { name: 'Déconnexion' }).click();
+  await page.getByRole('button', { name: 'Se déconnecter' }).click();
   await expect(page.getByText('Bienvenue sur LeRoutier')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Se connecter', exact: true })).toBeVisible();
 });
