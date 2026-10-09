@@ -28,9 +28,9 @@ async function openPassengerDestination(page,name){
   await page.getByRole('button',{name:'Ouvrir le menu'}).click();
   await page.getByRole('navigation',{name:'Menu principal'}).getByRole('link',{name,exact:true}).click();
 }
-/** @type {Array<[string,string,string[],('bar'|'menu')?]>} */
+/** @type {Array<[string,string,string[],('bar'|'menu'|'tabs')?]>} */
 const profiles=[
-  ['Voyageur','/tickets',['Réservations','Envoyer un colis','Suivre un colis','Mes voyages','Notifications'],'menu'],
+  ['Voyageur','/tickets',['Réservations','Trajets','Colis','Profil'],'tabs'],
   ['Chauffeur indépendant','/work/today',['Aujourd’hui','Manifeste','Scanner','Comptant','Colis','Véhicule','Points','Recettes','Profil']],
   ['Conducteur de compagnie','/work/today',['Aujourd’hui','Manifeste','Scanner','Comptant','Colis','Véhicule','Profil']],
   ['Convoyeur','/work/today',['Service','Manifeste','Scanner','Comptant','Colis','Profil']],
@@ -59,17 +59,20 @@ for(const [label,path,links,mode='bar'] of profiles) test(`TEST ${label}: mobile
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await login(page,label);await expect(page).toHaveURL(APP+path);
   await expect(page.getByText(/Espace TEST/)).toBeVisible();
-  // Where a destination is, in each kind of shell. A task bar answers with a
-  // button and stays on screen; the passenger's drawer answers with a link and
-  // has to be reopened to read where it says we are.
+  // Destinations in an operational task bar are buttons. Passenger and public
+  // destinations are real links in the bottom tabs. Workspace menus remain
+  // links in the accessible drawer.
   const goTo=async name=>{
+    if(mode==='tabs'){await page.getByRole('navigation',{name:'Navigation voyageur'}).getByRole('link',{name,exact:true}).click();return;}
     if(mode!=='menu'){await page.getByRole('navigation').getByRole('button',{name,exact:true}).click();return;}
     await page.getByRole('button',{name:'Ouvrir le menu'}).click();
     await page.getByRole('navigation',{name:'Menu principal'}).getByRole('link',{name,exact:true}).click();
   };
-  const destination=name=>mode==='menu'
-    ?page.getByRole('navigation',{name:'Menu principal'}).getByRole('link',{name,exact:true})
-    :page.getByRole('navigation').getByRole('button',{name,exact:true});
+  const destination=name=>mode==='tabs'
+    ?page.getByRole('navigation',{name:'Navigation voyageur'}).getByRole('link',{name,exact:true})
+    :mode==='menu'
+      ?page.getByRole('navigation',{name:'Menu principal'}).getByRole('link',{name,exact:true})
+      :page.getByRole('navigation').getByRole('button',{name,exact:true});
   const assertCurrent=async name=>{
     if(mode!=='menu'){await expect(destination(name)).toHaveAttribute('aria-current','page');return;}
     await page.getByRole('button',{name:'Ouvrir le menu'}).click();
