@@ -74,6 +74,7 @@ async function mockIdentity(page, { needsProfile = true } = {}) {
 }
 
 test('a new user creates an account, is asked to verify the address, then lands connected and complete', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await mockFirebase(page, { signUp: { email: 'nouveau@example.com' }, signIn: { email: 'nouveau@example.com' } });
   await mockIdentity(page);
   await page.goto(APP + '/account');
@@ -161,6 +162,7 @@ test('password reset asks for the email and confirms the send without leaking pr
 });
 
 test('the anonymous mobile header leaves account access to the bottom Profil tab', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await mockFirebase(page);
   await page.goto(APP + '/account');
   await expect(page.locator('.lr-header .account-menu-wrap')).toBeHidden();
@@ -173,6 +175,7 @@ test('the anonymous mobile header leaves account access to the bottom Profil tab
 });
 
 test('Mon compte keeps profile, privacy and logout actions available on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await mockFirebase(page, { signIn: { email: 'nouveau@example.com' } });
   await mockIdentity(page, { needsProfile: false });
   await page.goto(APP + '/account');
