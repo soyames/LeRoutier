@@ -206,7 +206,10 @@ export default function App() {
     checkout: 'Paiement', notifications: 'Notifications',
   };
 
-  const workNav = [
+  const workNav = can.cashier ? [
+    { id: 'walk-up', label: 'Vente de billets', icon: Wallet },
+    { id: 'profile', label: 'Profil', icon: UserRound },
+  ] : [
     { id: 'today', label: can.convoyeur ? 'Service' : 'Aujourd’hui', icon: Route },
     { id: 'manifest', label: 'Manifeste', icon: Users },
     { id: 'scanner', label: 'Scanner', icon: QrCode },
@@ -232,17 +235,18 @@ export default function App() {
     { id: 'fleet', label: 'Flotte', icon: BusFront }, { id: 'crew', label: 'Équipage', icon: Users },
     { id: 'stations', label: 'Stations', icon: MapPin }, { id: 'parcels', label: 'Colis', icon: Package },
     { id: 'payments', label: 'Paiements', icon: WalletCards }, { id: 'settlements', label: 'Règlements', icon: Wallet },
+    { id: 'finance', label: 'CRM financier', icon: WalletCards },
     { id: 'incidents', label: 'Incidents', icon: ShieldAlert }, { id: 'alerts', label: 'Alertes', icon: Bell },
     { id: 'settings', label: 'Paramètres', icon: SettingsIcon },
   ];
   const companyOpsScreens = {
     today: <OpsToday/>, services: <Services/>, fleet: <Fleet/>, crew: <Crew/>, stations: <OpsStations/>,
-    parcels: <OpsParcels/>, payments: <Payments/>, settlements: <Settlements/>, incidents: <Incidents/>,
+    parcels: <OpsParcels/>, payments: <Payments/>, settlements: <Settlements/>, finance:<Earnings/>,incidents: <Incidents/>,
     alerts: <Alerts/>, settings: <Settings/>, notifications: <NotificationCentre onOpen={to => navigate(to)}/>,
   };
   const companyOpsTitles = {
     today: 'Aujourd’hui', services: 'Services & lignes', fleet: 'Flotte & véhicules', crew: 'Équipage & personnel',
-    stations: 'Stations & points', parcels: 'Colis & fret', payments: 'Paiements', settlements: 'Règlements & retraits',
+    stations: 'Stations & points', parcels: 'Colis & fret', payments: 'Paiements', settlements: 'Règlements & retraits',finance:'CRM financier',
     incidents: 'Incidents', alerts: 'Alertes & approbations', settings: 'Paramètres', notifications: 'Notifications',
   };
 
@@ -282,9 +286,9 @@ export default function App() {
   const opsScreens=can.platformOps?platformOpsScreens:companyOpsScreens;
   const opsTitles=can.platformOps?platformOpsTitles:companyOpsTitles;
   const scoped = workspace === PASSENGER ? { nav: [], screens: passengerScreens, titles: passengerTitles, prefix: '', role: 'Voyageur' }
-    : workspace === WORK ? { nav: workNav, screens: workScreens, titles: workTitles, prefix: '/work', role: can.convoyeur ? 'Convoyeur' : can.independent ? 'Chauffeur propriétaire' : 'Chauffeur' }
+    : workspace === WORK ? { nav: workNav, screens: workScreens, titles: workTitles, prefix: '/work', role: can.cashier ? 'Caissier autorisé' : can.convoyeur ? 'Convoyeur' : can.independent ? 'Chauffeur propriétaire' : 'Chauffeur' }
       : { nav: opsNav, screens: opsScreens, titles: opsTitles, prefix: '/ops', role: can.platformOps?'Exploitation plateforme':'Exploitation compagnie' };
-  const fallbackPage=workspace===PASSENGER?'':workspace===OPS&&can.platformOps?'platform':'today';
+  const fallbackPage=workspace===PASSENGER?'':workspace===OPS&&can.platformOps?'platform':workspace===WORK&&can.cashier?'walk-up':'today';
   const page = (workspace === PASSENGER ? segments[0] : segments[1]) ?? fallbackPage;
   const privacySub = workspace === PASSENGER && page === 'account' && segments[1] === 'privacy';
   const known = Object.hasOwn(scoped.screens, page);

@@ -106,7 +106,7 @@ test('a ticket is issued only once the purchase is paid, then for every travelle
 
   const paid = await call(token, `/bookings/${booked.data.id}/payments/test`, { method: 'POST', key: randomUUID(), body: {} });
   assert.equal(paid.status, 200, JSON.stringify(paid));
-  assert.equal(paid.data.amount_minor, booked.data.amount_minor, 'one charge, for the whole party');
+  assert.equal(paid.data.amount_minor, booked.data.amount_minor+booked.data.service_fee_minor, 'one charge covers fare plus service fee');
 
   const tickets = [];
   for (const seat of booked.data.bookings) {
@@ -344,7 +344,7 @@ test('a transport company onboards, and reads its subscription, with no ticket a
   assert.equal(plan.status, 200, JSON.stringify(plan));
   assert.equal(plan.data.operatorType, 'company');
   assert.ok(plan.data.subscription && 'billingStatus' in plan.data.subscription);
-  assert.equal(plan.data.commissionBp, 500);
+  assert.equal(plan.data.serviceFeeBp, 200);
   await nothingWasSold();
 });
 

@@ -157,6 +157,9 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       '/me/bookings': ['GET'], '/me/claim': ['POST'], '/me/parcels': ['GET'], '/notifications': ['GET'],
       '/notifications/preferences': ['GET', 'PUT'], '/parcels/quote': ['GET'], '/parcels': ['POST'],
       '/bookings': ['POST'], '/operator/settlements': ['GET'], '/operator/payouts': ['GET', 'POST'],
+      '/operator/payout-schedule':['GET','POST'],
+      '/operator/subscription': ['GET','POST'],
+      '/operator/subscription/payment': ['POST'], '/ops/subscription-payments': ['GET'],
       '/driver/earnings': ['GET'], '/driver/parcels': ['GET'], '/driver/parcels/lookup': ['GET'], '/driver/service': ['GET'],
       '/driver/payouts': ['GET', 'POST'], '/driver/payout-destinations': ['GET', 'POST'],
       '/driver/walk-up-bookings': ['POST'], '/driver/actions': ['POST'],
@@ -567,6 +570,17 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method!=='GET') await limited(actor.id ?? actor.agent.id);
     if(actor.agent && !path.startsWith('/agent/') && !(method==='POST' && path==='/workflows/tick'))
       invariant(false,'FORBIDDEN','Agent principals can only use the agent API.',403);
+    // Professional subscription state gates provider-side writes after the
+    // adoption period. Traveller APIs (including passenger booking) are not in
+    // this authenticated-provider branch; account, verification and renewal
+    // screens remain reachable so an expired operator can recover access.
+    const providerRole=['driver','convoyeur','cashier','ops'].includes(actor.role);
+    const subscriptionExempt=path.startsWith('/operator/subscription')||path.startsWith('/onboarding/')||path==='/me'||path==='/auth/totp';
+    if(!actor.agent&&providerRole&&method!=='GET'&&!subscriptionExempt&&actor.operator_id){
+      const access=await commerce.access(actor);
+      invariant(access.active,'SUBSCRIPTION_REQUIRED',
+        'Votre abonnement professionnel a expiré. Choisissez une période et renouvelez-le pour reprendre les opérations.',402);
+    }
     // The second factor, enforced HERE rather than on a list of "sensitive"
     // routes. An identity that has confirmed a factor must prove this browser
     // has passed it before any authenticated call succeeds: gating only the
@@ -722,6 +736,14 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='POST' && path==='/driver/walk-up-bookings') return walkUp(actor,await body(),req.headers.get('idempotency-key'));
     // --- Operator settlements & withdrawals ---
     if(method==='GET' && path==='/operator/settlements') return {summary:await settle.summary(actor),entries:await settle.ledger(actor)};
+    if(method==='GET' && path==='/operator/payout-schedule') return settle.payoutSchedule(actor);
+    if(method==='POST' && path==='/operator/payout-schedule') return settle.setPayoutSchedule(actor,await body());
+    if(method==='GET' && path==='/operator/subscription') return commerce.ownPlan(actor);
+    if(method==='POST' && path==='/operator/subscription') return commerce.selectPeriod(actor,await body());
+    if(method==='POST' && path==='/operator/subscription/payment') return commerce.requestPayment(actor,await body());
+    if(method==='GET' && path==='/ops/subscription-payments') return commerce.paymentRequests(actor);
+    const subscriptionPaymentDecision=path.match(/^\/ops\/subscription-payments\/([^/]+)\/(confirm|reject)$/);
+    if(method==='POST'&&subscriptionPaymentDecision) return commerce.reviewPayment(actor,uuid(subscriptionPaymentDecision[1]),subscriptionPaymentDecision[2]);
     if(method==='GET' && path==='/operator/payouts') return settle.list(actor);
     if(method==='POST' && path==='/operator/payouts') return settle.request(actor,await body(),req.headers.get('idempotency-key'));
     const operatorPayoutCancel=path.match(/^\/operator\/payouts\/([^/]+)\/cancel$/);
@@ -941,9 +963,9 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     // Known corridors, so an operator does not have to invent a road thousands
     // of people already travel. A corridor is never a service.
     if(method==='GET' && path==='/ops/corridors') return provision.corridors(actor);
-    const provisionPath=path.match(/^\/ops\/(operators|drivers|convoyeurs|ops-users|places|stops|vehicles|routes|services)$/);
+    const provisionPath=path.match(/^\/ops\/(operators|drivers|convoyeurs|cashiers|ops-users|places|stops|vehicles|routes|services)$/);
     if(method==='POST' && provisionPath) {
-      const operations={operators:'operator',drivers:'driver',convoyeurs:'convoyeur','ops-users':'opsUser',places:'place',stops:'stop',vehicles:'vehicle',routes:'route',services:'service'};
+      const operations={operators:'operator',drivers:'driver',convoyeurs:'convoyeur',cashiers:'cashier','ops-users':'opsUser',places:'place',stops:'stop',vehicles:'vehicle',routes:'route',services:'service'};
       return provision[operations[provisionPath[1]]](actor,await body(),req.headers.get('idempotency-key'));
     }
     // ---- LeRoutier's own staff ----------------------------------------------
@@ -1012,15 +1034,17 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       if(method==='POST' && action) return domain.transition(actor,id,action,['board','alight'].includes(action)?(await body()).stopSequence:undefined);
     }
     if(method==='GET' && path==='/driver/service') {
-      invariant(actor.role==='driver' || actor.role==='convoyeur','FORBIDDEN','Crew access required.',403);
+      invariant(actor.role==='driver' || actor.role==='convoyeur' || actor.role==='cashier','FORBIDDEN','Crew or cashier access required.',403);
+      if(actor.role==='cashier') invariant(actor.operator_type==='company' && actor.operator_id,
+        'FORBIDDEN','Un compte caisse de compagnie est requis.',403);
       const rows=await list(`SELECT s.*,r.name AS route_name,v.registration,
         bdp.name AS departure_point_name,bdp.description AS departure_point_landmark,
         bap.name AS arrival_point_name,bap.description AS arrival_point_landmark
         FROM service_assignments a JOIN services s ON s.id=a.service_id
         JOIN routes r ON r.id=s.route_id JOIN vehicles v ON v.id=a.vehicle_id
         LEFT JOIN boarding_points bdp ON bdp.id=s.departure_point_id LEFT JOIN boarding_points bap ON bap.id=s.arrival_point_id
-        WHERE ((a.driver_id=$1 AND $2='driver') OR (a.convoyeur_id=$1 AND $2='convoyeur')) AND a.ended_at IS NULL
-        AND s.status IN ('scheduled','active','disrupted') ORDER BY departure_at LIMIT 1`,[actor.id,actor.role]);
+        WHERE (($3='cashier' AND s.operator_id=$4) OR ((a.driver_id=$1 AND $2='driver') OR (a.convoyeur_id=$1 AND $2='convoyeur')) AND a.ended_at IS NULL)
+        AND s.status IN ('scheduled','active','disrupted') ORDER BY departure_at LIMIT 1`,[actor.id,actor.role,actor.role,actor.operator_id??null]);
       if(!rows[0]) return null;
       const stops=await list(`SELECT ss.sequence,ss.stop_id,s.name,p.name AS city FROM service_stops ss JOIN stops s ON s.id=ss.stop_id
         JOIN places p ON p.id=s.place_id WHERE ss.service_id=$1 ORDER BY sequence`,[rows[0].id]);

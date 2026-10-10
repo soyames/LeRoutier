@@ -1,19 +1,17 @@
 import { useRef, useState } from 'react';
 import { useApi, useSession } from '@leroutier/config/client';
 import { Card, SectionTitle, ApiState, fcfa } from '@leroutier/ui';
-import { splitCommission, LEROUTIER_COMMISSION_BP } from '@leroutier/domain';
+import { priceWithServiceFee } from '@leroutier/domain';
 
-// Live preview of the commercial split, computed with the SAME integer-money
-// module the API uses. The published fare is the final customer price; the 5%
-// commission comes out of it and is never added on top. Shown only to the
-// operator — passengers see the final price and nothing else.
+// Preview is explicit: published fare belongs to the operator; the platform
+// fee is added on top and is never deducted from their fare.
 function FareBreakdown({total}){
-  if(total===null) return <p className="small muted">Le tarif publié est le prix final payé par le client. La commission LeRoutier (5&nbsp;%) en est déduite&nbsp;: elle n’est jamais ajoutée au-dessus du prix affiché.</p>;
-  const split=splitCommission(total);
+  if(total===null) return <p className="small muted">Le transporteur fixe et reçoit son tarif. LeRoutier ajoute des frais de service de 2&nbsp;% au montant payé par le voyageur.</p>;
+  const split=priceWithServiceFee(total);
   return <div className="stack" role="status" aria-label="Détail commercial avant publication">
-    <div className="row"><span>Prix final client</span><strong>{fcfa(total)}</strong></div>
-    <div className="row"><span>Commission LeRoutier ({LEROUTIER_COMMISSION_BP/100}&nbsp;%)</span><span>{fcfa(split.commissionMinor)}</span></div>
-    <div className="row"><span>Votre montant net</span><strong>{fcfa(split.netMinor)}</strong></div>
+    <div className="row"><span>Tarif transporteur</span><strong>{fcfa(split.fareMinor)}</strong></div>
+    <div className="row"><span>Frais de service LeRoutier (2&nbsp;%)</span><span>{fcfa(split.serviceFeeMinor)}</span></div>
+    <div className="row"><span>Total payé par le voyageur</span><strong>{fcfa(split.totalMinor)}</strong></div>
   </div>;
 }
 
@@ -75,6 +73,7 @@ export function Provisioning({onSaved=()=>{},staffing=true,title='Administration
           <p className="small muted">Utilisez l’identifiant utilisateur vérifié par votre fournisseur d’identité, jamais un mot de passe.</p><Field label="Identifiant d’identité du conducteur" name="subject" maxLength={255}/><Field label="Nom du conducteur" name="name" maxLength={100}/><Field label="Référence du permis" name="license" maxLength={100}/>
         </ProvisionForm>
         <ProvisionForm title="Provisionner un convoyeur" path="/ops/convoyeurs" body={f=>({operatorId,subject:f.get('subject'),displayName:f.get('name')})} {...formProps}><Field label="Identifiant d’identité du convoyeur" name="subject" maxLength={255}/><Field label="Nom du convoyeur" name="name" maxLength={100}/><p className="small muted">Le convoyeur contrôle les billets, vend au comptant et suit les colis : il ne conduit pas.</p></ProvisionForm>
+        {user.operator_id && user.operator_type==='company' && <ProvisionForm title="Créer un compte caissier autorisé" path="/ops/cashiers" body={f=>({operatorId,subject:f.get('subject'),displayName:f.get('name')})} {...formProps}><Field label="Identifiant d’identité du caissier" name="subject" maxLength={255}/><Field label="Nom du caissier" name="name" maxLength={100}/><p className="small muted">Ce compte peut vendre des billets au comptant pour les services de cette compagnie. Il ne peut ni gérer les services ni retirer les recettes.</p></ProvisionForm>}
         <ProvisionForm title="Provisionner un agent Ops" path="/ops/ops-users" body={f=>({operatorId,subject:f.get('subject'),displayName:f.get('name')})} {...formProps}><Field label="Identifiant d’identité de l’agent" name="subject" maxLength={255}/><Field label="Nom de l’agent" name="name" maxLength={100}/><p className="small muted">L’agent pourra administrer uniquement cet opérateur.</p></ProvisionForm>
         <details><summary>Comptes de l’opérateur</summary><div className="stack">{scope(data.users).map(u=><div key={u.id}><p>{u.display_name} · {u.role} · {u.active && u.driver_active!==false?'Actif':'Inactif'}</p>{u.id!==user.id && <ProvisionForm title={u.active?'Désactiver le compte':'Activer le compte'} path={`/ops/users/${u.id}/status`} method="PATCH" body={()=>({active:!u.active})} {...formProps}><p>Confirmer le changement pour {u.display_name}.</p></ProvisionForm>}</div>)}</div></details>
       </>}

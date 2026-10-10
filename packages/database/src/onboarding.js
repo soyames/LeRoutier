@@ -81,8 +81,8 @@ export function onboarding(db,store=null){
         await addEvidence(tx,operator.id,'legal_representative_identity',{reference:representativeIdReference,fileUrl:representativeIdDocumentUrl});
         await addEvidence(tx,operator.id,'transport_authorization',{reference:transportAuthorizationReference,fileUrl:transportAuthorizationDocumentUrl});
         await addEvidence(tx,operator.id,'registered_address',{reference:input.registeredAddress.trim(),fileUrl:addressProofUrl});
-        await tx.query(`INSERT INTO operator_plans(operator_id,plan,monthly_price_minor,billing_status,included_features)
-          VALUES($1,'standard',NULL,'not_billed','["operational_management","fare_intelligence"]'::jsonb) ON CONFLICT DO NOTHING`,[operator.id]);
+        await tx.query(`INSERT INTO operator_plans(operator_id,plan,monthly_price_minor,billing_status,included_features,billing_period,trial_ends_at)
+          VALUES($1,'standard',30000,'not_billed','["operational_management","fare_intelligence"]'::jsonb,'month','2027-04-30T23:00:00Z') ON CONFLICT DO NOTHING`,[operator.id]);
         await tx.query(`UPDATE users SET role='ops',operator_id=$2,display_name=$3,profile_completed_at=now(),updated_at=now() WHERE id=$1`,[actor.id,operator.id,user.display_name||input.displayName.trim()]);
         await audit(tx,actor.id,'operator.onboarded',operator.id,operator.id,{key,type:'company',verification:'kyb'});
         await audit(tx,actor.id,'identity.role_assigned',actor.id,operator.id,{role:'ops',via:'company_onboarding'});
@@ -124,6 +124,8 @@ export function onboarding(db,store=null){
         await eligible(tx,actor);
         const operator=await one(tx,`INSERT INTO operators(name,type,owner_user_id,admin_user_id,verification_status,contact_phone,country,transport_authorization_reference)
           VALUES($1,'independent',$2,$2,'pending_verification',$3,$4,$5) RETURNING *`,[input.displayName.trim(),actor.id,input.phone.trim(),input.country.toLowerCase(),transportAuthorizationReference]);
+        await tx.query(`INSERT INTO operator_plans(operator_id,plan,monthly_price_minor,billing_status,billing_period,trial_ends_at)
+          VALUES($1,'standard',10000,'not_billed','month','2027-04-30T23:00:00Z')`,[operator.id]);
         await tx.query(`UPDATE users SET role='driver',operator_id=$2,display_name=$3,profile_completed_at=now(),updated_at=now() WHERE id=$1`,[actor.id,operator.id,input.displayName.trim()]);
         await tx.query(`INSERT INTO driver_profiles(user_id,operator_id,license_reference,id_document_type,id_document_reference,photo_url,insurance_reference,roadworthiness_reference,transport_authorization_reference,active)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,true)`,[actor.id,operator.id,licenseReference,input.idDocumentType,idDocumentReference,driverPhotoUrl,insuranceReference,roadworthinessReference,transportAuthorizationReference]);

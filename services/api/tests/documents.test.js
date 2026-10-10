@@ -56,12 +56,12 @@ test('a refunded payment invalidates an already issued boarding credential',asyn
     WHERE sa.service_id=$1 AND sa.ended_at IS NULL ORDER BY sa.assigned_at DESC LIMIT 1`,[issued.serviceId]))).rows[0];
   assert.ok(assignedDriver);
   await db.transaction(async tx=>{
-    await tx.query("UPDATE payments SET status='refunded' WHERE booking_id=$1 AND status='succeeded'",[id]);
+    await tx.query("UPDATE payments SET status='refunded',refunded_minor=COALESCE(NULLIF(fare_minor,0),amount_minor) WHERE booking_id=$1 AND status='succeeded'",[id]);
     await tx.query("UPDATE services SET status='active',current_sequence=$2 WHERE id=$1",[issued.serviceId,b.origin_sequence]);
   });
   await assert.rejects(tickets(db).verify(assignedDriver,{code:issued.token,serviceId:issued.serviceId,stopSequence:b.origin_sequence}),{code:'TICKET_INVALID'});
   await db.transaction(async tx=>{
-    await tx.query("UPDATE payments SET status='succeeded' WHERE booking_id=$1 AND status='refunded'",[id]);
+    await tx.query("UPDATE payments SET status='succeeded',refunded_minor=0 WHERE booking_id=$1 AND status='refunded'",[id]);
     await tx.query("UPDATE services SET status='scheduled',current_sequence=0 WHERE id=$1",[issued.serviceId]);
   });
 });
@@ -70,9 +70,10 @@ test('cancellation document separates pending review from actual refunded paymen
   const cancelled=await tickets(db).issue(passenger,id);
   assert.equal(cancelled.document.status,'cancelled');assert.ok(cancelled.token);assert.equal(cancelled.validForBoarding,false);assert.equal(cancelled.document.refundedMinor,0);
   assert.ok(cancelled.document.paidMinor>0);
-  await db.transaction(tx=>tx.query("UPDATE payments SET status='refunded' WHERE booking_id=$1",[id]));
+  await db.transaction(tx=>tx.query("UPDATE payments SET status='refunded',refunded_minor=COALESCE(NULLIF(fare_minor,0),amount_minor) WHERE booking_id=$1",[id]));
   const refunded=await tickets(db).issue(passenger,id);
-  assert.equal(refunded.document.refundedMinor,refunded.document.paidMinor);assert.equal(refunded.token,cancelled.token);
+  assert.equal(refunded.document.refundedMinor,refunded.document.payments[0].fare_minor);assert.equal(refunded.token,cancelled.token);
+  assert.ok(refunded.document.paidMinor-refunded.document.refundedMinor>0,'the LeRoutier service fee remains recorded as retained');
 });
 test('intermediate boarding uses the booked stop and does not invent a timetable',async()=>{
   const domain=transport(db);

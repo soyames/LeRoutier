@@ -5,6 +5,7 @@
   "buildCommand": "corepack pnpm build",
   "outputDirectory": "dist",
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
+  "crons": [{ "path": "/api/cron/monthly-operator-settlements", "schedule": "0 3 1 * *" }],
   "headers": [
     {
       "source": "/(.*)",
@@ -13,5 +14,8 @@
       ]
     }
   ],
-  "functions": { "api/index.js": { "maxDuration": 30 } }
+  "functions": {
+    "api/index.js": { "maxDuration": 30 },
+    "api/cron/monthly-operator-settlements.js": { "maxDuration": 60 }
+  }
 }

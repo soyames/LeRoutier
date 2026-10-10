@@ -73,7 +73,7 @@ test('agent cannot bypass operator boundary',async()=>{
 
 test('financial action requires approval and surfaces execution failure',async()=>{
   const b=await domain.hold(passenger,{serviceId:demo.service,origin:0,destination:1},randomUUID());
-  const p=await domain.recordPayment(ops,b.id,{provider:'cash',reference:'CASH-1',amountMinor:2500,currency:'XOF'},randomUUID());
+  const p=await domain.recordPayment(ops,b.id,{provider:'cash',reference:'CASH-1',amountMinor:2550,currency:'XOF'},randomUUID());
   const before=await one('SELECT status FROM payments WHERE id=$1',[p.id]);
   assert.equal(before.status,'succeeded');
   const run=await engine.runAction(platform,'payment.reconcile',{paymentId:p.id},'agent-reconcile-1');
@@ -330,7 +330,7 @@ test('a model outage cannot touch booking or payment',async()=>{
   // The deterministic platform is unchanged: a booking still holds, still
   // takes payment, still confirms.
   const booking=await domain.hold(passenger,{serviceId:demo.service,origin:0,destination:3},randomUUID());
-  await domain.recordPayment(ops,booking.id,{provider:'demo',reference:randomUUID(),amountMinor:booking.amount_minor,currency:'XOF'},randomUUID());
+  await domain.recordPayment(ops,booking.id,{provider:'demo',reference:randomUUID(),amountMinor:booking.amount_minor+booking.service_fee_minor,currency:'XOF'},randomUUID());
   const confirmed=await domain.transition(passenger,booking.id,'confirm');
   assert.equal(confirmed.status,'confirmed','model availability must never gate a core journey');
 });

@@ -1,19 +1,23 @@
-// Commercial model: integer-money commission split.
-//
-// The fare an operator publishes IS the final customer price. LeRoutier's
-// commission comes out of that amount — it is never added on top — and the
-// operator receives the remainder:
-//
-//   published 7 500 FCFA  →  passenger pays 7 500 FCFA
-//   commission (5 %)     =  375 FCFA
-//   operator net         =  7 125 FCFA
-//
-// All arithmetic is integer-based; gross = commission + net always holds by
-// construction. One constant, one function: every UI preview, settlement
-// credit and test uses this same implementation.
+// Legacy commission split retained for parcel transactions. Passenger tickets
+// use priceWithServiceFee below: it adds 2% on top of the fare and preserves the
+// operator's full published fare.
 
 /** Commission basis points: 500 bp = 5 % of the final customer price. */
 export const LEROUTIER_COMMISSION_BP = 500;
+
+/** Customer-facing service fee added to the operator's published fare. */
+export const LEROUTIER_SERVICE_FEE_BP = 200;
+
+/**
+ * Add the LeRoutier service fee on top of an operator-set fare. The operator
+ * keeps the full published fare; payment-provider charges remain separate.
+ */
+export function priceWithServiceFee(fareMinor, feeBp = LEROUTIER_SERVICE_FEE_BP) {
+  if (!Number.isInteger(fareMinor) || fareMinor < 0) throw new Error('Service fee requires a non-negative integer fare.');
+  if (!Number.isInteger(feeBp) || feeBp < 0 || feeBp > 10000) throw new Error('Service fee basis points must be 0–10000.');
+  const serviceFeeMinor = Math.round((fareMinor * feeBp) / 10000);
+  return { fareMinor, serviceFeeMinor, totalMinor: fareMinor + serviceFeeMinor, feeBp };
+}
 
 /**
  * Splits a final customer price into LeRoutier commission and operator net.

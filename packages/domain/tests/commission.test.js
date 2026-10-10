@@ -1,10 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitCommission, LEROUTIER_COMMISSION_BP } from '../src/index.js';
+import { splitCommission, priceWithServiceFee, LEROUTIER_COMMISSION_BP, LEROUTIER_SERVICE_FEE_BP } from '../src/index.js';
 
-// Commercial model: the published fare IS the final customer price. The 5%
-// commission comes out of it and the operator receives the remainder. All
-// arithmetic is integer; gross = commission + net holds exactly.
+// Legacy parcel commission remains an integer split. Passenger tickets use the
+// additive service-fee helper tested below.
 
 test('the published example splits exactly: 7500 → 375 commission, 7125 net', () => {
   const split = splitCommission(7500);
@@ -44,4 +43,12 @@ test('invalid inputs are rejected, never silently rounded', () => {
   assert.throws(() => splitCommission(7500, -1));
   assert.throws(() => splitCommission(7500, 10001));
   assert.throws(() => splitCommission(7500, 1.5));
+});
+
+test('the operator fare is preserved and a 2% service fee is added on top',()=>{
+  assert.deepEqual(priceWithServiceFee(2500),{fareMinor:2500,serviceFeeMinor:50,totalMinor:2550,feeBp:200});
+  assert.equal(LEROUTIER_SERVICE_FEE_BP,200);
+  assert.deepEqual(priceWithServiceFee(0),{fareMinor:0,serviceFeeMinor:0,totalMinor:0,feeBp:200});
+  assert.throws(()=>priceWithServiceFee(-1));
+  assert.throws(()=>priceWithServiceFee(1.1));
 });
