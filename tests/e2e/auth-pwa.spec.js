@@ -249,5 +249,5 @@ test('a Firebase session survives a full app relaunch, with one /me per sign-in'
   // is left behind for the next person on the handset.
   await page.getByRole('button', { name: 'Se déconnecter' }).click();
   await expect(page.getByText('Bienvenue sur LeRoutier')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Se connecter', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Se connecter avec mon adresse e-mail', exact: true })).toBeVisible();
 });

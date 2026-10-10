@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { DomainError, invariant } from '@leroutier/domain';
 
 // FedaPay adapter (official contract, docs.fedapay.com, checked 2026-09):
@@ -20,6 +20,7 @@ const TOLERANCE=300;
 const COLLECTION_EVENTS=new Set(['transaction.created','transaction.approved','transaction.declined',
   'transaction.canceled','transaction.refunded','transaction.transferred','transaction.updated']);
 const COLLECTION_STATUS={pending:'pending',approved:'succeeded',transferred:'succeeded',
+  approved_partially_refunded:'succeeded',transferred_partially_refunded:'succeeded',
   declined:'failed',canceled:'cancelled',refunded:'refunded'};
 const PAYOUT_STATUS={pending:'processing',scheduled:'processing',started:'processing',
   processing:'processing',sent:'paid',failed:'failed',canceled:'cancelled',reversed:'reversed'};
@@ -39,7 +40,7 @@ export function verifyFedaPaySignature(raw,header,secret,now=Date.now()){
   }
   invariant(timestamp>=0 && signatures.length,'INVALID_WEBHOOK','Webhook signature is invalid.',401);
   const age=Math.floor(now/1000)-timestamp;
-  invariant(age<=TOLERANCE,'INVALID_WEBHOOK','Webhook signature is too old.',401);
+  invariant(Math.abs(age)<=TOLERANCE,'INVALID_WEBHOOK','Webhook signature is outside the accepted time window.',401);
   const matches=hex(secret,raw,timestamp);
   invariant(signatures.some(matches),'INVALID_WEBHOOK','Webhook signature is invalid.',401);
   return true;
@@ -73,7 +74,7 @@ export function fedapayAdapter(config,http=fetch){
   }
   async function fetchEntity(kind,objectId){
     if(!Number.isInteger(objectId))return null;
-    try{return await send((kind==='payout'?'/payouts/':'/transactions/')+objectId);}
+    try{return await send((kind==='payout'?'/payouts/':'/transactions/')+objectId,'GET',undefined,kind==='payout'?payoutKey:secretKey);}
     catch{return null;}
   }
   function mapEvent(event){
@@ -97,7 +98,9 @@ export function fedapayAdapter(config,http=fetch){
     const reference=entity.reference || String(entity.id);
     if(typeof reference!=='string' || !reference || reference.length>150)return null;
     return {kind:'payment',eventName:name,eventId:String(event.id ?? `${name}:${entity.id}`),
-      paymentId,reference,amountMinor:entity.amount,currency,status};
+      paymentId,reference,amountMinor:entity.amount,currency,status,
+      ...((entity.approved_partially_refunded_at || entity.transferred_partially_refunded_at || entity.status.includes('partially_refunded'))?{refundReview:true}:{}),
+      ...(Number.isInteger(entity.amount_debited)&&entity.amount_debited>=entity.amount?{providerFeeMinor:entity.amount_debited-entity.amount}:{})};
   }
   function mapPayout(event,name){
     const entity=event.entity || event.data;
@@ -114,6 +117,7 @@ export function fedapayAdapter(config,http=fetch){
       ...(amountMinor!==undefined?{amountMinor}:{}),...(typeof currency==='string'?{currency}:{}),status};
   }
   return {name:'fedapay',environment,
+    payoutAccount:payoutKey?createHash('sha256').update(payoutKey).digest('hex'):null,
     payoutsAvailable:!!payoutKey,
     // ---- collections ----
     async initiate({paymentId,bookingId,amountMinor,currency,idempotencyKey}){
@@ -135,7 +139,10 @@ export function fedapayAdapter(config,http=fetch){
       const currency=entity.currency?.iso ?? entity.currency;
       if(!status || !Number.isInteger(entity.amount) || typeof currency!=='string')return null;
       return {kind:'payment',eventId:`reconcile:${id}:${entity.updated_at ?? ''}`,
-        paymentId:payment.id,reference:String(entity.reference ?? entity.id),amountMinor:entity.amount,currency,status};
+        paymentId:payment.id,reference:String(entity.reference ?? entity.id),amountMinor:entity.amount,currency,status,
+        ...((entity.approved_partially_refunded_at || entity.transferred_partially_refunded_at || entity.status.includes('partially_refunded'))?{refundReview:true}:{}),
+        ...(Number.isInteger(entity.amount_debited) && entity.amount_debited>=entity.amount ? {providerFeeMinor:entity.amount_debited-entity.amount}:{}),
+        ...(status==='refunded'?{refundedMinor:entity.amount,operatorRefundedMinor:payment.fare_minor??entity.amount}:{})};
     },
     // ---- payouts ----
     async createPayout({payoutRequestId,firstName,lastName,phoneNumber,country,amountMinor,currency,idempotencyKey}){

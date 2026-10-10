@@ -1,156 +1,141 @@
-// Commercial model, represented as configuration — never as a second billing
-// platform. Business rules, enforced and read here:
-//
-//   companies:        monthly/term subscription, free through 2027-04-30
-//   independent:      lower monthly/term subscription, free through 2027-04-30
-//
-// Renewal is manual. The current payment providers do not provide a confirmed
-// recurring mandate for these plans, so this module never schedules charges.
-
-import { invariant, uuid } from '@leroutier/domain';
+import { createHash } from 'node:crypto';
+import { invariant, idempotencyKey, subscriptionFree, subscriptionPrice, subscriptionEnd, OPERATOR_PAID_FROM, SUBSCRIPTION_PRICES } from '@leroutier/domain';
 import { activeIdentity, audit } from './identities.js';
-import { requirePlatform } from './platform-access.js';
-
 const one = async (tx, sql, args = []) => (await tx.query(sql, args)).rows[0];
-function addMonthsUtc(date,months){
-  const year=date.getUTCFullYear(),month=date.getUTCMonth()+months,day=date.getUTCDate();
-  const first=new Date(Date.UTC(year,month,1,date.getUTCHours(),date.getUTCMinutes(),date.getUTCSeconds(),date.getUTCMilliseconds()));
-  first.setUTCDate(Math.min(day,new Date(Date.UTC(first.getUTCFullYear(),first.getUTCMonth()+1,0)).getUTCDate()));
-  return first;
-}
-
-export function commercial(db) {
-  return {
+const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export function commercial(db, adapter = null, clock = () => new Date()) {
+  async function scope(tx, actor, requested = null) {
+    const user = await activeIdentity(tx, actor.id);
+    const id = user.operator_id ?? requested;
+    invariant(id, 'FORBIDDEN', 'Compte opérateur requis.', 403);
+    const operator = await one(tx, 'SELECT * FROM operators WHERE id=$1 AND active=true', [id]);
+    invariant(operator, 'NOT_FOUND', 'Opérateur introuvable.', 404);
+    invariant((user.role === 'ops' && (!user.operator_id || user.operator_id === id)) ||
+      (operator.type === 'independent' && operator.owner_user_id === user.id), 'FORBIDDEN', 'Accès opérateur requis.', 403);
+    invariant(!requested || requested === id, 'FORBIDDEN', 'Accès interdit.', 403);
+    return operator;
+  }
+  async function plan(actor, requested = null) {
+    return db.transaction(async tx => {
+      const operator = await scope(tx, actor, requested);
+      const selected = await one(tx, 'SELECT * FROM operator_subscriptions WHERE operator_id=$1', [operator.id]);
+      const free = subscriptionFree(clock());
+      const paid = selected?.paid_until && new Date(selected.paid_until) > clock();
+      const receipts = (await tx.query('SELECT id,billing_period,amount_minor,provider_fee_minor,billing_contact,currency,status,provider_reference,verified_at,period_start,period_end,checkout_url FROM subscription_payments WHERE operator_id=$1 ORDER BY created_at DESC LIMIT 30', [operator.id])).rows;
+      return { operatorId: operator.id, operatorType: operator.type, commissionBp: 200, serviceFeeBp: 200, operatorName: operator.name, prices: SUBSCRIPTION_PRICES[operator.type],
+        paymentMethods: adapter ? [{ id: 'hosted', label: 'Paiement sécurisé FedaPay (moyens disponibles chez le prestataire)' }] : [],
+        subscription: { active: !!(free || paid), free, renewalMode:'manual', plan: selected ? operator.type : null,
+          monthlyPriceMinor: SUBSCRIPTION_PRICES[operator.type].monthly, billingPeriod: selected?.billing_period ?? null,
+          billingContact: selected?.billing_contact ?? null, trialActive: free, trialEndsAt: OPERATOR_PAID_FROM, paidThrough: selected?.paid_until ?? null, billingStatus: free ? 'free' : paid ? 'confirmed' : 'payment_due',
+          nextDueAt: free ? OPERATOR_PAID_FROM : selected?.paid_until ?? OPERATOR_PAID_FROM }, receipts };
+    });
+  }
+  async function select(actor, input) {
+    invariant(input && Object.keys(input).every(k => ['billingPeriod','billingContact','paymentMethod'].includes(k)), 'INVALID_PLAN', 'Champs inattendus.');
+    const contact = input.billingContact;
+    invariant(contact && Object.keys(contact).every(k => ['name','email','phone','address'].includes(k)) &&
+      typeof contact.name === 'string' && contact.name.trim().length >= 2 && contact.name.length <= 160 &&
+      typeof contact.email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email) && contact.email.length <= 200 &&
+      typeof contact.phone === 'string' && /^\+?[0-9 ()-]{8,25}$/.test(contact.phone) &&
+      typeof contact.address === 'string' && contact.address.trim().length >= 3 && contact.address.length <= 300,
+      'INVALID_CONTACT', 'Confirmez vos coordonnées de facturation.');
+    await db.transaction(async tx => {
+      const operator = await scope(tx, actor);
+      subscriptionPrice(operator.type, input.billingPeriod);
+      await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['subscription:' + operator.id]);
+      invariant(!await one(tx, "SELECT id FROM subscription_payments WHERE operator_id=$1 AND status='pending'", [operator.id]), 'PAYMENT_PENDING', 'Vérifiez le paiement en attente avant de modifier la formule.', 409);
+      await tx.query(`INSERT INTO operator_subscriptions(operator_id,billing_period,billing_contact) VALUES($1,$2,$3)
+        ON CONFLICT(operator_id) DO UPDATE SET billing_period=$2,billing_contact=$3,selected_at=now()`, [operator.id, input.billingPeriod, JSON.stringify(contact)]);
+      await audit(tx, actor.id, 'subscription.selected', operator.id, operator.id, { billingPeriod: input.billingPeriod, free: subscriptionFree(clock()) });
+    });
+    return plan(actor);
+  }
+  async function reconcile(actor, id, trusted = false) {
+    const p = await db.transaction(async tx => {
+      const payment = await one(tx, 'SELECT * FROM subscription_payments WHERE id=$1', [id]);
+      invariant(payment, 'NOT_FOUND', 'Paiement introuvable.', 404);
+      if (!trusted) await scope(tx, actor, payment.operator_id);
+      return payment;
+    });
+    invariant(adapter && p.provider === adapter.name, 'PAYMENT_UNAVAILABLE', 'Prestataire indisponible.', 503);
+    // Ignore callback/webhook claims. Read the actual transaction with server credentials.
+    const event = await adapter.reconcilePayment(p);
+    if (!event) return { status: p.status, pending: true };
+    invariant(event.paymentId === p.id && event.reference === p.provider_reference && event.amountMinor === p.amount_minor && event.currency === 'XOF', 'PAYMENT_MISMATCH', 'Paiement non conforme.', 409);
+    return db.transaction(async tx => {
+      await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['subscription:' + p.operator_id]);
+      const current = await one(tx, 'SELECT * FROM subscription_payments WHERE id=$1 FOR UPDATE', [id]);
+      if(event.providerFeeMinor!==undefined){
+        invariant(Number.isInteger(event.providerFeeMinor)&&event.providerFeeMinor>=0,'PAYMENT_MISMATCH','Frais du prestataire invalides.',409);
+        await tx.query('UPDATE subscription_payments SET provider_fee_minor=$2 WHERE id=$1',[id,event.providerFeeMinor]);
+      }
+      if(event.refundReview===true)return {status:current.status,pending:true};
+      if (current.status === event.status) return { status: current.status };
+      invariant(['pending','succeeded'].includes(current.status), 'PAYMENT_TRANSITION', 'État de paiement incompatible.', 409);
+      invariant(['pending','succeeded','failed','cancelled','refunded'].includes(event.status), 'PAYMENT_TRANSITION', 'État inconnu.', 409);
+      if (event.status === 'succeeded' && current.status === 'pending') {
+        invariant(!subscriptionFree(clock()) && new Date(p.created_at) >= new Date(OPERATOR_PAID_FROM), 'FREE_PERIOD', 'Aucun paiement avant le 1er mai 2027.', 409);
+        const subscription = await one(tx, 'SELECT * FROM operator_subscriptions WHERE operator_id=$1 FOR UPDATE', [p.operator_id]);
+        const start = new Date(Math.max(clock().getTime(), new Date(subscription.paid_until ?? 0).getTime()));
+        const end = subscriptionEnd(start, p.billing_period);
+        await tx.query('UPDATE operator_subscriptions SET paid_until=$2 WHERE operator_id=$1', [p.operator_id, end]);
+        await tx.query('UPDATE subscription_payments SET verified_at=$4,period_start=$2,period_end=$3 WHERE id=$1', [id, start, end, clock()]);
+      }
+      if (event.status === 'refunded') {
+        // A refund revokes this entitlement; other paid receipts remain auditable.
+        await tx.query('UPDATE operator_subscriptions SET paid_until=LEAST(paid_until,$2) WHERE operator_id=$1', [p.operator_id, current.period_start ?? clock()]);
+      }
+      await tx.query('UPDATE subscription_payments SET status=$2 WHERE id=$1', [id, event.status]);
+      await audit(tx, null, 'subscription.' + event.status, id, p.operator_id, { providerReference: event.reference });
+      return { status: event.status };
+    });
+  }
+  return { plan, ownPlan: plan, selectPeriod: select, select, reconcile,
     async access(actor) {
-      if(!actor?.operator_id || actor.role==='passenger')return {active:true,reason:null};
-      return db.transaction(async tx=>{
-        const plan=await one(tx,`SELECT trial_ends_at,paid_through FROM operator_plans
-          WHERE operator_id=$1 AND effective_to IS NULL`,[actor.operator_id]);
-        const trialEnd=plan?.trial_ends_at??'2027-04-30T23:00:00Z';
-        const active=Date.now()<new Date(trialEnd).getTime()||!!plan?.paid_through&&Date.now()<new Date(plan.paid_through).getTime();
-        return {active,reason:active?null:'subscription_required',trialEndsAt:trialEnd,paidThrough:plan?.paid_through??null};
-      });
+      if (actor.role === 'passenger' || !actor.operator_id || subscriptionFree(clock())) return { active: true };
+      const row = await db.transaction(tx => one(tx, 'SELECT operator_id FROM operator_subscriptions WHERE operator_id=$1 AND paid_until>$2', [actor.operator_id, clock()]));
+      return { active: !!row };
     },
-    async ownPlan(actor) {
-      const operatorId=await db.transaction(async tx=>{
-        const user=await activeIdentity(tx,actor.id);
-        invariant(user.role==='ops'||(user.role==='driver'&&user.operator_type==='independent'),
-          'FORBIDDEN','Un compte professionnel est requis.',403);
-        invariant(user.operator_id,'NOT_FOUND','Aucun opérateur associé à ce compte.',404);
-        const owner=await one(tx,'SELECT owner_user_id,admin_user_id FROM operators WHERE id=$1',[user.operator_id]);
-        invariant(owner && (owner.owner_user_id===user.id||owner.admin_user_id===user.id),
-          'FORBIDDEN','Seul le titulaire peut gérer l’abonnement.',403);
-        return user.operator_id;
+    async requestPayment() { invariant(false, 'VERIFIED_CHECKOUT_REQUIRED', 'Use the secure subscription checkout.', 409); },
+    async paymentRequests() { return []; },
+    async reviewPayment() { invariant(false, 'VERIFIED_PAYMENT_REQUIRED', 'A submitted reference cannot activate a subscription.', 409); },
+    async checkout(actor, input, key) {
+      idempotencyKey(key);
+      invariant(!subscriptionFree(clock()), 'FREE_PERIOD', 'Gratuit jusqu’au 30 avril 2027 inclus. Revenez dès le 1er mai pour payer.', 409);
+      invariant(input && Object.keys(input).length === 1 && input.paymentMethod === 'hosted', 'INVALID_METHOD', 'Choisissez le paiement sécurisé.', 400);
+      invariant(adapter, 'PAYMENT_UNAVAILABLE', 'Paiement indisponible.', 503);
+      const p = await db.transaction(async tx => {
+        const operator = await scope(tx, actor);
+        await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['subscription:' + operator.id]);
+        const selected = await one(tx, 'SELECT * FROM operator_subscriptions WHERE operator_id=$1', [operator.id]);
+        invariant(selected, 'INVALID_PLAN', 'Choisissez une formule et confirmez vos coordonnées.', 409);
+        const storedKey = 'subscription:' + operator.id + ':' + key;
+        const fingerprint = digest([selected.billing_period, selected.billing_contact]);
+        const prior = await one(tx, 'SELECT * FROM subscription_payments WHERE idempotency_key=$1', [storedKey]);
+        if (prior) { invariant(prior.request_fingerprint === fingerprint, 'IDEMPOTENCY_CONFLICT', 'Clé déjà utilisée.', 409); return prior; }
+        invariant(!await one(tx, "SELECT id FROM subscription_payments WHERE operator_id=$1 AND status='pending'", [operator.id]), 'PAYMENT_PENDING', 'Vérifiez le paiement existant.', 409);
+        return one(tx, `INSERT INTO subscription_payments(operator_id,billing_period,billing_contact,amount_minor,provider,idempotency_key,request_fingerprint,created_at)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`, [operator.id, selected.billing_period, selected.billing_contact, subscriptionPrice(operator.type, selected.billing_period), adapter.name, storedKey, fingerprint, clock()]);
       });
-      return this.plan({role:'ops',id:actor.id,operator_id:operatorId},operatorId);
+      if (p.provider_reference || p.status !== 'pending') return { id: p.id, status: p.status, checkoutUrl: p.checkout_url };
+      // One initiation attempt only. An uncertain result requires reconciliation, never a blind retry.
+      const claimed = await db.transaction(tx => one(tx, `UPDATE subscription_payments SET provider_metadata='{"initiating":true}' WHERE id=$1 AND provider_metadata='{}' RETURNING id`, [p.id]));
+      invariant(claimed, 'PAYMENT_PENDING', 'Initiation en attente de réconciliation manuelle.', 409);
+      const result = await adapter.initiate({ paymentId: p.id, amountMinor: p.amount_minor, currency: 'XOF', idempotencyKey: p.id });
+      const url = new URL(result.checkoutUrl);
+      invariant(url.protocol === 'https:' && !url.username && !url.password, 'PAYMENT_UNAVAILABLE', 'Lien invalide.', 503);
+      await db.transaction(tx => tx.query('UPDATE subscription_payments SET provider_reference=$2,provider_metadata=$3,checkout_url=$4 WHERE id=$1', [p.id, result.reference, JSON.stringify(result.metadata ?? {}), url.href]));
+      return { id: p.id, status: 'pending', checkoutUrl: url.href };
     },
-    async selectPeriod(actor,input) {
-      invariant(input && Object.keys(input).every(k=>k==='billingPeriod') && ['month','six_months','year'].includes(input.billingPeriod),
-        'INVALID_SUBSCRIPTION','Choisissez un paiement mensuel, semestriel ou annuel.');
-      await db.transaction(async tx=>{
-        const user=await activeIdentity(tx,actor.id);
-        invariant(user.role==='ops'||(user.role==='driver'&&user.operator_type==='independent'),
-          'FORBIDDEN','Un compte professionnel est requis.',403);
-        invariant(user.operator_id,'NOT_FOUND','Aucun opérateur associé à ce compte.',404);
-        const owner=await one(tx,'SELECT owner_user_id,admin_user_id,type FROM operators WHERE id=$1',[user.operator_id]);
-        invariant(owner && (owner.owner_user_id===user.id||owner.admin_user_id===user.id),
-          'FORBIDDEN','Seul le titulaire peut choisir la période.',403);
-        await tx.query(`INSERT INTO operator_plans(operator_id,plan,monthly_price_minor,billing_status,billing_period,trial_ends_at)
-          VALUES($1,'standard',$2,'not_billed',$3,'2027-04-30T23:00:00Z')
-          ON CONFLICT (operator_id) WHERE effective_to IS NULL DO UPDATE SET billing_period=EXCLUDED.billing_period,
-            monthly_price_minor=EXCLUDED.monthly_price_minor,selected_at=now()`,
-        [user.operator_id,owner.type==='company'?30000:10000,input.billingPeriod]);
-        await audit(tx,user.id,'operator.subscription_period_selected',user.operator_id,null,{billingPeriod:input.billingPeriod});
-      });
-      return this.ownPlan(actor);
+    async requireActive(actor) {
+      if (actor.role === 'passenger' || !actor.operator_id || subscriptionFree(clock())) return;
+      const active = await db.transaction(tx => one(tx, 'SELECT operator_id FROM operator_subscriptions WHERE operator_id=$1 AND paid_until>$2', [actor.operator_id, clock()]));
+      invariant(active, 'SUBSCRIPTION_REQUIRED', 'Renouvelez votre abonnement pour utiliser cette fonction professionnelle.', 402);
     },
-    async requestPayment(actor,input) {
-      invariant(input&&Object.keys(input).every(k=>['provider','reference'].includes(k))&&
-        ['fedapay','mtn_momo','moov_momo','bank_transfer','cash'].includes(input.provider)&&
-        typeof input.reference==='string'&&input.reference.trim().length>=2&&input.reference.length<=150,
-      'INVALID_SUBSCRIPTION_PAYMENT','Fournissez le moyen et la référence du paiement.');
-      return db.transaction(async tx=>{
-        const user=await activeIdentity(tx,actor.id);
-        invariant(user.role==='ops'||(user.role==='driver'&&user.operator_type==='independent'),
-          'FORBIDDEN','Un compte professionnel est requis.',403);
-        invariant(user.operator_id,'NOT_FOUND','Aucun opérateur associé à ce compte.',404);
-        const operator=await one(tx,'SELECT * FROM operators WHERE id=$1',[user.operator_id]);
-        invariant(operator&&(operator.owner_user_id===user.id||operator.admin_user_id===user.id),
-          'FORBIDDEN','Seul le titulaire peut soumettre un renouvellement.',403);
-        const plan=await one(tx,'SELECT billing_period FROM operator_plans WHERE operator_id=$1 AND effective_to IS NULL',[operator.id]);
-        const billingPeriod=plan?.billing_period??'month';
-        const months={month:1,six_months:6,year:12}[billingPeriod];
-        const amountMinor=(operator.type==='company'?30000:10000)*months;
-        await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`subscription-payment:${input.provider}:${input.reference.trim()}`]);
-        invariant(!await one(tx,'SELECT id FROM operator_subscription_payments WHERE provider=$1 AND reference=$2',[input.provider,input.reference.trim()]),
-          'DUPLICATE_PAYMENT_REFERENCE','Cette référence de paiement a déjà été soumise.',409);
-        const request=await one(tx,`INSERT INTO operator_subscription_payments(operator_id,requested_by,billing_period,amount_minor,provider,reference)
-          VALUES($1,$2,$3,$4,$5,$6) RETURNING id,operator_id,billing_period,amount_minor,provider,reference,status,created_at`,
-        [operator.id,user.id,billingPeriod,amountMinor,input.provider,input.reference.trim()]);
-        await audit(tx,user.id,'operator.subscription_payment_submitted',request.id,operator.id,{billingPeriod,amountMinor,provider:input.provider});
-        return request;
-      });
-    },
-    async paymentRequests(actor) {
-      requirePlatform(actor,'finance');
-      return db.transaction(async tx=>(await tx.query(`SELECT p.*,o.name AS operator_name,o.type AS operator_type,u.display_name AS requester_name
-        FROM operator_subscription_payments p JOIN operators o ON o.id=p.operator_id JOIN users u ON u.id=p.requested_by
-        WHERE p.status='pending' ORDER BY p.created_at`,[])).rows);
-    },
-    async reviewPayment(actor,id,decision) {
-      requirePlatform(actor,'finance');
-      invariant(['confirm','reject'].includes(decision),'INVALID_DECISION','Choisissez confirmer ou rejeter.');
-      return db.transaction(async tx=>{
-        const request=await one(tx,'SELECT * FROM operator_subscription_payments WHERE id=$1 FOR UPDATE',[uuid(id)]);
-        invariant(request,'NOT_FOUND','Demande de renouvellement introuvable.',404);
-        invariant(request.status==='pending','SUBSCRIPTION_PAYMENT_REVIEWED','Cette demande est déjà traitée.',409);
-        let paidThrough=null;
-        if(decision==='confirm'){
-          const plan=await one(tx,'SELECT trial_ends_at,paid_through FROM operator_plans WHERE operator_id=$1 AND effective_to IS NULL FOR UPDATE',[request.operator_id]);
-          invariant(plan,'SUBSCRIPTION_NOT_FOUND','Abonnement introuvable.',404);
-          const base=new Date(Math.max(Date.now(),new Date(plan.trial_ends_at).getTime(),plan.paid_through?new Date(plan.paid_through).getTime():0));
-          const months={month:1,six_months:6,year:12}[request.billing_period];
-          paidThrough=addMonthsUtc(base,months);
-          await tx.query(`UPDATE operator_plans SET billing_period=$2,paid_through=$3,last_payment_reference=$4,
-            billing_status='billing_pending',selected_at=now() WHERE operator_id=$1 AND effective_to IS NULL`,
-          [request.operator_id,request.billing_period,paidThrough,request.reference]);
-        }
-        const updated=await one(tx,`UPDATE operator_subscription_payments SET status=$2,reviewed_by=$3,reviewed_at=now(),paid_through=$4
-          WHERE id=$1 RETURNING *`,[request.id,decision==='confirm'?'confirmed':'rejected',actor.id,paidThrough]);
-        await audit(tx,actor.id,'operator.subscription_payment_'+updated.status,request.id,request.operator_id,{amountMinor:request.amount_minor,reference:request.reference,paidThrough});
-        return updated;
-      });
-    },
-    async plan(actor, operatorIdParam = null) {
-      invariant(actor?.role === 'ops', 'FORBIDDEN', 'Operations access required.', 403);
-      const requested = operatorIdParam ? uuid(operatorIdParam) : null;
-      // An operator admin may read their own plan only; a platform ops may
-      // name any operator explicitly.
-      if (actor.operator_id) invariant(!requested || requested === actor.operator_id, 'FORBIDDEN', 'Operation is not permitted.', 403);
-      const operatorId = actor.operator_id ?? requested;
-      invariant(operatorId, 'INVALID_INPUT', 'Operator is required.', 409);
-      return db.transaction(async tx => {
-        const operator = await one(tx, 'SELECT id,type,name FROM operators WHERE id=$1 AND active=true', [operatorId]);
-        invariant(operator, 'NOT_FOUND', 'Operator not found.', 404);
-        const plan = await one(tx, `SELECT plan,monthly_price_minor,billing_status,included_features,effective_from,
-            billing_period,trial_ends_at,paid_through,last_payment_reference
-          FROM operator_plans WHERE operator_id=$1 AND effective_to IS NULL`, [operatorId]);
-        const periodMonths={month:1,six_months:6,year:12};
-        const monthlyPriceMinor=operator.type==='company'?30000:10000;
-        const billingPeriod=plan?.billing_period ?? 'month';
-        const trialEndsAt=plan?.trial_ends_at ?? '2027-05-01T00:00:00.000Z';
-        const trialActive=Date.now()<new Date(trialEndsAt).getTime();
-        const paidActive=!!plan?.paid_through && Date.now()<new Date(plan.paid_through).getTime();
-        return { operatorId, operatorType: operator.type, operatorName:operator.name,
-          subscription: { active:trialActive||paidActive, trialActive, trialEndsAt,
-            billingPeriod, periodMonths:periodMonths[billingPeriod]??1,
-            priceMinor:monthlyPriceMinor*(periodMonths[billingPeriod]??1), monthlyPriceMinor,
-            billingStatus:trialActive?'trial':paidActive?'paid':'renewal_required',
-            renewalMode:'manual', paidThrough:plan?.paid_through??null,
-            lastPaymentReference:plan?.last_payment_reference??null,
-            plan:plan?.plan??'standard',includedFeatures:plan?.included_features??[] },
-          serviceFeeBp:200 };
-      });
+    async webhook(event) {
+      const exists = await db.transaction(tx => one(tx, 'SELECT id FROM subscription_payments WHERE id=$1', [event.paymentId]));
+      if (!exists) return null;
+      return reconcile(null, exists.id, true);
     },
   };
 }

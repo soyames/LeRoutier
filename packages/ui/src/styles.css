@@ -1258,3 +1258,9 @@ body[data-nav="public"] .assistant-launcher{bottom:calc(92px + max(16px,env(safe
      holds still. */
   .lr-loader-mark[data-visible]{animation:none;opacity:1;transform:none}
 }
+.subscription-cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.subscription-card { border-top: 4px solid var(--primary, #17644a); }
+.subscription-card h2 { margin: 0; font-size: 1.2rem; }
+.subscription-price strong { font-size: clamp(1.7rem, 4vw, 2.3rem); letter-spacing: -0.04em; }
+.subscription-price span { color: var(--muted, #586761); font-size: 0.9rem; }
+.subscription-card .btn { margin-top: auto; min-height: 48px; }

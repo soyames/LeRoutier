@@ -60,7 +60,8 @@ test('initiate creates a transaction with LeRoutier metadata and returns a check
 test('webhook signature verifies exactly per the official FedaPay scheme',async()=>{
   const raw=JSON.stringify(event('transaction.approved',{status:'approved',amount:2500,currency:{iso:'XOF'},reference:'T-REF-42',id:42,custom_metadata:{app:'leroutier',payment_id:'00000000-0000-4000-8000-000000000001'}}));
   assert.equal(verifyFedaPaySignature(raw,sign(raw),secret),true);
-  assert.throws(()=>verifyFedaPaySignature(raw,sign(raw,Math.floor(Date.now()/1000)-301),secret),/too old/);
+  assert.throws(()=>verifyFedaPaySignature(raw,sign(raw,Math.floor(Date.now()/1000)-301),secret),/time window/);
+  assert.throws(()=>verifyFedaPaySignature(raw,sign(raw,Math.floor(Date.now()/1000)+301),secret),/time window/);
   assert.throws(()=>verifyFedaPaySignature(raw,`t=${Math.floor(Date.now()/1000)},s=${'f'.repeat(64)}`,secret),/invalid/);
   assert.throws(()=>verifyFedaPaySignature(raw,sign(raw+' '),secret),/invalid/);
   assert.throws(()=>verifyFedaPaySignature(raw,sign(raw,undefined,'other-secret-32-chars-minimum!'),secret),/invalid/);

@@ -287,7 +287,7 @@ test('company and independent operators receive the published manual subscriptio
   assert.equal(companyPlan.serviceFeeBp,200);
   assert.equal(companyPlan.subscription.monthlyPriceMinor,30000);
   assert.equal(companyPlan.subscription.renewalMode,'manual');
-  const independent=await commerce.plan({id:demo.ops,role:'ops',operator_id:SECOND_OPERATOR},SECOND_OPERATOR);
+  const independent=await commerce.plan({id:demoId(41),role:'ops',operator_id:SECOND_OPERATOR});
   assert.equal(independent.operatorType,'independent');
   assert.equal(independent.subscription.monthlyPriceMinor,10000);
   assert.equal(independent.subscription.renewalMode,'manual');

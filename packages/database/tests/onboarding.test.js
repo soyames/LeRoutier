@@ -236,9 +236,9 @@ test('only independent owner-drivers can withdraw operator revenue',async()=>{
   // Platform approval executes through the provider abstraction; without an
   // adapter it fails closed and releases the reservation.
   await assert.rejects(settle.approve(platformOps,request.id),{code:'PAYOUT_UNAVAILABLE'});
-  assert.equal((await settle.summary(owner)).available,5000,'reservation released on failure');
+  assert.equal((await settle.summary(owner)).available,2000,'unavailable provider leaves a requested manual reconciliation');
   const status=await one('SELECT status FROM operator_payout_requests WHERE id=$1',[request.id]);
-  assert.equal(status.status,'failed');
+  assert.equal(status.status,'requested');
   // Unverified operators cannot withdraw at all.
   const unverified=await newUser('passenger');
   await onboard.startIndependent({id:unverified,role:'passenger'},independentDossier({displayName:'Non Vérifié',phone:'+229 61000003',licenseReference:'L-UV',vehicleRegistration:'IND-BUS-03'}),randomUUID());

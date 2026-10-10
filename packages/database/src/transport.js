@@ -53,12 +53,12 @@ export const holdsOpen = (service, bookings) =>
  * true of the balance, and false of what happened.
  *
  * @param {{query:(sql:string,params?:unknown[])=>Promise<{rows:any[]}>}} tx
- * @param {{id:string,amount_minor:number,group_id?:string|null}} booking
+ * @param {{id:string,amount_minor:number,group_id?:string|null,service_fee_minor?:number}} booking
  */
 export async function bookingMoney(tx, booking) {
   const sums = `SELECT
     coalesce(sum(amount_minor) FILTER (WHERE status IN ('succeeded','refunded')),0)::integer AS paid,
-    coalesce(sum(refunded_minor) FILTER (WHERE status='refunded'),0)::integer AS refunded`;
+    coalesce(sum(LEAST(refunded_minor,amount_minor)),0)::integer AS refunded`;
   const own = await one(tx, `${sums} FROM payments WHERE booking_id=$1`, [booking.id]);
   const group = booking.group_id
     ? await one(tx, `${sums} FROM payments WHERE group_id=$1`, [booking.group_id])

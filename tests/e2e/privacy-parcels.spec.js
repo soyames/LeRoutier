@@ -63,7 +63,7 @@ test('in-app notification centre and unread badge work end to end', async ({ pag
   await page.getByRole('button', { name: 'Connexion de développement' }).click();
   // On mobile, account actions live in Mon compte rather than under the
   // duplicated header icon. Notifications remain one tap away there.
-  await expect(page.locator('.lr-header .account-menu-wrap')).toBeHidden();
+  if(test.info().project.name==='mobile')await expect(page.locator('.lr-header .account-menu-wrap')).toBeHidden();
   await page.getByRole('button', { name: 'Mes notifications' }).click();
   await expect(page.getByRole('heading', { name: /Notifications/ })).toBeVisible();
 });

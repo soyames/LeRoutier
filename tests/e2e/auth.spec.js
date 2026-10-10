@@ -31,7 +31,7 @@ async function isolateProvider(page) {
 /** Reach the passenger account using the navigation available at this width. */
 async function openPassengerProfile(page) {
   if ((page.viewportSize()?.width ?? 1280) < 900) {
-    await openPassengerProfile(page);
+    await page.getByRole('navigation', { name: 'Navigation voyageur' }).getByRole('link', { name: 'Profil' }).click();
   } else {
     await page.getByRole('button', { name: /^Compte de/ }).click();
     await page.getByRole('menuitem', { name: 'Mon profil' }).click();
@@ -165,7 +165,11 @@ test('a passenger completes their profile and signs out leaving nothing behind',
   await page.getByLabel('Nom complet').fill('Voyageur Test');
   await page.getByLabel('Téléphone', { exact: true }).fill('');
   await page.getByRole('button', { name: 'Enregistrer mon profil' }).click();
-  await expect(page.getByRole('button', { name: /^Compte de Voyageur Test$/ })).toBeVisible();
+  if ((page.viewportSize()?.width ?? 1280) < 900) {
+    await expect(page.getByRole('main').getByText('Voyageur Test', { exact: true })).toBeVisible();
+  } else {
+    await expect(page.getByRole('button', { name: /^Compte de Voyageur Test$/ })).toBeVisible();
+  }
 
   // With a completed profile the account buys as itself, and the checkout asks
   // it for nothing at all. The search is run from the home page rather than a

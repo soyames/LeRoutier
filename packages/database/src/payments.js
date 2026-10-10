@@ -41,7 +41,7 @@ export function payments(db,adapter=null){
     return {group:null,service,bookings:[booking]};
   }
   async function apply(event){
-    invariant(event && Object.keys(event).every(k=>['paymentId','eventId','reference','amountMinor','currency','status'].includes(k)),'INVALID_PAYMENT_EVENT','Invalid payment event.');
+    invariant(event && Object.keys(event).every(k=>['paymentId','eventId','reference','amountMinor','currency','status','refundedMinor','operatorRefundedMinor','providerFeeMinor','refundReview'].includes(k)),'INVALID_PAYMENT_EVENT','Invalid payment event.');
     uuid(event.paymentId);
     invariant(typeof event.eventId==='string' && event.eventId.length>0 && event.eventId.length<=150 && typeof event.reference==='string' && event.reference.length>0 && event.reference.length<=150 &&
       Number.isInteger(event.amountMinor) && event.currency==='XOF' && ['pending','succeeded','failed','cancelled','refunded'].includes(event.status),'INVALID_PAYMENT_EVENT','Invalid payment event.');
@@ -58,15 +58,19 @@ export function payments(db,adapter=null){
       invariant(!await one(tx,'SELECT id FROM payments WHERE provider=$1 AND provider_reference=$2 AND id<>$3',[p.provider,event.reference,p.id]),'DUPLICATE_REFERENCE','Provider reference already belongs to another payment.',409);
       const allowed={pending:['pending','succeeded','failed','cancelled'],succeeded:['succeeded','refunded'],failed:['failed'],cancelled:['cancelled'],refunded:['refunded']};
       invariant(allowed[p.status].includes(event.status),'PAYMENT_TRANSITION','Payment event conflicts with its current state.',409);
-      // FedaPay supports partial refunds from its merchant dashboard, but not
-      // through the collection API. Under the published LeRoutier policy, a
-      // `refunded` provider event accounts for the operator fare only; the
-      // 2% service fee remains retained. Legacy payments have no service fee
-      // and therefore use their original amount. The provider transaction
-      // itself remains reconciled by its signed event.
-      const refundedMinor=event.status==='refunded'?Math.min(p.amount_minor,p.fare_minor||p.amount_minor):p.refunded_minor||0;
-      await tx.query('UPDATE payments SET provider_reference=$2,status=$3,refunded_minor=$4,updated_at=now() WHERE id=$1',
-        [p.id,event.reference,event.status,refundedMinor]);
+      const refundedMinor=event.refundedMinor ?? (event.status==='refunded'?p.amount_minor:p.refunded_minor);
+      const operatorRefundedMinor=event.operatorRefundedMinor ?? (event.status==='refunded'?(p.fare_minor||p.amount_minor):p.operator_refunded_minor);
+      invariant(Number.isInteger(refundedMinor)&&refundedMinor>=p.refunded_minor&&refundedMinor<=p.amount_minor+(event.providerFeeMinor??p.provider_fee_minor),'REFUND_MISMATCH','Invalid confirmed refund amount.',409);
+      invariant(Number.isInteger(operatorRefundedMinor)&&operatorRefundedMinor>=p.operator_refunded_minor&&operatorRefundedMinor<=(p.fare_minor||p.amount_minor)&&operatorRefundedMinor<=refundedMinor,'REFUND_MISMATCH','Invalid operator fare refund allocation.',409);
+      if(event.providerFeeMinor!==undefined){
+        invariant(Number.isInteger(event.providerFeeMinor)&&event.providerFeeMinor>=0,'PAYMENT_MISMATCH','Invalid provider fee.',409);
+        await tx.query('UPDATE payments SET provider_fee_minor=$2 WHERE id=$1',[p.id,event.providerFeeMinor]);
+      }
+      await tx.query('UPDATE payments SET provider_reference=$2,status=$3,refunded_minor=$4,operator_refunded_minor=$5,updated_at=now() WHERE id=$1',
+        [p.id,event.reference,event.status,refundedMinor,operatorRefundedMinor]);
+      if(operatorRefundedMinor>p.operator_refunded_minor&&!service.is_demo) await tx.query(`INSERT INTO operator_settlement_reversals(operator_id,payment_id,amount_minor)
+        VALUES($1,$2,$3) ON CONFLICT(payment_id) DO UPDATE SET amount_minor=$3,state=CASE WHEN operator_settlement_reversals.state='settled' THEN 'open' ELSE operator_settlement_reversals.state END`,
+        [service.operator_id,p.id,operatorRefundedMinor]);
       let reconciliation=event.status==='pending'?'pending':'applied';
       // The ONE place a payment confirms anything. The fan-out for a purchase
       // lives inside this guard and never beside it.
@@ -131,21 +135,9 @@ export function payments(db,adapter=null){
           if(['held','confirmed'].includes(seat.status))await transport(nested(tx)).transition({id:seat.passenger_id,role:'passenger'},seat.id,'cancel');
           else if(seat.status==='boarded')reconciliation='review';
         }
-        if(p.status!=='refunded'&&!service.is_demo){
-          const credit=await one(tx,`SELECT id,payout_state,payout_request_id FROM operator_settlements
-            WHERE operator_id=$1 AND source='ticket_online' AND reference=$2 FOR UPDATE`,
-          [service.operator_id,'payment:'+p.id]);
-          if(credit){
-            await tx.query("UPDATE operator_settlements SET payout_state='reversed' WHERE id=$1",[credit.id]);
-            if(['reserved','paid'].includes(credit.payout_state)){
-              await tx.query(`INSERT INTO operator_settlement_reversals(operator_id,payment_id,amount_minor,state,payout_request_id)
-                VALUES($1,$2,$3,$4,$5) ON CONFLICT(payment_id) DO NOTHING`,
-              [service.operator_id,p.id,refundedMinor,credit.payout_state==='reserved'?'allocated':'open',credit.payout_state==='reserved'?credit.payout_request_id:null]);
-            }
-          }
-        }
       }
       if(event.status===p.status)reconciliation=p.reconciliation;
+      if(event.refundReview===true || (refundedMinor>p.refunded_minor && event.status!=='refunded' && event.operatorRefundedMinor===undefined))reconciliation='review';
       await tx.query('UPDATE payments SET reconciliation=$2 WHERE id=$1',[p.id,reconciliation]);
       await tx.query('INSERT INTO payment_events(provider,event_id,payment_id,fingerprint,status) VALUES($1,$2,$3,$4,$5)',[p.provider,event.eventId,p.id,hash,event.status]);
       await audit(tx,null,'payment.'+event.status,p.id,null,{bookingId:b.id,groupId:group?.id??null});
@@ -251,14 +243,14 @@ export function payments(db,adapter=null){
       invariant(adapter && name===adapter.name,'PAYMENT_UNAVAILABLE','Payment integration is unavailable.',503);
       const event=await adapter.verifyEvent(raw,headers);
       if(!event || event.kind!=='payment')return {ignored:true};
-      const {paymentId,eventId,reference,amountMinor,currency,status}=event;
-      return apply({paymentId,eventId,reference,amountMinor,currency,status});
+      const {paymentId,eventId,reference,amountMinor,currency,status,refundedMinor,operatorRefundedMinor,providerFeeMinor,refundReview}=event;
+      return apply({paymentId,eventId,reference,amountMinor,currency,status,refundedMinor,operatorRefundedMinor,providerFeeMinor,refundReview});
     },
     // Apply an already-verified collection event (shared webhook route).
     applyEvent(event){
       invariant(event?.kind==='payment','INVALID_PAYMENT_EVENT','Not a payment event.');
-      const {paymentId,eventId,reference,amountMinor,currency,status}=event;
-      return apply({paymentId,eventId,reference,amountMinor,currency,status});
+      const {paymentId,eventId,reference,amountMinor,currency,status,refundedMinor,operatorRefundedMinor,providerFeeMinor,refundReview}=event;
+      return apply({paymentId,eventId,reference,amountMinor,currency,status,refundedMinor,operatorRefundedMinor,providerFeeMinor,refundReview});
     },
     async reconcile(actor,id){
       uuid(id);const p=await db.transaction(tx=>one(tx,'SELECT * FROM payments WHERE id=$1',[id]));invariant(p,'NOT_FOUND','Payment not found.',404);
@@ -269,8 +261,8 @@ export function payments(db,adapter=null){
       invariant(adapter && p.provider===adapter.name,'PAYMENT_UNAVAILABLE','Payment integration is unavailable.',503);
       const event=await adapter.reconcilePayment(p);
       if(!event)return {ignored:true};
-      const {paymentId,eventId,reference,amountMinor,currency,status}=event;
-      return apply({paymentId,eventId,reference,amountMinor,currency,status});
+      const {paymentId,eventId,reference,amountMinor,currency,status,refundedMinor,operatorRefundedMinor,providerFeeMinor,refundReview}=event;
+      return apply({paymentId,eventId,reference,amountMinor,currency,status,refundedMinor,operatorRefundedMinor,providerFeeMinor,refundReview});
     },
     async manual(actor,id,input,key){return db.transaction(async tx=>{
       const d=transport(nested(tx)),p=await d.recordPayment(actor,id,input,key);

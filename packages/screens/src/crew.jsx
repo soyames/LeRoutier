@@ -1,3 +1,4 @@
+import { OperatorSubscription, OperatorCashReconciliation } from './subscriptions.jsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useApi, useSession, IDENTITY_ERROR_CODES } from '@leroutier/config/client';
@@ -233,14 +234,14 @@ export function Today(){
 
   if(!user) return <><SectionTitle title="Aujourd’hui"/><Card className="stack"><strong>Connectez-vous</strong>
     <p className="small muted">Votre service du jour s’affiche ici.</p></Card></>;
-  if(service.loading) return <><VerificationBanner/><SectionTitle title="Aujourd’hui"/><SkeletonCards count={2} lines={4}/></>;
-  if(service.error) return <><VerificationBanner/><SectionTitle title="Aujourd’hui"/>
+  if(service.loading) return <><OperatorSubscription/><VerificationBanner/><SectionTitle title="Aujourd’hui"/><SkeletonCards count={2} lines={4}/></>;
+  if(service.error) return <><OperatorSubscription/><VerificationBanner/><SectionTitle title="Aujourd’hui"/>
     {/* An identity problem is the user's to act on, so it is stated plainly;
         anything else is a transient failure they can simply retry. */}
     <ErrorState title={IDENTITY_ERROR_CODES.includes(service.code)?'Accès impossible':'Chargement impossible'}
       text={IDENTITY_ERROR_CODES.includes(service.code)?service.error:'Impossible de charger votre service.'}
       onRetry={IDENTITY_ERROR_CODES.includes(service.code)?undefined:service.reload}/></>;
-  if(!s) return <><VerificationBanner/><SectionTitle title="Aujourd’hui"/>
+  if(!s) return <><OperatorSubscription/><VerificationBanner/><SectionTitle title="Aujourd’hui"/>
     <Card className="stack"><strong>Aucun service aujourd’hui</strong>
       <p className="small muted">Aucun départ ne vous est affecté. Prévenez votre exploitation si cela vous semble anormal.</p></Card></>;
 
@@ -645,18 +646,20 @@ function PayoutCapability({capability}){
     missing_credentials:'Les retraits ne sont pas encore ouverts sur LeRoutier. Votre solde reste acquis et vous sera versé dès l’ouverture.',
     provider_not_activated:'Les virements sont momentanément indisponibles chez notre prestataire. Votre solde est intact ; LeRoutier règle le problème et vous pourrez retirer ensuite.',
     configured:'Aucun virement n’a encore été effectué depuis cette plateforme. Votre demande sera traitée manuellement par LeRoutier lors de ce premier retrait.',
+    unproven:'Les versements du prestataire ne sont pas vérifiés pour ce compte. Contactez la régulation pour un rapprochement et un règlement manuel.',
+    unavailable:'Les versements du prestataire sont indisponibles. Contactez la régulation pour un rapprochement et un règlement manuel.',
   };
   return <p className="small" role="status">{copy[capability.state]||copy.missing_provider}</p>;
 }
 
 function MonthlyPayoutSettings({schedule,enabled,setEnabled,phone,setPhone,busy,online,onSave}){
   return <Card className="stack">
-    <SectionTitle title="Versement mensuel automatique"/>
-    <p className="small muted">Le 1er de chaque mois, LeRoutier enverra sur ce numéro le solde disponible des billets payés en ligne pendant les mois précédents. Les ventes en espèces sont déjà encaissées par l’opérateur et ne seront pas versées une seconde fois. Les remboursements du tarif transporteur sont compensés sur les versements suivants; les frais de service restent acquis, sous réserve de la loi.</p>
+    <SectionTitle title="Règlement mensuel des recettes en ligne"/>
+    <p className="small muted">Le règlement couvre le mois précédent, heure du Bénin, après compensation du tarif transporteur effectivement remboursé. Les espèces sont déjà encaissées par l’opérateur. Tant que les versements du prestataire ne sont pas vérifiés, la régulation prépare un rapprochement et un règlement manuel.</p>
     {!schedule?.available&&<p className="small" role="status">Les virements automatiques ne sont pas ouverts sur le compte du prestataire pour le moment.</p>}
-    <label className="row"><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)} disabled={!schedule?.available&&!(schedule?.enabled&&!enabled)}/><span>J’autorise le versement automatique mensuel sur ce numéro.</span></label>
-    <label>Numéro Mobile Money<input className="control" type="tel" inputMode="numeric" value={phone} onChange={e=>setPhone(e.target.value.replace(/[^0-9]/g,''))} disabled={!schedule?.available}/></label>
-    <button className="btn btn-soft" disabled={busy||!online||(!schedule?.available&&!(schedule?.enabled&&!enabled))||!/^[0-9]{8,15}$/.test(phone)} onClick={onSave}>Enregistrer mon choix</button>
+    <label className="row"><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)}/><span>J’accepte le règlement mensuel sur ce numéro. Je peux retirer ce consentement.</span></label>
+    <label>Numéro Mobile Money<input className="control" type="tel" inputMode="numeric" value={phone} onChange={e=>setPhone(e.target.value.replace(/[^0-9]/g,''))}/></label>
+    <button className="btn btn-soft" disabled={busy||!online||!/^[0-9]{8,15}$/.test(phone)} onClick={onSave}>Enregistrer mon choix</button>
     {schedule?.consentedAt&&<p className="small muted">Choix enregistré le {new Date(schedule.consentedAt).toLocaleDateString('fr-FR')}.</p>}
   </Card>;
 }
@@ -668,16 +671,19 @@ export function Earnings(){
   const companyManager=user?.operator_type==='company'&&user?.role==='ops'&&!!user?.operator_id;
   const providerManager=independent||companyManager;
   const operatorData=useApi(providerManager?'/operator/settlements':null),operatorPayouts=useApi(providerManager?'/operator/payouts':null),payoutSchedule=useApi(providerManager?'/operator/payout-schedule':null);
-  const payments=useApi(providerManager?'/payments/config':null);
+  const payments=useApi(providerManager?'/operator/payout-capability':null);
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const [amount,setAmount]=useState(''),[destinationId,setDestinationId]=useState('');
   const [phone,setPhone]=useState(''),[country,setCountry]=useState('BJ'),[network,setNetwork]=useState('');
   const [opAmount,setOpAmount]=useState(''),[opPhone,setOpPhone]=useState(user?.phone||'');
-  const [monthlyEnabled,setMonthlyEnabled]=useState(false),[monthlyPhone,setMonthlyPhone]=useState(user?.phone||'');
-  useEffect(()=>{if(payoutSchedule.data){setMonthlyEnabled(payoutSchedule.data.enabled);if(payoutSchedule.data.phoneNumber)setMonthlyPhone(payoutSchedule.data.phoneNumber);}},[payoutSchedule.data]);
+  const [monthlyChoice,setMonthlyChoice]=useState(null);
+  const monthlyEnabled=monthlyChoice?.enabled ?? payoutSchedule.data?.enabled ?? false;
+  const monthlyPhone=monthlyChoice?.phone ?? payoutSchedule.data?.phoneNumber ?? user?.phone ?? '';
+  const setMonthlyEnabled=enabled=>setMonthlyChoice(choice=>({...choice,enabled}));
+  const setMonthlyPhone=phone=>setMonthlyChoice(choice=>({...choice,phone}));
   const summary=data.data?.summary || {available:0,reserved:0,paid:0,reversed:0};
   async function act(path,body,key){setBusy(true);setError('');setNotice('');try{await request(path,{method:'POST',body,key});payouts.reload();destinations.reload();data.reload();operatorData.reload?.();operatorPayouts.reload?.();setNotice('Action enregistrée.');}catch(e){setError(e.message);}finally{setBusy(false);}}
-  async function saveMonthlyPayout(){setBusy(true);setError('');setNotice('');try{await request('/operator/payout-schedule',{method:'POST',body:{enabled:monthlyEnabled,phoneNumber:monthlyPhone,country:'BJ',network:null}});payoutSchedule.reload();setNotice(monthlyEnabled?'Versement mensuel automatique activé.':'Versement mensuel automatique désactivé.');}catch(e){setError(e.message);}finally{setBusy(false);}}
+  async function saveMonthlyPayout(){setBusy(true);setError('');setNotice('');try{await request('/operator/payout-schedule',{method:'POST',body:{enabled:monthlyEnabled,phoneNumber:monthlyPhone,country:'BJ',network:null,consentVersion:'monthly-v1'}});payoutSchedule.reload();setNotice(monthlyEnabled?'Consentement au règlement mensuel enregistré.':'Règlement mensuel désactivé.');}catch(e){setError(e.message);}finally{setBusy(false);}}
   if(!user) return <Card className="stack"><strong>Connectez-vous</strong>
     <p className="small muted">Vos recettes s’affichent ici.</p></Card>;
   // Company crew are paid by their employer: no ledger and no withdrawal
@@ -696,7 +702,7 @@ export function Earnings(){
         </div>
         <Card className="stack"><SectionTitle title="Recettes confirmées par mois"/>
           <p className="small muted">Les montants ci-dessous correspondent aux tarifs transporteur confirmés; les frais de service LeRoutier sont comptabilisés séparément et ne sont pas déduits de votre tarif. Les frais réels des prestataires seront indiqués uniquement lorsqu’ils sont transmis par ceux-ci.</p>
-          {Array.from(operatorData.data.entries.reduce((map,e)=>{const month=new Date(e.earned_at).toLocaleDateString('fr-FR',{month:'long',year:'numeric'});const row=map.get(month)||{month,fare:0,direct:0,count:0};if(e.payout_state!=='reversed'){row.fare+=e.gross_minor;row.count++;if(e.payout_state==='direct')row.direct+=e.gross_minor;}map.set(month,row);return map;},new Map()).values()).slice(0,12).map(m=><div className="row" key={m.month}><span>{m.month} · {m.count} vente(s){m.direct?` · espèces déjà encaissées ${fcfa(m.direct)}`:''}</span><strong>{fcfa(m.fare)}</strong></div>)}
+          {Array.from(operatorData.data.entries.reduce((map,e)=>{const month=new Date(e.earned_at).toLocaleDateString('fr-FR',{month:'long',year:'numeric',timeZone:'Africa/Porto-Novo'});const row=map.get(month)||{month,fare:0,direct:0,count:0};if(e.payout_state!=='reversed'){row.fare+=e.gross_minor;row.count++;if(e.payout_state==='direct')row.direct+=e.gross_minor;}map.set(month,row);return map;},new Map()).values()).slice(0,12).map(m=><div className="row" key={m.month}><span>{m.month} · {m.count} vente(s){m.direct?` · espèces déjà encaissées ${fcfa(m.direct)}`:''}</span><strong>{fcfa(m.fare)}</strong></div>)}
           {!operatorData.data.entries.length&&<p className="small muted">Aucune recette confirmée pour le moment.</p>}
         </Card>
         <Card className="stack"><SectionTitle title="Dernières ventes et règlements"/>
@@ -706,8 +712,8 @@ export function Earnings(){
         <Card className="stack"><SectionTitle title="Demander le règlement du solde disponible"/>
           <label>Numéro de réception Mobile Money<input className="control" type="tel" inputMode="numeric" value={opPhone} onChange={e=>setOpPhone(e.target.value.replace(/[^0-9]/g,''))}/></label>
           <label>Montant (FCFA)<input className="control" type="number" min={1} step={1} value={opAmount} onChange={e=>setOpAmount(e.target.value)} placeholder={String(operatorData.data.summary.available)}/></label>
-          <button className="btn btn-primary" disabled={busy||!online||payments.data?.payouts?.canRequest===false||operatorData.data.summary.verificationStatus!=='verified'||!Number.isInteger(Number(opAmount))||Number(opAmount)<=0||Number(opAmount)>operatorData.data.summary.available||!/^[0-9]{8,15}$/.test(opPhone)} onClick={()=>act('/operator/payouts',{amountMinor:Number(opAmount),phoneNumber:opPhone,country:'BJ',network:null},'company-payout-'+crypto.randomUUID())}>Demander le versement</button>
-          <p className="small muted">Les retraits manuels attendent l’approbation des opérations. Le versement mensuel automatique porte sur les tarifs de billets payés en ligne. Les ventes en espèces sont indiquées séparément, car la compagnie les a déjà encaissées.</p>
+          <button className="btn btn-primary" disabled={busy||!online||payments.data?.canRequest!==true||operatorData.data.summary.verificationStatus!=='verified'||!Number.isInteger(Number(opAmount))||Number(opAmount)<=0||Number(opAmount)>operatorData.data.summary.available||!/^[0-9]{8,15}$/.test(opPhone)} onClick={()=>act('/operator/payouts',{amountMinor:Number(opAmount),phoneNumber:opPhone,country:'BJ',network:null},'company-payout-'+crypto.randomUUID())}>Demander le versement</button>
+          <p className="small muted">Les retraits manuels attendent l’approbation des opérations. Le règlement mensuel porte sur les recettes payées en ligne. Les ventes en espèces sont indiquées séparément, car la compagnie les a déjà encaissées.</p>
           {(operatorPayouts.data||[]).map(p=><div className="between" key={p.id}><span className="small">{fcfa(p.amountMinor)} · {p.phoneNumber}</span><Badge tone={status('payout',p.status).tone}>{status('payout',p.status).label}</Badge></div>)}
         </Card>
       </>}
@@ -738,13 +744,13 @@ export function Earnings(){
           withdrawal button shown on the strength of an environment variable
           takes a driver's request, reserves their balance, and fails at a
           provider that never activated transfers for this account. */}
-      <PayoutCapability capability={payments.data?.payouts}/>
+      <PayoutCapability capability={payments.data}/>
       <MonthlyPayoutSettings schedule={payoutSchedule.data} enabled={monthlyEnabled} setEnabled={setMonthlyEnabled} phone={monthlyPhone} setPhone={setMonthlyPhone} busy={busy} online={online} onSave={saveMonthlyPayout}/>
-      {!!operatorData.data.summary.outstandingReversals&&<p className="small" role="status">Les retraits manuels restent bloqués tant que {fcfa(operatorData.data.summary.outstandingReversals)} de tarif remboursé n’a pas été compensé. Les frais de service conservés ne sont pas déduits de vos recettes.</p>}
+      {!!operatorData.data.summary.outstandingReversals&&<p className="small" role="status">Les retraits manuels restent bloqués tant que {fcfa(operatorData.data.summary.outstandingReversals)} de tarif transporteur effectivement remboursé n’a pas été compensé. Les frais LeRoutier et du prestataire restent distincts du tarif transporteur.</p>}
       <div className="between wrap">
         <label className="grow">Montant du retrait (FCFA)<input className="control" type="number" min={1} step={1} value={opAmount} onChange={e=>setOpAmount(e.target.value)}/></label>
         <label className="grow">Numéro Mobile Money<input className="control" type="tel" inputMode="numeric" value={opPhone} onChange={e=>setOpPhone(e.target.value.replace(/[^0-9]/g,''))}/></label>
-        <button className="btn btn-primary" disabled={busy || !online || payments.data?.payouts?.canRequest===false || operatorData.data.summary.verificationStatus!=='verified' || !Number.isInteger(Number(opAmount)) || Number(opAmount)<=0 || !/^[0-9]{8,15}$/.test(opPhone)} onClick={()=>act('/operator/payouts',{amountMinor:Number(opAmount),phoneNumber:opPhone,country:'BJ',network:null},'oppayout-'+crypto.randomUUID())}>Demander le retrait</button>
+        <button className="btn btn-primary" disabled={busy || !online || payments.data?.canRequest!==true || operatorData.data.summary.verificationStatus!=='verified' || !Number.isInteger(Number(opAmount)) || Number(opAmount)<=0 || !/^[0-9]{8,15}$/.test(opPhone)} onClick={()=>act('/operator/payouts',{amountMinor:Number(opAmount),phoneNumber:opPhone,country:'BJ',network:null},'oppayout-'+crypto.randomUUID())}>Demander le retrait</button>
       </div>
       {(operatorPayouts.data||[]).map(p=><div className="between" key={p.id}><span className="small">{fcfa(p.amountMinor)} · {p.phoneNumber}</span><Badge tone={status('payout',p.status).tone}>{status('payout',p.status).label}</Badge></div>)}
     </Card>}
@@ -781,7 +787,7 @@ export function Earnings(){
 
 export function Profile(){
   const {user}=useSession(),service=useApi(user?'/driver/service':null);
-  return <><VerificationBanner/>
+  return <><OperatorSubscription/><OperatorCashReconciliation/><VerificationBanner/>
     <Card className="stack"><h2>{user?.display_name || 'Profil'}</h2><span className="small muted">{user?.role==='convoyeur'?'Compte convoyeur':'Compte conducteur'}{user?.operator_type==='independent'?' · indépendant':''}</span></Card>
     <Card className="stack"><SectionTitle icon={BusFront} title="Affectation véhicule"/>{service.data?<><h3>{service.data.registration}</h3><p>{service.data.route_name}</p><Badge>{service.data.capacity} places</Badge></>:<ApiState resource={service} empty="Aucune affectation disponible."/>}</Card>
     <Card className="stack"><SectionTitle icon={Navigation} title="Ma position sur le réseau"/><p className="small muted">Partagez votre position depuis l’écran Aujourd’hui pendant le service : elle alimente le suivi des passagers.</p></Card>

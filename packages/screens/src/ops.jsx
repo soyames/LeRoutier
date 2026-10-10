@@ -1,3 +1,4 @@
+import { OperatorSubscription, OperatorCashReconciliation } from './subscriptions.jsx';
 import { Suspense, lazy, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
@@ -84,6 +85,7 @@ export function Today(){
         <p>Erreurs récentes : {health.data.signals.reduce((sum,s)=>sum+s.count,0)}. Alertes consultables ici ; aucun envoi externe configuré.</p>
       </> : <p>Contrôle en cours…</p>}
     </Card>}
+    <OperatorSubscription/>
     <SectionTitle icon={Home} title="Aujourd’hui"/>
     <Card className="stack"><span className="eyebrow">{configured?'Centre opérationnel':'Compte en attente de vérification'}</span>
       <h1>{platform?'Vue de la plateforme':user?.operator_type==='independent'?'Votre activité indépendante':user?.operator_name || 'Votre compagnie'}</h1>
@@ -475,5 +477,5 @@ export function Alerts(){
 }
 
 export function Settings(){
-  return <Provisioning/>;
+  return <div className="stack"><OperatorSubscription/><OperatorCashReconciliation/><Provisioning/></div>;
 }

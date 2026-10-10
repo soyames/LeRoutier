@@ -78,7 +78,8 @@ test('the fare per passenger and the total for the party are both shown before p
   await expect(page.getByText('7 500 FCFA par voyageur')).toBeVisible();
   await expect(page.getByText('7 500 FCFA').last()).toBeVisible();
   await page.getByRole('button', { name: '3 billets' }).click();
-  await expect(page.getByText('22 500 FCFA')).toBeVisible();
+  await expect(page.getByLabel('Détail du prix').getByText('22 500 FCFA')).toBeVisible();
+  await expect(page.getByLabel('Détail du prix').getByText('22 950 FCFA')).toBeVisible();
   await expect(page.getByText('× 3 voyageurs')).toBeVisible();
   await page.getByRole('button', { name: '1 billet' }).click();
   await expect(page.getByText('× 3 voyageurs')).toHaveCount(0);
@@ -103,7 +104,8 @@ test('ten tickets is the ceiling, and a party of ten buys and boards like any ot
   // Ten is the most one purchase covers, and the quick chips stop at three: the
   // rest is a number, clamped at the ceiling rather than refused after the fact.
   await page.getByLabel('Autre nombre de billets').fill('10');
-  await expect(page.getByText('75 000 FCFA')).toBeVisible();
+  await expect(page.getByLabel('Détail du prix').getByText('75 000 FCFA')).toBeVisible();
+  await expect(page.getByLabel('Détail du prix').getByText('76 500 FCFA')).toBeVisible();
   await page.getByLabel('Autre nombre de billets').fill('11');
   await expect(page.getByLabel('Autre nombre de billets')).toHaveValue('10');
   await page.getByRole('button', { name: /Payer 10 billets/ }).click();
@@ -126,7 +128,8 @@ test('a guest buys two tickets and lands on them, still signed out', async ({ pa
   await page.getByLabel('Nom et prénom du voyageur principal').fill('Awa Sossou');
   await page.getByLabel('Numéro de téléphone').fill('97000042');
   await page.getByRole('button', { name: '2 billets' }).click();
-  await expect(page.getByText('15 000 FCFA')).toBeVisible();
+  await expect(page.getByLabel('Détail du prix').getByText('15 000 FCFA')).toBeVisible();
+  await expect(page.getByLabel('Détail du prix').getByText('15 300 FCFA')).toBeVisible();
   await page.getByRole('button', { name: /Payer 2 billets/ }).click();
   await expect(page).toHaveURL(/\/tickets\//, { timeout: 15000 });
   // The party arrived, on a device holding no account at all: two ticket cards,

@@ -66,7 +66,7 @@ test('anonymous trip search works and never offers cash', async ({ page }) => {
   // Results, fares and the TEST offer are all visible without an account.
   await expect(page.getByText('Opérateur démo')).toBeVisible();
   await expect(page.getByText('TEST Chauffeur 01')).toBeVisible();
-  await expect(page.getByText('7 500 FCFA').first()).toBeVisible();
+  await expect(page.getByText(/7\s650\sFCFA/).first()).toBeVisible();
   await expect(page.getByText('2 trajets disponibles')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Choisir' }).first()).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Voir le trajet' }).first()).toBeEnabled();

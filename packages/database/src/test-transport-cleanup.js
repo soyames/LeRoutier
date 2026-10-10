@@ -8,7 +8,7 @@ const serviceIds = ids([60,61,62,63,64,65]);
 
 // Everything that points at a booking, deleted before the bookings are.
 const BOOKING_CHILDREN = ['ticket_credentials','boarding_events','alighting_events',
-  'booking_passengers','mobility_handoff_events'];
+  'booking_passengers','mobility_handoff_events','operator_cash_fees'];
 // Everything that points at a service. `recovery_assignments` precedes
 // `incidents` because it points at those too.
 //
@@ -66,6 +66,9 @@ export async function cleanupTestServices(tx) {
   const paid = `SELECT id FROM payments WHERE booking_id IN (${bookings})
     OR group_id IN (SELECT id FROM booking_groups WHERE service_id=ANY($1::uuid[]))`;
   await tx.query(`DELETE FROM payment_events WHERE payment_id IN (${paid})`, [services]);
+  await tx.query(`DELETE FROM operator_cash_fee_collections WHERE cash_fee_id IN (SELECT id FROM operator_cash_fees WHERE booking_id IN (${bookings}))`, [services]);
+  await tx.query(`DELETE FROM operator_reversal_allocations WHERE reversal_id IN (SELECT id FROM operator_settlement_reversals WHERE payment_id IN (${paid}))`, [services]);
+  await tx.query(`DELETE FROM operator_settlement_reversals WHERE payment_id IN (${paid})`, [services]);
   for (const table of BOOKING_CHILDREN) {
     await tx.query(`DELETE FROM ${table} WHERE booking_id IN (${bookings})`, [services]);
   }

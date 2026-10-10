@@ -94,7 +94,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
   const health=operationalHealth(db,{routing:{configured:Boolean(config.routing?.url),provider:config.routing?.provider??null,timeoutMs:config.routing?.timeoutMs??null}});
   const secondFactor=totpService(db);
   const fares=fareIntelligence(db);
-  const commerce=commercial(db);
+  const commerce=commercial(db,adapter,config.subscriptionClock ?? (() => new Date()));
   const domain=transport(db), auth=authentication(db,config,keyResolver),provision=provisioning(db,config);
   const pay=payments(db,adapter),ticket=tickets(db),rating=ratings(db);
   const cover=insurance(db),coverAdmin=insuranceAdmin(db);
@@ -159,6 +159,8 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
       '/bookings': ['POST'], '/operator/settlements': ['GET'], '/operator/payouts': ['GET', 'POST'],
       '/operator/payout-schedule':['GET','POST'],
       '/operator/subscription': ['GET','POST'],
+      '/operator/subscription/checkout':['POST'], '/operator/payout-capability':['GET'],
+      '/ops/cash-fees':['GET'], '/ops/operator-monthly-payouts':['POST'],
       '/operator/subscription/payment': ['POST'], '/ops/subscription-payments': ['GET'],
       '/driver/earnings': ['GET'], '/driver/parcels': ['GET'], '/driver/parcels/lookup': ['GET'], '/driver/service': ['GET'],
       '/driver/payouts': ['GET', 'POST'], '/driver/payout-destinations': ['GET', 'POST'],
@@ -267,7 +269,8 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
             return await settle.applyEvent(event);
           }
         }
-        return await pay.applyEvent(event);
+        const subscriptionResult=await commerce.webhook(event);
+        return subscriptionResult ?? await pay.applyEvent(event);
       }catch(error){
         const anomaly=['PAYMENT_MISMATCH','DUPLICATE_REFERENCE','EVENT_CONFLICT','PAYMENT_TRANSITION','NOT_FOUND'].includes(error.code);
         if(!anomaly)throw error;
@@ -574,13 +577,7 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     // adoption period. Traveller APIs (including passenger booking) are not in
     // this authenticated-provider branch; account, verification and renewal
     // screens remain reachable so an expired operator can recover access.
-    const providerRole=['driver','convoyeur','cashier','ops'].includes(actor.role);
-    const subscriptionExempt=path.startsWith('/operator/subscription')||path.startsWith('/onboarding/')||path==='/me'||path==='/auth/totp';
-    if(!actor.agent&&providerRole&&method!=='GET'&&!subscriptionExempt&&actor.operator_id){
-      const access=await commerce.access(actor);
-      invariant(access.active,'SUBSCRIPTION_REQUIRED',
-        'Votre abonnement professionnel a expiré. Choisissez une période et renouvelez-le pour reprendre les opérations.',402);
-    }
+    if(!actor.agent && method==='POST' && (path==='/driver/walk-up-bookings' || path==='/cashier/walk-up-bookings' || /^\/ops\/(services|routes|vehicles|parcel-rate-rules)$/.test(path))) await commerce.requireActive(actor);
     // The second factor, enforced HERE rather than on a list of "sensitive"
     // routes. An identity that has confirmed a factor must prove this browser
     // has passed it before any authenticated call succeeds: gating only the
@@ -736,14 +733,24 @@ export function createApi(db, config, keyResolver=undefined, adapter=paymentAdap
     if(method==='POST' && path==='/driver/walk-up-bookings') return walkUp(actor,await body(),req.headers.get('idempotency-key'));
     // --- Operator settlements & withdrawals ---
     if(method==='GET' && path==='/operator/settlements') return {summary:await settle.summary(actor),entries:await settle.ledger(actor)};
+    if(method==='GET' && path==='/operator/payout-capability') return settle.capability();
+    if(method==='GET' && path==='/ops/cash-fees') return settle.cashFees(actor);
+    if(method==='POST' && path==='/ops/operator-monthly-payouts') { requirePlatform(actor,'finance'); return settle.runMonthly(); }
+    const collectCashFee=path.match(/^\/ops\/cash-fees\/([^/]+)\/collect$/);
+    if(method==='POST' && collectCashFee) return settle.collectCashFee(actor,uuid(collectCashFee[1]),await body());
+    const manualOperatorPayout=path.match(/^\/ops\/operator-payouts\/([^/]+)\/manual-confirmation$/);
+    if(method==='POST' && manualOperatorPayout) return settle.manualSettlement(actor,uuid(manualOperatorPayout[1]),await body());
     if(method==='GET' && path==='/operator/payout-schedule') return settle.payoutSchedule(actor);
     if(method==='POST' && path==='/operator/payout-schedule') return settle.setPayoutSchedule(actor,await body());
     if(method==='GET' && path==='/operator/subscription') return commerce.ownPlan(actor);
     if(method==='POST' && path==='/operator/subscription') return commerce.selectPeriod(actor,await body());
-    if(method==='POST' && path==='/operator/subscription/payment') return commerce.requestPayment(actor,await body());
-    if(method==='GET' && path==='/ops/subscription-payments') return commerce.paymentRequests(actor);
+    if(method==='POST' && path==='/operator/subscription/checkout') return commerce.checkout(actor,await body(),req.headers.get('idempotency-key'));
+    const subscriptionCheck=path.match(/^\/operator\/subscription\/payments\/([^/]+)\/reconcile$/);
+    if(method==='POST' && subscriptionCheck) return commerce.reconcile(actor,uuid(subscriptionCheck[1]));
+    if(method==='POST' && path==='/operator/subscription/payment') return commerce.requestPayment();
+    if(method==='GET' && path==='/ops/subscription-payments') { requirePlatform(actor,'finance'); return commerce.paymentRequests(); }
     const subscriptionPaymentDecision=path.match(/^\/ops\/subscription-payments\/([^/]+)\/(confirm|reject)$/);
-    if(method==='POST'&&subscriptionPaymentDecision) return commerce.reviewPayment(actor,uuid(subscriptionPaymentDecision[1]),subscriptionPaymentDecision[2]);
+    if(method==='POST'&&subscriptionPaymentDecision) { requirePlatform(actor,'finance'); return commerce.reviewPayment(); }
     if(method==='GET' && path==='/operator/payouts') return settle.list(actor);
     if(method==='POST' && path==='/operator/payouts') return settle.request(actor,await body(),req.headers.get('idempotency-key'));
     const operatorPayoutCancel=path.match(/^\/operator\/payouts\/([^/]+)\/cancel$/);

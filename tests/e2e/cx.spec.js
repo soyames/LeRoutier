@@ -21,7 +21,7 @@ test('a result card leads with times, places and fare — not with internal meta
   await expect(page.getByText('13:40')).toBeVisible();
   await expect(page.getByText('6 h 10')).toBeVisible();
   await expect(page.getByText(/Godomey – Carrefour/)).toBeVisible();
-  await expect(page.getByText('7 500 FCFA')).toBeVisible();
+  await expect(page.getByText(/7\s650\sFCFA/)).toBeVisible();
   await expect(page.getByText('12 places')).toBeVisible();
   // A passenger never needs the plate or the driver's name to choose a trip.
   await expect(page.getByText('DEMO-BUS-01')).toHaveCount(0);

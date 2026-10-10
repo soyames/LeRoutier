@@ -84,6 +84,8 @@ export function walkUpBookings(db) {
       if (!service.is_demo) {
         await settlements.credit(tx, { operatorId: service.operator_id, source: 'walk_up', reference: 'walkup:' + booking.id,
           grossMinor: pricing.fareMinor, deductionMinor: 0, payoutState:'direct' });
+        await tx.query(`INSERT INTO operator_cash_fees(operator_id,booking_id,fare_minor,fee_minor,cash_received_minor,recorded_by)
+          VALUES($1,$2,$3,$4,$5,$6)`,[service.operator_id,booking.id,pricing.fareMinor,pricing.serviceFeeMinor,pricing.totalMinor,actor.id]);
         // The completed cash sale is also market evidence for its corridor.
         const od = await one(tx, `SELECT o.stop_id AS origin_stop_id,d.stop_id AS destination_stop_id,op.type AS operator_type
           FROM service_stops o JOIN service_stops d ON d.service_id=o.service_id AND d.sequence=$3

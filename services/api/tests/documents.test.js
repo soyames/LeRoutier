@@ -27,7 +27,7 @@ after(async()=>{try{await dropDisposableSchema(db);}finally{await db.close();}})
 test('concurrent ticket previews preserve the same QR, code and financial projection',async()=>{
   const [first,second]=await Promise.all([tickets(db).issue(passenger,seeded.bookings[0]),tickets(db).issue(passenger,seeded.bookings[0])]);
   assert.equal(first.token,second.token);assert.equal(first.manualCode,second.manualCode);assert.ok(first.validForBoarding);
-  assert.equal(first.document.paidMinor,first.document.amount_minor);assert.equal(first.document.refundedMinor,0);
+  assert.equal(first.document.paidMinor,first.document.fareMinor+first.document.platformFeeMinor+first.document.providerFeeMinor);assert.equal(first.document.refundedMinor,0);
   assert.equal(first.document.passenger_name,'TEST Passenger');
   const privateCall=await api(new Request(`http://localhost/api/v1/bookings/${seeded.bookings[0]}/ticket`,{method:'POST',body:'{}'}));
   assert.equal(privateCall.status,401);
@@ -70,10 +70,10 @@ test('cancellation document separates pending review from actual refunded paymen
   const cancelled=await tickets(db).issue(passenger,id);
   assert.equal(cancelled.document.status,'cancelled');assert.ok(cancelled.token);assert.equal(cancelled.validForBoarding,false);assert.equal(cancelled.document.refundedMinor,0);
   assert.ok(cancelled.document.paidMinor>0);
-  await db.transaction(tx=>tx.query("UPDATE payments SET status='refunded',refunded_minor=COALESCE(NULLIF(fare_minor,0),amount_minor) WHERE booking_id=$1",[id]));
+  await db.transaction(tx=>tx.query("UPDATE payments SET status='refunded',refunded_minor=amount_minor+provider_fee_minor,operator_refunded_minor=fare_minor WHERE booking_id=$1",[id]));
   const refunded=await tickets(db).issue(passenger,id);
-  assert.equal(refunded.document.refundedMinor,refunded.document.payments[0].fare_minor);assert.equal(refunded.token,cancelled.token);
-  assert.ok(refunded.document.paidMinor-refunded.document.refundedMinor>0,'the LeRoutier service fee remains recorded as retained');
+  assert.equal(refunded.document.refundedMinor,refunded.document.paidMinor);assert.equal(refunded.token,cancelled.token);
+  assert.equal(refunded.document.paidMinor-refunded.document.refundedMinor,0,'confirmed full refund retains no fee');
 });
 test('intermediate boarding uses the booked stop and does not invent a timetable',async()=>{
   const domain=transport(db);

@@ -84,8 +84,8 @@ function JourneySummary({ intent, perPassenger, quantity, seatsLeft }) {
       {plural && <span className="muted">× {quantity} voyageurs</span>}
     </div>
     <div className="between wrap checkout-total">
-      <span>Prix total</span>
-      <span className="trip-price">{fcfa(perPassenger * quantity)}</span>
+      <span>Total · tarif + frais LeRoutier (2 %)</span>
+      <span className="trip-price">{fcfa(priceWithServiceFee(perPassenger * quantity).totalMinor)}</span>
     </div>
   </div>;
 }

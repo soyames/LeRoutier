@@ -140,6 +140,7 @@ export function payouts(db, adapter = null, config = {}) {
       } else if (event.status === 'reversed') {
         await tx.query(`UPDATE driver_earnings SET payout_state='reversed' WHERE payout_request_id=$1 AND payout_state IN ('reserved','paid')`, [r.id]);
       }
+      if(event.status==='paid') await tx.query("UPDATE payout_requests SET provider_metadata=provider_metadata || jsonb_build_object('verifiedEnvironment',$2::text,'verifiedAccount',$3::text) WHERE id=$1",[r.id,adapter.environment??'unknown',adapter.payoutAccount??'fixture']);
       const result = await one(tx, 'UPDATE payout_requests SET status=$2,updated_at=now() WHERE id=$1 RETURNING *', [r.id, next]);
       await tx.query('INSERT INTO payout_events(provider,event_id,payout_request_id,fingerprint,status) VALUES($1,$2,$3,$4,$5)',
         [r.provider, event.eventId, r.id, hash, event.status]);
@@ -182,23 +183,19 @@ export function payouts(db, adapter = null, config = {}) {
       const provider = adapter.name;
       if (!adapter.payoutsAvailable) return { state: 'missing_credentials', canRequest: false, provider };
       const history = await db.transaction(async tx => (await tx.query(`SELECT
-        count(*) FILTER (WHERE status='paid')::integer AS paid,
+        count(*) FILTER (WHERE status='paid' AND provider_metadata->>'verifiedEnvironment'=$2 AND provider_metadata->>'verifiedAccount'=$3)::integer AS paid,
         count(*) FILTER (WHERE status IN ('processing','paid'))::integer AS accepted,
         count(*) FILTER (WHERE status='failed' AND updated_at>now()-interval '7 days')::integer AS recent_failures
-        FROM payout_requests WHERE provider=$1`, [provider])).rows[0]);
+        FROM payout_requests WHERE provider=$1`, [provider,adapter.environment??'unknown',adapter.payoutAccount??'fixture'])).rows[0]);
       // A completed transfer is the only thing that proves the account works.
       if (history.paid > 0) return { state: 'available', canRequest: true, provider };
-      // The provider accepted an initiation but nothing has settled yet: the
-      // account is working, the transfer is in flight.
-      if (history.accepted > 0) return { state: 'available', canRequest: true, provider };
+      // A pending initiation is not evidence of a completed transfer.
       // Every attempt so far was refused at the provider. On FedaPay that is
       // what an unactivated Payouts account looks like from this side, and it
       // is the most useful thing to tell somebody.
       if (history.recent_failures > 0) return { state: 'provider_not_activated', canRequest: false, provider };
-      // Credentials are present and nothing has been tried. Requests are
-      // allowed — that is how the first one ever happens — but nothing claims
-      // the transfer will land.
-      return { state: 'configured', canRequest: true, provider };
+      // Credentials alone leave payouts unavailable to customers.
+      return { state: 'configured', canRequest: false, provider };
     },
     // Internal accessor for the agentic layer; API routes enforce authorization.
     async getById(id) {

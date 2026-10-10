@@ -241,8 +241,8 @@ test('a refund releases the whole party', async () => {
   await pay.applyEvent({ kind: 'payment', paymentId: payment.id, eventId: 'evt-2', reference: await referenceOf(payment.id),
     amountMinor: group.amount_minor+group.service_fee_minor, currency: 'XOF', status: 'refunded' });
   assert.ok((await groupSeats(group.id)).every(s => s.status === 'cancelled'), 'every seat is released');
-  assert.equal((await one('SELECT refunded_minor FROM payments WHERE id=$1',[payment.id])).refunded_minor,group.amount_minor,
-    'the operator fare is refunded while the service fee stays retained');
+  assert.equal((await one('SELECT refunded_minor FROM payments WHERE id=$1',[payment.id])).refunded_minor,group.amount_minor+group.service_fee_minor,
+    'the confirmed full transaction refund includes the service fee');
   assert.equal((await one('SELECT count(*)::integer AS n FROM booking_segments')).n, 0, 'and every segment with it');
 });
 

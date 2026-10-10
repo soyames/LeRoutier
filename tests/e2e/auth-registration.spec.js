@@ -186,5 +186,5 @@ test('Mon compte keeps profile, privacy and logout actions available on mobile',
   await expect(page.getByRole('button', { name: 'Ouvrir confidentialité et données' })).toBeVisible();
   await page.getByRole('button', { name: 'Se déconnecter' }).click();
   await expect(page.getByText('Bienvenue sur LeRoutier')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Se connecter', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Se connecter avec mon adresse e-mail', exact: true })).toBeVisible();
 });

@@ -33,7 +33,7 @@ test('results, fares, detail and selection need no authentication at any point',
   await expect(page.getByText('TEST Chauffeur 01')).toBeVisible();
   await expect(page.getByText('Toyota Hiace')).toBeVisible();
   await expect(page.getByText('Autocar')).toBeVisible();
-  await expect(page.getByText('7 500 FCFA').first()).toBeVisible();
+  await expect(page.getByText(/7\s650\sFCFA/).first()).toBeVisible();
   // The TEST offer wears its badge; the banner states the mode plainly.
   await expect(page.getByText('TEST', { exact: true }).first()).toBeVisible();
   await expect(page.getByText(/Mode test/)).toBeVisible();

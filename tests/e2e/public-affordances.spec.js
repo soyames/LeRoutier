@@ -50,7 +50,8 @@ test('a party sees the whole total before paying, not a per-seat price', async (
   // Three travellers: the fare per passenger AND what the party pays.
   await page.getByRole('button', { name: '3 billets' }).click();
   await expect(page.getByText('7 500 FCFA par voyageur')).toBeVisible();
-  await expect(page.getByText('22 500 FCFA')).toBeVisible();
+  await expect(page.getByLabel('Détail du prix').getByText('22 500 FCFA')).toBeVisible();
+  await expect(page.getByLabel('Détail du prix').getByText('22 950 FCFA')).toBeVisible();
   await expect(page.getByText('× 3 voyageurs')).toBeVisible();
 });
 

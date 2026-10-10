@@ -295,13 +295,14 @@ test('monthly operator payouts require opt-in and transfer online ticket revenue
     await tx.query("INSERT INTO operators(id,name,type,verification_status,owner_user_id) VALUES($1,'Monthly Operator','independent','verified',$2)",[operatorId,ownerId]);
     await tx.query('UPDATE users SET operator_id=$2 WHERE id=$1',[ownerId,operatorId]);
     await tx.query("INSERT INTO driver_profiles(user_id,operator_id,license_reference,active) VALUES($1,$2,'MONTHLY-1',true)",[ownerId,operatorId]);
-    await tx.query(`INSERT INTO operator_payout_schedules(operator_id,enabled,phone_number,country,network,consented_by)
-      VALUES($1,true,'97000123','BJ','mtn',$2)`,[operatorId,ownerId]);
+    await tx.query(`INSERT INTO operator_payout_schedules(operator_id,enabled,phone_number,country,network,consented_by,consent_version)
+      VALUES($1,true,'97000123','BJ','mtn',$2,'monthly-v1')`,[operatorId,ownerId]);
     await settle.credit(tx,{operatorId,source:'ticket_online',reference:'month-online-'+operatorId,grossMinor:12000,deductionMinor:0});
     await settle.credit(tx,{operatorId,source:'walk_up',reference:'month-cash-'+operatorId,grossMinor:5000,deductionMinor:0,payoutState:'direct'});
   });
   const result=await settle.runMonthly('2026-11-01');
-  assert.equal(result.processed,1);
+  assert.equal(result.processed,0,'a configured key is not provider capability');
+  assert.equal(result.manual,1);
   assert.equal(result.failed,0);
   const request=await db.transaction(async tx=>(await tx.query("SELECT * FROM operator_payout_requests WHERE operator_id=$1 AND payout_kind='monthly'",[operatorId])).rows[0]);
   assert.equal(request.amount_minor,12000);
@@ -333,6 +334,9 @@ test('a withdrawal is reserved once: approving twice cannot pay twice',async()=>
   // the first request.
   await assert.rejects(settle.request(owner,{amountMinor:9000,phoneNumber:'97000444',country:'BJ',network:null},key),
     {code:'IDEMPOTENCY_CONFLICT'});
+  // Seed evidence of a completed transfer for this fixture account, never a secret alone.
+  await db.transaction(tx=>tx.query(`INSERT INTO operator_payout_requests(operator_id,amount_minor,phone_number,country,provider,status,idempotency_key,request_fingerprint,provider_metadata)
+    VALUES($1,1,'97000444','BJ','fedapay','paid',$2,'fixture',$3)`,[demo.operator,randomUUID(),JSON.stringify({verifiedEnvironment:adapter.environment,verifiedAccount:adapter.payoutAccount})]));
   await settle.approve(platformOps,first.id);
   // Already processing: a second approval is a state error, not a second payout.
   await assert.rejects(settle.approve(platformOps,first.id),{code:'PAYOUT_TRANSITION'});
@@ -366,7 +370,7 @@ test('payout capability reports what is proven, not what is configured',async()=
   await db.transaction(tx=>tx.query("DELETE FROM payout_requests WHERE provider='fedapay'"));
   const fresh=await payout.capability();
   assert.equal(fresh.state,'configured');
-  assert.equal(fresh.canRequest,true,'the first payout has to be possible');
+  assert.equal(fresh.canRequest,false,'credentials cannot enable withdrawals');
   assert.notEqual(fresh.state,'available','credentials are not proof');
 });
 

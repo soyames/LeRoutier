@@ -15,8 +15,8 @@ export function ticketDocument(ticket, kind = 'ticket') {
   const successfulPayments=b.payments.filter(p=>p.status==='succeeded'||p.status==='refunded');
   const serviceFeeMinor=successfulPayments.reduce((sum,p)=>sum+(p.service_fee_minor||0),0);
   const providerFeeMinor=successfulPayments.reduce((sum,p)=>sum+(p.provider_fee_minor||0),0);
-  const paymentRows = [['Tarif fixé par le transporteur', fcfa(b.amount_minor)],
-    ['Frais de service LeRoutier (2 %, retenus en cas d’annulation)', fcfa(serviceFeeMinor)],
+  const paymentRows = [['Tarif fixé par le transporteur', fcfa(b.fareMinor ?? b.amount_minor)],
+    ['Frais de service LeRoutier (2 %)', fcfa(serviceFeeMinor)],
     ...(providerFeeMinor?[['Frais du prestataire de paiement',fcfa(providerFeeMinor)]]:[]),
     ['Montant payé', fcfa(b.paidMinor)], ['Montant remboursé', fcfa(b.refundedMinor)]];
   const cancellation = b.refundedMinor > 0 ? 'Remboursement enregistré' : b.paidMinor > 0 ? 'Remboursement à examiner : aucun versement confirmé' : 'Aucun paiement encaissé';
@@ -26,7 +26,7 @@ export function ticketDocument(ticket, kind = 'ticket') {
     isTest: b.is_demo, status: status('booking', b.status).label,
     route: `${b.departure_city} → ${b.arrival_city}`,
     sections: [
-      { title: 'Voyageur & transporteur', rows: [['Voyageur', b.passenger_name], ['Transporteur', b.operator_name], ['Facture', `Émise par LeRoutier pour le compte de ${b.operator_name}`], ['Conducteur', b.driver_name || 'Non affecté'], ['Véhicule', b.registration || 'Non affecté'], ['Réservation du', when(b.created_at)]] },
+      { title: 'Voyageur & transporteur', rows: [['Voyageur', b.passenger_name], ['Vendeur du transport', b.operator_name], ['Facture', `Émise par LeRoutier pour le compte de ${b.operator_name}`], ['Conducteur', b.driver_name || 'Non affecté'], ['Véhicule', b.registration || 'Non affecté'], ['Réservation du', when(b.created_at)]] },
       { title: 'Votre trajet', rows: [['Ligne', b.route_name], ['Embarquement', [b.departure_point_name, b.departure_point_landmark].filter(Boolean).join(' · ')], ['Départ · heure du Bénin', when(b.departure_at)], ['Descente', [b.arrival_point_name, b.arrival_point_landmark].filter(Boolean).join(' · ')], ['Arrivée prévue · heure du Bénin', when(b.arrival_at)], ['Place / quantité', `Siège ${b.seat_number} · 1 voyageur`]] },
       { title: kind === 'cancellation' ? 'Situation du remboursement' : 'Paiement', rows: [...paymentRows,
         ...(kind === 'cancellation' ? [['Situation', cancellation], ['Dernière mise à jour', when(b.updated_at)]] : []),

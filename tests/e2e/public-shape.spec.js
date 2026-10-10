@@ -63,7 +63,7 @@ test('the professional entry explains the three situations and stays public', as
   await page.goto(APP + '/professionnel');
   await expect(page.getByRole('heading', { name: 'Vous travaillez dans le transport ?' })).toBeVisible();
   for (const title of ['Chauffeur indépendant', 'Compagnie de transport', 'Conducteur ou convoyeur d’une compagnie']) {
-    await expect(page.getByRole('heading', { name: title })).toBeVisible();
+    await expect(page.getByRole('heading', { name: title }).first()).toBeVisible();
   }
   // A company's employees are the company's responsibility, and the page says so.
   await expect(page.getByText(/aucune pièce d’identité personnelle à déposer ici/)).toBeVisible();

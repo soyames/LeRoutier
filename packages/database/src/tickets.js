@@ -22,7 +22,7 @@ export function tickets(db){
         // seat was paid for as part of a party is as boardable as one who paid
         // alone. Comparing the seat's own fare instead is what would make every
         // grouped ticket permanently unusable at the door.
-        const canBoard=b.status==='confirmed' && document.paidMinor-document.refundedMinor===document.dueMinor &&
+        const canBoard=b.status==='confirmed' && document.settled &&
           ['scheduled','active'].includes(s.status) && s.current_sequence<=b.origin_sequence;
         let ticket=await one(tx,'SELECT * FROM ticket_credentials WHERE booking_id=$1',[id]);
         // Viewing an archive must never depend on eligibility to board again.
