@@ -23,6 +23,7 @@ export function workspacesFor(user) {
       path: '/work/today',
     });
   }
+  if(user.role==='cashier') available.push({id:WORK,label:`Caisse${company}`,hint:'Vente de billets pour votre compagnie',path:'/work/walk-up'});
   if (user.role === 'ops') {
     const platform = !user.operator_id;
     available.push({
@@ -49,6 +50,7 @@ export function capabilities(user) {
     // company driver is crew and never sees settlements or withdrawals.
     independent: role === 'driver' && user?.operator_type === 'independent' && user?.owner_user_id === user?.id,
     convoyeur: role === 'convoyeur',
+    cashier:user?.role==='cashier',
     ops: user?.role === 'ops',
     platformOps,
     platformGrants: grants,

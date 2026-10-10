@@ -108,4 +108,4 @@ export function journeyPlan({ departureAt, arrivalAt = null, localTravelMinutes 
 }
 
 // Commercial model: integer-money commission split (gross = commission + net).
-export { LEROUTIER_COMMISSION_BP, splitCommission } from './commission.js';
+export { LEROUTIER_COMMISSION_BP, LEROUTIER_SERVICE_FEE_BP, priceWithServiceFee, splitCommission } from './commission.js';

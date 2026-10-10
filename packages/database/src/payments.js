@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { invariant, uuid, idempotencyKey, splitCommission } from '@leroutier/domain';
+import { invariant, uuid, idempotencyKey, priceWithServiceFee } from '@leroutier/domain';
 import { transport, holdsOpen } from './transport.js';
 import { operatorSettlements } from './operator-settlements.js';
 import { fareIntelligence } from './fare-intelligence.js';
@@ -7,7 +7,9 @@ import { audit } from './identities.js';
 const one=async(tx,sql,args=[]) => (await tx.query(sql,args)).rows[0];
 const digest=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const nested=tx=>({transaction:fn=>fn(tx)});
-const publicPayment=p=>({id:p.id,bookingId:p.booking_id,groupId:p.group_id,provider:p.provider,status:p.status,amountMinor:p.amount_minor,currency:p.currency,checkoutUrl:p.checkout_url,reconciliation:p.reconciliation});
+const publicPayment=p=>({id:p.id,bookingId:p.booking_id,groupId:p.group_id,provider:p.provider,status:p.status,amountMinor:p.amount_minor,
+  fareMinor:p.fare_minor??null,serviceFeeMinor:p.service_fee_minor??null,providerFeeMinor:p.provider_fee_minor??null,refundedMinor:p.refunded_minor??0,
+  currency:p.currency,checkoutUrl:p.checkout_url,reconciliation:p.reconciliation});
 
 export function payments(db,adapter=null){
   const domain=transport(db);
@@ -56,7 +58,15 @@ export function payments(db,adapter=null){
       invariant(!await one(tx,'SELECT id FROM payments WHERE provider=$1 AND provider_reference=$2 AND id<>$3',[p.provider,event.reference,p.id]),'DUPLICATE_REFERENCE','Provider reference already belongs to another payment.',409);
       const allowed={pending:['pending','succeeded','failed','cancelled'],succeeded:['succeeded','refunded'],failed:['failed'],cancelled:['cancelled'],refunded:['refunded']};
       invariant(allowed[p.status].includes(event.status),'PAYMENT_TRANSITION','Payment event conflicts with its current state.',409);
-      await tx.query('UPDATE payments SET provider_reference=$2,status=$3,updated_at=now() WHERE id=$1',[p.id,event.reference,event.status]);
+      // FedaPay supports partial refunds from its merchant dashboard, but not
+      // through the collection API. Under the published LeRoutier policy, a
+      // `refunded` provider event accounts for the operator fare only; the
+      // 2% service fee remains retained. Legacy payments have no service fee
+      // and therefore use their original amount. The provider transaction
+      // itself remains reconciled by its signed event.
+      const refundedMinor=event.status==='refunded'?Math.min(p.amount_minor,p.fare_minor||p.amount_minor):p.refunded_minor||0;
+      await tx.query('UPDATE payments SET provider_reference=$2,status=$3,refunded_minor=$4,updated_at=now() WHERE id=$1',
+        [p.id,event.reference,event.status,refundedMinor]);
       let reconciliation=event.status==='pending'?'pending':'applied';
       // The ONE place a payment confirms anything. The fan-out for a purchase
       // lives inside this guard and never beside it.
@@ -85,20 +95,18 @@ export function payments(db,adapter=null){
         if(confirmable){
           for(const seat of bookings) await transport(nested(tx)).transition({id:seat.passenger_id,role:'passenger'},seat.id,'confirm');
         }else{reconciliation='review';await audit(tx,null,'payment.refund_review',p.id,s.operator_id,{bookingId:b.id,groupId:group?.id??null});}
-        // The customer paid the final price: the operator settlement credits
-        // gross minus commission, and the transaction becomes market evidence.
+        // The customer paid fare plus service fee. The operator settlement
+        // credits the full fare; the fee is never deducted from operator income.
         // Both are idempotent per payment, so a replayed webhook changes nothing.
         // TEST/demo services never enter real financial settlement or market
         // observations: synthetic money must not move real ledgers.
         //
-        // The commission is split from the AGGREGATE, which is the money actually
-        // received. Splitting per seat and adding up can differ by a franc or two
-        // because the split rounds, and a platform cut that does not come out of
-        // the amount collected is a platform cut somebody else pays.
+        // The settlement is based on recorded operator fare, not the amount
+        // collected from the passenger, which also includes LeRoutier's fee.
         if(!s.is_demo) {
-          const split=splitCommission(event.amountMinor);
+          const pricing=priceWithServiceFee(group?group.amount_minor:b.amount_minor);
           await settlements.credit(tx,{operatorId:s.operator_id,source:'ticket_online',reference:'payment:'+p.id,
-            grossMinor:split.grossMinor,deductionMinor:split.commissionMinor});
+            grossMinor:pricing.fareMinor,deductionMinor:0});
           const od=await one(tx,`SELECT o.stop_id AS origin_stop_id,d.stop_id AS destination_stop_id,op.type AS operator_type
             FROM service_stops o JOIN service_stops d ON d.service_id=o.service_id AND d.sequence=$3
             JOIN operators op ON op.id=$2
@@ -111,7 +119,7 @@ export function payments(db,adapter=null){
             // keeps every observation idempotent on its own.
             const seats=group?Array.from({length:group.quantity},(_,n)=>n+1):[null];
             for(const n of seats) await fares.recordTransaction(tx,{operatorId:s.operator_id,originStopId:od.origin_stop_id,destinationStopId:od.destination_stop_id,
-              routeId:s.route_id,fareType:'passenger',priceMinor:group?group.seat_amount_minor:event.amountMinor,operatorType:od.operator_type,
+              routeId:s.route_id,fareType:'passenger',priceMinor:group?group.seat_amount_minor:b.amount_minor,operatorType:od.operator_type,
               sourceReference:n===null?'payment:'+p.id:'payment:'+p.id+':'+n,observedAt:new Date().toISOString()});
           }
         }
@@ -123,6 +131,19 @@ export function payments(db,adapter=null){
           if(['held','confirmed'].includes(seat.status))await transport(nested(tx)).transition({id:seat.passenger_id,role:'passenger'},seat.id,'cancel');
           else if(seat.status==='boarded')reconciliation='review';
         }
+        if(p.status!=='refunded'&&!service.is_demo){
+          const credit=await one(tx,`SELECT id,payout_state,payout_request_id FROM operator_settlements
+            WHERE operator_id=$1 AND source='ticket_online' AND reference=$2 FOR UPDATE`,
+          [service.operator_id,'payment:'+p.id]);
+          if(credit){
+            await tx.query("UPDATE operator_settlements SET payout_state='reversed' WHERE id=$1",[credit.id]);
+            if(['reserved','paid'].includes(credit.payout_state)){
+              await tx.query(`INSERT INTO operator_settlement_reversals(operator_id,payment_id,amount_minor,state,payout_request_id)
+                VALUES($1,$2,$3,$4,$5) ON CONFLICT(payment_id) DO NOTHING`,
+              [service.operator_id,p.id,refundedMinor,credit.payout_state==='reserved'?'allocated':'open',credit.payout_state==='reserved'?credit.payout_request_id:null]);
+            }
+          }
+        }
       }
       if(event.status===p.status)reconciliation=p.reconciliation;
       await tx.query('UPDATE payments SET reconciliation=$2 WHERE id=$1',[p.id,reconciliation]);
@@ -130,7 +151,7 @@ export function payments(db,adapter=null){
       await audit(tx,null,'payment.'+event.status,p.id,null,{bookingId:b.id,groupId:group?.id??null});
       await tx.query('INSERT INTO outbox(event_type,aggregate_id,payload) VALUES($1,$2,$3)',['payment.'+event.status,p.id,JSON.stringify({
         ...(group?{groupId:group.id}:{bookingId:b.id}),provider:p.provider,reference:event.reference})]);
-      return publicPayment({...p,status:event.status,reconciliation});
+      return publicPayment({...p,status:event.status,refunded_minor:refundedMinor,reconciliation});
     });
   }
   return {
@@ -156,9 +177,10 @@ export function payments(db,adapter=null){
         // Checked against the RESOLVED target, so a pending purchase payment and a
         // pending seat payment for the same seats cannot both exist.
         invariant(!await one(tx,"SELECT id FROM payments WHERE (booking_id=$1 OR group_id=$1) AND status IN ('pending','succeeded')",[target.id]),'PAYMENT_EXISTS','Retrieve the existing payment before retrying.',409);
-        return {payment:await one(tx,`INSERT INTO payments(booking_id,group_id,provider,amount_minor,status,idempotency_key,request_fingerprint,recorded_by,reconciliation)
-          VALUES($1,$2,$3,$4,'pending',$5,$6,$7,'pending') RETURNING *`,
-        [target.kind==='booking'?target.id:null,target.kind==='group'?target.id:null,adapter.name,target.amount_minor,storedKey,digest([target.id,adapter.name]),actor.id]),serviceId:s.id};
+        const pricing={fareMinor:target.amount_minor,serviceFeeMinor:target.service_fee_minor,totalMinor:target.amount_minor+target.service_fee_minor};
+        return {payment:await one(tx,`INSERT INTO payments(booking_id,group_id,provider,amount_minor,fare_minor,service_fee_minor,status,idempotency_key,request_fingerprint,recorded_by,reconciliation)
+          VALUES($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,'pending') RETURNING *`,
+        [target.kind==='booking'?target.id:null,target.kind==='group'?target.id:null,adapter.name,pricing.totalMinor,pricing.fareMinor,pricing.serviceFeeMinor,storedKey,digest([target.id,adapter.name]),actor.id]),serviceId:s.id};
       });
       const p=prepared.payment;
       if(p.status!=='pending' || p.provider_reference)return publicPayment(p);

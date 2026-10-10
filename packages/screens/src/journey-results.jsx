@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router';
 import { useApi,useSession } from '@leroutier/config/client';
 import { Card,Badge,ErrorState,SkeletonCards } from '@leroutier/ui';
 import { fcfa,time,dayLong } from '@leroutier/ui';
+import { priceWithServiceFee } from '@leroutier/domain';
 import { Armchair,Bus,Car,List,Map as MapIcon,X,ShieldCheck,Star,UserRound } from 'lucide-react';
 
 const JourneyMap=lazy(()=>import('./map.jsx').then(m=>({default:m.JourneyPlanMap})));
@@ -65,6 +66,7 @@ function OperatorLine({option}){
 
 export function OfferCard({option,originLabel,destinationLabel,selected,onSelect,onView,onChoose,compact=false}){
   const seats=option.available,soldOut=seats===0;
+  const price=priceWithServiceFee(option.fare.amountMinor);
   return <article className={`card offer-card ${selected?'selected':''} ${compact?'compact':''}`} onMouseEnter={onSelect} onFocusCapture={onSelect} aria-label={`Trajet de ${option.operatorName}`}>
     <div className="offer-head between wrap"><div className="trip-times"><strong>{time(option.departureAt)}</strong><span className="arrow">→</span><strong>{option.etaAt?time(option.etaAt):'–'}</strong>{option.totalDurationS!=null&&<span className="trip-duration">{durText(option.totalDurationS)}</span>}</div>
       <div className="offer-head-end">{option.isTest&&<TestBadge/>}<Badge tone={soldOut?'danger':seats>2?'success':'warning'}><Armchair size={13}/>{soldOut?'Complet':`${seats} place${seats>1?'s':''}`}</Badge></div></div>
@@ -74,7 +76,7 @@ export function OfferCard({option,originLabel,destinationLabel,selected,onSelect
     <div className="between wrap offer-trust"><Reputation rating={option.rating}/><Amenities amenities={option.amenities}/></div>
     <span className="small muted">{option.serviceStatus==='active'?'En cours':'Départ programmé'}{option.livePosition?` · ${option.livePosition.signal==='live'?'En direct':'Dernière position connue'}`:''}</span>
     {option.waitingS>0&&<span className="small muted">Dont {mins(option.waitingS)} d’attente à la prise en charge</span>}
-    <div className="trip-foot"><span className="trip-price">{fcfa(option.fare.amountMinor)}</span><div className="controls"><button className="btn btn-soft" onClick={onView}>Voir le trajet</button><button className="btn btn-primary" disabled={soldOut||!option.feasible} onClick={onChoose}>Choisir</button></div></div>
+    <div className="trip-foot"><span className="trip-price">{fcfa(price.totalMinor)}<small className="small muted"> tarif + frais de service (2 %)</small></span><div className="controls"><button className="btn btn-soft" onClick={onView}>Voir le trajet</button><button className="btn btn-primary" disabled={soldOut||!option.feasible} onClick={onChoose}>Choisir</button></div></div>
   </article>;
 }
 
@@ -95,7 +97,7 @@ function OfferDetails({option,originLabel,destinationLabel,originPoint,destinati
     <div className="journey-steps">{steps.map(([at,label],i)=><div key={i} className="journey-step">{at?<strong className="small">{at}</strong>:<span className="small muted">–</span>}<span className="small">{label}</span></div>)}</div>
     {option.livePosition&&<span className="small muted" role="status">{option.livePosition.signal==='live'?'En direct : position récente du véhicule':'Dernière position connue du véhicule'}</span>}
     <Suspense fallback={<SkeletonCards count={1} lines={3}/>}><JourneyMap option={option} originPoint={originPoint} destinationPoint={destinationPoint} height={260}/></Suspense>
-    <div className="summary"><div className="row"><span>Opérateur</span><span>{option.operatorName}</span></div><div className="row"><span>Véhicule</span><span>{vehicleText(option.vehicle)}</span></div><div className="row"><span>Immatriculation</span><span>{option.vehicle?.registration??'Non communiquée'}</span></div><div className="row"><span>Places restantes</span><span>{soldOut?'Complet':`${seats} place${seats>1?'s':''}`}</span></div><div className="row"><span>Prix final</span><span>{fcfa(option.fare.amountMinor)}</span></div></div>
+    <div className="summary"><div className="row"><span>Opérateur</span><span>{option.operatorName}</span></div><div className="row"><span>Véhicule</span><span>{vehicleText(option.vehicle)}</span></div><div className="row"><span>Immatriculation</span><span>{option.vehicle?.registration??'Non communiquée'}</span></div><div className="row"><span>Places restantes</span><span>{soldOut?'Complet':`${seats} place${seats>1?'s':''}`}</span></div><div className="row"><span>Tarif fixé par l’opérateur</span><span>{fcfa(option.fare.amountMinor)}</span></div><div className="row"><span>Frais de service LeRoutier (2 %)</span><span>{fcfa(priceWithServiceFee(option.fare.amountMinor).serviceFeeMinor)}</span></div><div className="row"><strong>Total par voyageur</strong><strong>{fcfa(priceWithServiceFee(option.fare.amountMinor).totalMinor)}</strong></div></div>
     <p className="small muted">Transport local (premier et dernier kilomètre) non inclus : estimé à pied. Conditions d’annulation selon l’opérateur.</p>
     <div className="controls"><button className="btn btn-soft" onClick={onClose}>Fermer</button><button className="btn btn-primary" disabled={soldOut||!option.feasible} onClick={onChoose}>Choisir ce trajet</button></div>
   </dialog>;
@@ -115,7 +117,7 @@ export function JourneySearchResults({originMode,originPlace,destinationPlace,de
 // come back — the commune their coordinates fell in. Without the last one a
 // "Ma position" search spends its first second titled "Départ → Parakou".
 const nameOf=id=>(places.data||[]).find(p=>p.id===id)?.name??null,originLabel=nameOf(originPlace)??plan.data?.options?.[0]?.pickupStop?.city??(originMode==='current'?nearCity:null)??null,destinationLabel=nameOf(destinationPlace)??plan.data?.options?.[0]?.dropoffStop?.city??null;
-  const options=useMemo(()=>{let list=(plan.data?.options||[]).filter(o=>!day||(o.departureAt&&new Date(o.departureAt).toLocaleDateString('en-CA')===day));if(filter==='company')list=list.filter(o=>o.operatorType==='company');else if(filter==='independent')list=list.filter(o=>o.operatorType==='independent');else if(filter==='seats')list=list.filter(o=>o.available>=2);else if(filter==='direct')list=list.filter(o=>!o.firstMile&&!o.lastMile);const by={recommended:(a,b)=>(Number(b.feasible)-Number(a.feasible))||((a.totalDurationS??Infinity)-(b.totalDurationS??Infinity)),earliest:(a,b)=>Date.parse(a.departureAt)-Date.parse(b.departureAt),arrival:(a,b)=>(a.etaAt?Date.parse(a.etaAt):Infinity)-(b.etaAt?Date.parse(b.etaAt):Infinity),cheapest:(a,b)=>a.fare.amountMinor-b.fare.amountMinor,shortest:(a,b)=>(a.totalDurationS??Infinity)-(b.totalDurationS??Infinity)}[sort];return [...list].sort(by);},[plan.data,day,sort,filter]);
+  const options=useMemo(()=>{let list=(plan.data?.options||[]).filter(o=>!day||(o.departureAt&&new Date(o.departureAt).toLocaleDateString('en-CA')===day));if(filter==='company')list=list.filter(o=>o.operatorType==='company');else if(filter==='independent')list=list.filter(o=>o.operatorType==='independent');else if(filter==='seats')list=list.filter(o=>o.available>=2);else if(filter==='direct')list=list.filter(o=>!o.firstMile&&!o.lastMile);const by={recommended:(a,b)=>(Number(b.feasible)-Number(a.feasible))||((a.totalDurationS??Infinity)-(b.totalDurationS??Infinity)),earliest:(a,b)=>Date.parse(a.departureAt)-Date.parse(b.departureAt),arrival:(a,b)=>(a.etaAt?Date.parse(a.etaAt):Infinity)-(b.etaAt?Date.parse(b.etaAt):Infinity),cheapest:(a,b)=>priceWithServiceFee(a.fare.amountMinor).totalMinor-priceWithServiceFee(b.fare.amountMinor).totalMinor,shortest:(a,b)=>(a.totalDurationS??Infinity)-(b.totalDurationS??Infinity)}[sort];return [...list].sort(by);},[plan.data,day,sort,filter]);
   const anyTest=options.some(o=>o.isTest),shown=detail??options.find(o=>o.serviceId===selected?.serviceId&&o.originSequence===selected?.originSequence&&o.destinationSequence===selected?.destinationSequence)??options[0];
   return <div className="stack journey-results">
     {/* Where the search starts from, said out loud.

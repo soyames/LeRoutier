@@ -16,7 +16,7 @@ const ops={id:demo.ops,role:'ops',operator_id:demo.operator};
 const hold=(origin=0,destination=3,key=randomUUID())=>api.hold(passenger,{serviceId:demo.service,origin,destination},key);
 async function confirmed(origin=0,destination=3) {
   const b=await hold(origin,destination);
-  await api.recordPayment(ops,b.id,{provider:'demo',reference:randomUUID(),amountMinor:b.amount_minor,currency:'XOF'},randomUUID());
+  await api.recordPayment(ops,b.id,{provider:'demo',reference:randomUUID(),amountMinor:b.amount_minor+b.service_fee_minor,currency:'XOF'},randomUUID());
   return api.transition(passenger,b.id,'confirm');
 }
 before(async()=>{await migrate(db);await seed(db,{capacity:2});});
@@ -66,10 +66,10 @@ test('duplicate concurrent idempotency keys return one booking',async()=>{
 });
 test('confirmation requires a verified matching payment',async()=>{
   const b=await hold();await assert.rejects(api.transition(passenger,b.id,'confirm'),{code:'PAYMENT_REQUIRED'});
-  await assert.rejects(api.recordPayment(passenger,b.id,{provider:'cash',reference:'cash-receipt',amountMinor:b.amount_minor,currency:'XOF'},randomUUID()),{code:'FORBIDDEN'});
+  await assert.rejects(api.recordPayment(passenger,b.id,{provider:'cash',reference:'cash-receipt',amountMinor:b.amount_minor+b.service_fee_minor,currency:'XOF'},randomUUID()),{code:'FORBIDDEN'});
 });
 test('payment retries preserve one record and conflicting keys fail',async()=>{
-  const b=await hold(),key=randomUUID();const input={provider:'demo',reference:randomUUID(),amountMinor:b.amount_minor,currency:'XOF'};
+  const b=await hold(),key=randomUUID();const input={provider:'demo',reference:randomUUID(),amountMinor:b.amount_minor+b.service_fee_minor,currency:'XOF'};
   const a=await api.recordPayment(ops,b.id,input,key),c=await api.recordPayment(ops,b.id,input,key);
   assert.equal(a.id,c.id);await assert.rejects(api.recordPayment(ops,b.id,{...input,amountMinor:1},key),{code:'IDEMPOTENCY_CONFLICT'});
 });

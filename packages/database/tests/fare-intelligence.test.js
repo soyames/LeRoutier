@@ -13,9 +13,8 @@ import {parcels} from '../src/parcels.js';
 import {transport} from '../src/transport.js';
 import {createApi} from '../../../services/api/src/app.js';
 
-// Fare Intelligence & commercial model: commission included in the final
-// price, deterministic recommendations, history preserved, express fails
-// closed, and tenant/commercial isolation enforced.
+// Fare Intelligence & commercial model: operator-set fares remain intact,
+// passenger service fees stay separate, and tenant isolation is enforced.
 const config={...serverConfig(),schema:'lr_test_'+randomUUID().replaceAll('-',''),demoLogin:true};
 const db=createDatabase(config);
 const sql=(q,p=[])=>db.transaction(tx=>tx.query(q,p));
@@ -55,27 +54,30 @@ const call=(path,token,opts={})=>{const {method='GET',body,key}=opts;
     ...(body===undefined?{}:{body:JSON.stringify(body)})}));};
 const OD={originStopId:demoId(200),destinationStopId:demoId(201)}; // Cotonou → Bohicon
 
-test('commission model: 5% is included in the final customer price, never added on top',async()=>{
+test('2% ticket service fee is added on top of the published operator fare',async()=>{
   const {commissionMinor,netMinor,grossMinor}=await import('@leroutier/domain').then(m=>m.splitCommission(7500));
   assert.equal(commissionMinor,375);assert.equal(netMinor,7125);assert.equal(grossMinor,7500);
   // The fare the passenger pays is the published segment sum, unchanged.
   const t=transport(db);
   const quote=await t.availability(demo.service,0,1);
-  assert.equal(quote.fare.amountMinor,2500,'published fare is what the passenger pays');
+  assert.equal(quote.fare.amountMinor,2500,'published fare remains the transport price');
 });
 
-test('walk-up cash sale credits the operator gross minus commission and stays cash',async()=>{
+test('walk-up cash sale collects the service fee and credits the operator full fare',async()=>{
   const beforeRows=(await sql('SELECT count(*)::integer AS n FROM operator_settlements')).rows[0].n;
   const r=await call('/driver/walk-up-bookings',driverToken,{method:'POST',key:randomUUID(),
     body:{serviceId:demo.service,origin:0,destination:1,passengerName:'Test Cash',passengerPhone:'+229 97 000000',amountMinor:2500,cashReference:'CASH-01'}});
   assert.equal(r.status,200);
   const row=await one("SELECT * FROM operator_settlements WHERE source='walk_up' ORDER BY earned_at DESC LIMIT 1");
   assert.equal(row.gross_minor,2500);
-  assert.equal(row.deduction_minor,125,'5% commission out of the final price');
-  assert.equal(row.net_minor,2375,'gross = commission + net');
+  assert.equal(row.deduction_minor,0,'the service fee is added on top, not deducted');
+  assert.equal(row.net_minor,2500);
+  assert.equal(row.payout_state,'direct','the operator already received walk-up cash; it must not be paid again');
   assert.equal(row.currency,'XOF');
   const payment=await one("SELECT provider FROM payments p JOIN bookings b ON b.id=p.booking_id WHERE p.provider='cash' ORDER BY p.created_at DESC LIMIT 1");
   assert.equal(payment.provider,'cash','cash stays cash, never a fake online payment');
+  const breakdown=await one("SELECT amount_minor,fare_minor,service_fee_minor FROM payments WHERE provider='cash' AND provider_reference='CASH-01'");
+  assert.deepEqual([breakdown.amount_minor,breakdown.fare_minor,breakdown.service_fee_minor],[2550,2500,50]);
   assert.equal((await sql('SELECT count(*)::integer AS n FROM operator_settlements')).rows[0].n,beforeRows+1);
 });
 
@@ -96,13 +98,13 @@ test('online ticket payment credits the ledger once and records one transaction 
   const stub={name:'fedapay',initiate:async({paymentId})=>({reference:'FEDA-'+paymentId.slice(0,8)})};
   const pay=payments(db,stub);
   const p=await pay.initiate({id:demo.passenger,role:'passenger'},booking.id,{},'fi-intent-'+randomUUID().slice(0,8));
-  const stored=await one('SELECT provider_reference FROM payments WHERE id=$1',[p.id]);
-  const event={kind:'payment',paymentId:p.id,eventId:'evt-'+randomUUID().slice(0,8),reference:stored.provider_reference,amountMinor:booking.amount_minor,currency:'XOF',status:'succeeded'};
+  const stored=await one('SELECT provider_reference,amount_minor FROM payments WHERE id=$1',[p.id]);
+  const event={kind:'payment',paymentId:p.id,eventId:'evt-'+randomUUID().slice(0,8),reference:stored.provider_reference,amountMinor:stored.amount_minor,currency:'XOF',status:'succeeded'};
   await pay.applyEvent(event);
   const settlement=await one("SELECT * FROM operator_settlements WHERE source='ticket_online' AND reference=$1",['payment:'+p.id]);
   assert.equal(settlement.gross_minor,booking.amount_minor);
-  assert.equal(settlement.deduction_minor,Math.round(booking.amount_minor*0.05));
-  assert.equal(settlement.net_minor,settlement.gross_minor-settlement.deduction_minor);
+  assert.equal(settlement.deduction_minor,0);
+  assert.equal(settlement.net_minor,settlement.gross_minor);
   const obs=await one("SELECT * FROM fare_observations WHERE source_type='leroutier_transaction' AND source_reference=$1",['payment:'+p.id]);
   assert.equal(obs.fare_type,'passenger');assert.equal(obs.price_minor,booking.amount_minor);assert.equal(obs.currency,'XOF');
   assert.equal(obs.origin_stop_id,demoId(200));assert.equal(obs.destination_stop_id,demoId(201));
@@ -276,22 +278,21 @@ test('cross-operator isolation: aggregates only, never another operator’s rows
     'no observation rows or operator identities leak through the API');
 });
 
-test('company plan representation; independent drivers have no subscription at all',async()=>{
+test('company and independent operators receive the published manual subscription terms',async()=>{
   const commerce=commercial(db);
   // The seeded demo company predates plan representation; give it its plan row.
   await sql(`INSERT INTO operator_plans(operator_id,plan,monthly_price_minor,billing_status) VALUES($1,'standard',NULL,'not_billed') ON CONFLICT DO NOTHING`,[demo.operator]);
   const companyPlan=await commerce.plan({id:demo.ops,role:'ops',operator_id:demo.operator});
   assert.equal(companyPlan.operatorType,'company');
-  assert.equal(companyPlan.commissionBp,500);
-  assert.equal(companyPlan.subscription.active,true);
-  assert.equal(companyPlan.subscription.billingStatus,'not_billed');
+  assert.equal(companyPlan.serviceFeeBp,200);
+  assert.equal(companyPlan.subscription.monthlyPriceMinor,30000);
+  assert.equal(companyPlan.subscription.renewalMode,'manual');
   const independent=await commerce.plan({id:demo.ops,role:'ops',operator_id:SECOND_OPERATOR},SECOND_OPERATOR);
   assert.equal(independent.operatorType,'independent');
-  assert.equal(independent.subscription.active,false);
-  assert.equal(independent.subscription.monthlyPriceMinor,0,'no independent subscription charged');
-  // The schema itself refuses a plan row for an independent driver.
-  await assert.rejects(sql(`INSERT INTO operator_plans(operator_id,plan,monthly_price_minor) VALUES($1,'standard',5000)`,[SECOND_OPERATOR]),
-    e=>{const err=/** @type {{code?:string,cause?:unknown,message?:string}} */(e);return err.code==='23514' || /no subscription plan/i.test(String(err.cause??err.message));});
+  assert.equal(independent.subscription.monthlyPriceMinor,10000);
+  assert.equal(independent.subscription.renewalMode,'manual');
+  assert.equal(independent.subscription.trialEndsAt.toISOString?.()??new Date(independent.subscription.trialEndsAt).toISOString(),'2027-04-30T23:00:00.000Z');
+  await sql(`INSERT INTO operator_plans(operator_id,plan,monthly_price_minor) VALUES($1,'standard',10000) ON CONFLICT DO NOTHING`,[SECOND_OPERATOR]);
 });
 
 test('platform ops can plan-view any operator; operator ops cannot cross the boundary',async()=>{
@@ -313,6 +314,6 @@ test('existing booking and capacity invariants remain unchanged',async()=>{
   const quote=await t.availability(demo.service,1,2);
   assert.equal(quote.fare.amountMinor,2000);
   const hold=await t.hold({id:demo.passenger,role:'passenger'},{serviceId:demo.service,origin:1,destination:2},'fi-inv-'+randomUUID().slice(0,8));
-  assert.equal(hold.amount_minor,2000,'the customer total is the published fare, commission never added on top');
+  assert.equal(hold.amount_minor,2000,'the hold stores the operator-set fare');
   assert.equal(hold.status,'held');
 });

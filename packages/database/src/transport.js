@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { DomainError, invariant, journeySegments, validateTransition, uuid, idempotencyKey } from '@leroutier/domain';
+import { DomainError, invariant, journeySegments, validateTransition, uuid, idempotencyKey, priceWithServiceFee } from '@leroutier/domain';
 import { audit } from './identities.js';
 import { publicRating } from './ratings.js';
 import { describeAmenities } from './amenities.js';
@@ -58,17 +58,20 @@ export const holdsOpen = (service, bookings) =>
 export async function bookingMoney(tx, booking) {
   const sums = `SELECT
     coalesce(sum(amount_minor) FILTER (WHERE status IN ('succeeded','refunded')),0)::integer AS paid,
-    coalesce(sum(amount_minor) FILTER (WHERE status='refunded'),0)::integer AS refunded`;
+    coalesce(sum(refunded_minor) FILTER (WHERE status='refunded'),0)::integer AS refunded`;
   const own = await one(tx, `${sums} FROM payments WHERE booking_id=$1`, [booking.id]);
   const group = booking.group_id
     ? await one(tx, `${sums} FROM payments WHERE group_id=$1`, [booking.group_id])
     : { paid: 0, refunded: 0 };
   const purchase = booking.group_id
-    ? await one(tx, 'SELECT amount_minor FROM booking_groups WHERE id=$1', [booking.group_id])
+    ? await one(tx, 'SELECT amount_minor,service_fee_minor FROM booking_groups WHERE id=$1', [booking.group_id])
     : null;
   const paidMinor = own.paid + group.paid;
   const refundedMinor = own.refunded + group.refunded;
-  const dueMinor = booking.group_id ? (purchase?.amount_minor ?? 0) : booking.amount_minor;
+  const fareMinor = booking.group_id ? (purchase?.amount_minor ?? 0) : booking.amount_minor;
+  // Fee is stored with the hold so existing tickets keep their old total and
+  // a quote cannot change between booking and payment.
+  const dueMinor = fareMinor + (booking.group_id ? (purchase?.service_fee_minor ?? 0) : (booking.service_fee_minor ?? 0));
   return { paidMinor, refundedMinor, dueMinor, settled: paidMinor - refundedMinor === dueMinor };
 }
 
@@ -212,9 +215,10 @@ export function transport(db) {
     invariant(seat, requested === null ? 'SOLD_OUT' : 'SEAT_TAKEN',
       requested === null ? 'No seat is available on every requested segment.'
         : 'Ce siège vient d’être pris. Choisissez-en un autre.', 409);
-    const booking = await one(tx, `INSERT INTO bookings(service_id,passenger_id,origin_sequence,destination_sequence,seat_number,status,amount_minor,expires_at,idempotency_key,request_fingerprint)
-      VALUES($1,$2,$3,$4,$5,'held',$6,now()+interval '10 minutes',$7,$8) RETURNING *`,
-    [serviceId, actor.id, origin, destination, seat.seat_number, quote.fare.amountMinor, key, hash]);
+    const pricing=priceWithServiceFee(quote.fare.amountMinor);
+    const booking = await one(tx, `INSERT INTO bookings(service_id,passenger_id,origin_sequence,destination_sequence,seat_number,status,amount_minor,service_fee_minor,expires_at,idempotency_key,request_fingerprint)
+      VALUES($1,$2,$3,$4,$5,'held',$6,$7,now()+interval '10 minutes',$8,$9) RETURNING *`,
+    [serviceId, actor.id, origin, destination, seat.seat_number, quote.fare.amountMinor,pricing.serviceFeeMinor, key, hash]);
     await tx.query('INSERT INTO booking_passengers(booking_id,passenger_id) VALUES($1,$2)', [booking.id, actor.id]);
     await tx.query(`INSERT INTO booking_segments(booking_id,service_id,seat_number,sequence)
       SELECT $1,$2,$3,generate_series($4::integer,$5::integer-1)`, [booking.id, serviceId, seat.seat_number, origin, destination]);
@@ -255,7 +259,8 @@ export function transport(db) {
       // Locked up front, so nothing can change between validating the party and
       // confirming it.
       const bookings = (await tx.query('SELECT * FROM bookings WHERE group_id=$1 ORDER BY seat_number FOR UPDATE', [group.id])).rows;
-      return { kind: 'group', id: group.id, group, service, amount_minor: group.amount_minor, bookings };
+      return { kind: 'group', id: group.id, group, service, amount_minor: group.amount_minor,
+        service_fee_minor:group.service_fee_minor??0,bookings };
     }
     const { booking, service } = await getBooking(tx, id, actor);
     // A seat bought as part of a party is paid for by the party. Letting it take
@@ -263,7 +268,8 @@ export function transport(db) {
     // covered, and the operator would be credited for both.
     invariant(!booking.group_id, 'PAYMENT_TARGET_GROUPED',
       'Ce billet fait partie d’un achat groupé : le règlement se fait sur l’achat entier.', 409);
-    return { kind: 'booking', id: booking.id, booking, service, amount_minor: booking.amount_minor, bookings: [booking] };
+    return { kind: 'booking', id: booking.id, booking, service, amount_minor: booking.amount_minor,
+      service_fee_minor:booking.service_fee_minor??0,bookings: [booking] };
   }
 
 
@@ -333,10 +339,11 @@ export function transport(db) {
         'Un des sièges choisis vient d’être pris. Choisissez-en d’autres.', 409);
       seats = picked.rows;
     }
+    const groupPricing=priceWithServiceFee(total);
     const group = await one(tx, `INSERT INTO booking_groups(service_id,origin_sequence,destination_sequence,quantity,
-      seat_amount_minor,amount_minor,status,purchaser_id,expires_at,idempotency_key,request_fingerprint)
-      VALUES($1,$2,$3,$4,$5,$6,'held',$7,now()+interval '10 minutes',$8,$9) RETURNING *`,
-    [serviceId, origin, destination, quantity, quote.fare.amountMinor, total, actor.id, key, hash]);
+      seat_amount_minor,amount_minor,service_fee_minor,status,purchaser_id,expires_at,idempotency_key,request_fingerprint)
+      VALUES($1,$2,$3,$4,$5,$6,$7,'held',$8,now()+interval '10 minutes',$9,$10) RETURNING *`,
+    [serviceId, origin, destination, quantity, quote.fare.amountMinor, total, groupPricing.serviceFeeMinor, actor.id, key, hash]);
     for (const { seat_number: seatNumber } of seats) {
       const booking = await one(tx, `INSERT INTO bookings(service_id,passenger_id,origin_sequence,destination_sequence,seat_number,status,amount_minor,expires_at,idempotency_key,request_fingerprint,group_id)
         VALUES($1,$2,$3,$4,$5,'held',$6,$7,$8,$9,$10) RETURNING *`,
@@ -540,10 +547,11 @@ export function transport(db) {
         invariant(holdsOpen(service, target.bookings), 'INVALID_PAYMENT', 'An active hold is required.', 409);
         invariant(!await one(tx, "SELECT id FROM payments WHERE (booking_id=$1 OR group_id=$1) AND status IN ('pending','succeeded')", [target.id]),
           'PAYMENT_EXISTS', 'Payment already exists.', 409);
-        const payment = await one(tx, `INSERT INTO payments(booking_id,group_id,provider,provider_reference,amount_minor,currency,status,idempotency_key,request_fingerprint,recorded_by)
-          VALUES($1,$2,'demo',$3,$4,'XOF','succeeded',$5,$6,$7) RETURNING *`,
+        const pricing={fareMinor:target.amount_minor,serviceFeeMinor:target.service_fee_minor,totalMinor:target.amount_minor+target.service_fee_minor};
+        const payment = await one(tx, `INSERT INTO payments(booking_id,group_id,provider,provider_reference,amount_minor,fare_minor,service_fee_minor,currency,status,idempotency_key,request_fingerprint,recorded_by)
+          VALUES($1,$2,'demo',$3,$4,$5,$6,'XOF','succeeded',$7,$8,$9) RETURNING *`,
         [target.kind === 'booking' ? target.id : null, target.kind === 'group' ? target.id : null,
-          'TEST-SIM-' + target.id, target.amount_minor, storedKey, fingerprint([target.id, 'test']), actor.id]);
+          'TEST-SIM-' + target.id, pricing.totalMinor, pricing.fareMinor, pricing.serviceFeeMinor, storedKey, fingerprint([target.id, 'test']), actor.id]);
         // Every traveller, in this transaction. A purchase that confirms for some
         // of its party and not others is the half-state this design refuses.
         for (const booking of target.bookings) await txTransition(tx, actor, booking.id, 'confirm');
@@ -571,14 +579,15 @@ export function transport(db) {
         invariant(input.provider !== 'demo' || service.is_demo, 'INVALID_PAYMENT', 'Demo payment is only allowed on demo services.');
         const prior = await one(tx, 'SELECT * FROM payments WHERE idempotency_key=$1', [key]);
         if (prior) { invariant(prior.request_fingerprint === hash, 'IDEMPOTENCY_CONFLICT', 'The key was used for another payment.', 409); return prior; }
-        invariant(holdsOpen(service, target.bookings) && target.amount_minor === input.amountMinor,
+        const pricing={fareMinor:target.amount_minor,serviceFeeMinor:target.service_fee_minor,totalMinor:target.amount_minor+target.service_fee_minor};
+        invariant(holdsOpen(service, target.bookings) && pricing.totalMinor === input.amountMinor,
           'INVALID_PAYMENT', 'Payment does not match an active hold.', 409);
         invariant(!await one(tx,"SELECT id FROM payments WHERE (booking_id=$1 OR group_id=$1) AND status='pending'",[id]),'PAYMENT_PENDING','Reconcile the pending provider payment before recording another payment.',409);
         invariant(!await one(tx, "SELECT id FROM payments WHERE (booking_id=$1 OR group_id=$1) AND status='succeeded'", [id]), 'ALREADY_PAID', 'Payment already recorded.', 409);
-        const payment = await one(tx, `INSERT INTO payments(booking_id,group_id,provider,provider_reference,amount_minor,currency,status,idempotency_key,request_fingerprint,recorded_by)
-          VALUES($1,$2,$3,$4,$5,'XOF','succeeded',$6,$7,$8) RETURNING *`,
+        const payment = await one(tx, `INSERT INTO payments(booking_id,group_id,provider,provider_reference,amount_minor,fare_minor,service_fee_minor,currency,status,idempotency_key,request_fingerprint,recorded_by)
+          VALUES($1,$2,$3,$4,$5,$6,$7,'XOF','succeeded',$8,$9,$10) RETURNING *`,
         [target.kind === 'booking' ? target.id : null, target.kind === 'group' ? target.id : null,
-          input.provider, input.reference, input.amountMinor, key, hash, actor.id]);
+          input.provider, input.reference, input.amountMinor, pricing.fareMinor, pricing.serviceFeeMinor, key, hash, actor.id]);
         await emit(tx, 'payment.recorded', payment.id, {
           ...(target.kind === 'booking' ? { bookingId: target.id } : { groupId: target.id }) });
         return payment;

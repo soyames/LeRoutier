@@ -29,7 +29,7 @@ export async function bookingDocument(tx, id) {
   // A seat is paid for by its own payment or by its purchase's, so the document
   // shows both: the traveller's receipt is the money that actually settled their
   // seat, not only the rows addressed to it.
-  const payments = (await tx.query(`SELECT id,amount_minor,currency,status,created_at,group_id FROM payments
+  const payments = (await tx.query(`SELECT id,amount_minor,fare_minor,service_fee_minor,provider_fee_minor,currency,status,created_at,group_id FROM payments
     WHERE (booking_id=$1 OR ($2::uuid IS NOT NULL AND group_id=$2)) AND status IN ('succeeded','refunded')
     ORDER BY created_at,id`, [id, b.group_id ?? null])).rows;
   const money = await bookingMoney(tx, b);

@@ -8,6 +8,7 @@ import { Armchair, Ticket, Building2, Navigation, UserRound, ArrowLeftRight, Cre
 import { NotificationPreferences } from './notifications.jsx';
 import { JourneySearchResults } from './journey-results.jsx';
 import { useGeolocation, nearestPlace } from './geolocation.js';
+import { priceWithServiceFee } from '@leroutier/domain';
 import { rememberCheckout } from './checkout.jsx';
 import { JourneyTimeline } from './journey.jsx';
 import { JourneyTracking, TicketLookup, TrackingPrivacyNote } from './tracking.jsx';
@@ -471,7 +472,7 @@ function LegacyServiceList({ originStopId, destinationStopId, day, choose }) {
                   <div><Badge tone={seats > 2 ? 'success' : seats ? 'warning' : 'danger'}><Armchair size={13}/>{seats ? `${seats} place${seats > 1 ? 's' : ''}` : 'Complet'}</Badge></div>
                 </div>
                 <div className="end">
-                  <span className="trip-price">{fcfa(a.fare.amountMinor)}</span>
+                  <span className="trip-price">{fcfa(priceWithServiceFee(a.fare.amountMinor).totalMinor)}<small className="small muted"> tarif + frais 2 %</small></span>
                   {service.is_demo && <Badge tone="danger">TEST</Badge>}
                   {/* No login at selection: choosing opens the anonymous checkout. */}
                   <button className="btn btn-primary" disabled={!online || !seats} onClick={() => choose(service)}>Choisir</button>

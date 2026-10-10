@@ -224,7 +224,7 @@ test('a transport company onboards, and its subscription plan is read, with no t
   // read from the operator's own plan row, which no ticket and no fare touches.
   const plan = await commercial(db).plan({ id: account.id, role: 'ops', operator_id: result.operatorId });
   assert.equal(plan.operatorType, 'company');
-  assert.equal(plan.commissionBp, 500, 'the transaction commission policy is unchanged');
+  assert.equal(plan.serviceFeeBp, 200, 'the passenger service fee is 2% and separate from fares');
   assert.ok(plan.subscription && 'billingStatus' in plan.subscription,
     'and the plan is a subscription record, not a booking');
   await nothingWasBought();

@@ -48,7 +48,7 @@ test('ops records payment and passenger confirms without client-supplied fare',a
   // pays once, at the counter exactly as online. A single seat of a purchase
   // refuses its own payment and says which id to use.
   assert.equal((await call(`/api/v1/bookings/${booking.id}/payments`,'POST',{provider:'cash',reference:'OPS-CASH-'+randomUUID().slice(0,8),amountMinor:2500,currency:'XOF'},'ops')).status,409);
-  assert.equal((await call(`/api/v1/bookings/${purchase.id}/payments`,'POST',{provider:'cash',reference:'OPS-CASH-'+randomUUID().slice(0,8),amountMinor:2500,currency:'XOF'},'ops')).status,200);
+  assert.equal((await call(`/api/v1/bookings/${purchase.id}/payments`,'POST',{provider:'cash',reference:'OPS-CASH-'+randomUUID().slice(0,8),amountMinor:2550,currency:'XOF'},'ops')).status,200);
   assert.equal((await call(`/api/v1/bookings/${booking.id}/confirm`,'POST')).data.status,'confirmed');
 });
 test('driver reads assignment and manifest then boards/alights',async()=>{

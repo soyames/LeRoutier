@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
+import { priceWithServiceFee } from '@leroutier/domain';
 import { Card, Badge, SectionTitle, ErrorState, BrandLoader, PHONE_COUNTRIES, resolvePhoneCountry, composePhone } from '@leroutier/ui';
 import { fcfa, time, dayLong } from '@leroutier/ui';
 import { ArrowLeft, CreditCard, Lock, Users } from 'lucide-react';
@@ -215,7 +216,9 @@ function CheckoutFlow({ intent }) {
 
   const perPassenger = availability.data?.fare?.amountMinor ?? option.fare.amountMinor;
   const seatsLeft = availability.data?.available ?? option.available;
-  const total = perPassenger * quantity;
+  const fareTotal = perPassenger * quantity;
+  const pricing = priceWithServiceFee(fareTotal);
+  const total = pricing.totalMinor;
   const soldOut = seatsLeft === 0;
   const contactIncomplete = !buyingAsSelf && (name.trim().length < 2 || phone.replace(/[^0-9]/g, '').length < 6);
 
@@ -347,6 +350,12 @@ function CheckoutFlow({ intent }) {
       {step === 'review' && !soldOut && quantity === 1 && <SeatPicker option={option} value={seat} onChange={setSeat}/>}
       {step === 'review' && quantity > 1 && <p className="small muted" role="status">
         Nous attribuons {quantity} places libres. Chaque voyageur reçoit son propre billet avec son siège.</p>}
+      {step === 'review' && <div className="summary" aria-label="Détail du prix">
+        <div className="row"><span>Tarif fixé par le transporteur · {quantity} voyageur{quantity>1?'s':''}</span><span>{fcfa(fareTotal)}</span></div>
+        <div className="row"><span>Frais de service LeRoutier (2 %)</span><span>{fcfa(pricing.serviceFeeMinor)}</span></div>
+        <div className="row"><strong>Total à payer</strong><strong>{fcfa(total)}</strong></div>
+        <p className="small muted">Les éventuels frais du prestataire de paiement sont affichés séparément par celui-ci avant validation.</p>
+      </div>}
       {/* Offered while the fare is still on screen, so it is a decision rather
           than a surprise after payment. Renders nothing at all when no partner
           is active, which is the state until one signs. */}

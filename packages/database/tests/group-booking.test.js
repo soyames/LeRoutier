@@ -154,12 +154,12 @@ test('chosen seats are honoured, and a clash is refused rather than silently res
 test('the whole party confirms together on one payment for the party total', async () => {
   const group = await hold(2);
   const payment = await pay.initiate(passenger, group.id, {}, randomUUID());
-  assert.equal(payment.amountMinor, group.amount_minor, 'one charge for the party');
+  assert.equal(payment.amountMinor, group.amount_minor+group.service_fee_minor, 'one charge for the party including the service fee');
   assert.equal(payment.groupId, group.id);
   assert.equal(payment.bookingId, null, 'a party payment settles the purchase, not a seat');
 
   await pay.applyEvent({ kind: 'payment', paymentId: payment.id, eventId: 'evt-1', reference: await referenceOf(payment.id),
-    amountMinor: group.amount_minor, currency: 'XOF', status: 'succeeded' });
+    amountMinor: group.amount_minor+group.service_fee_minor, currency: 'XOF', status: 'succeeded' });
   const seats = await groupSeats(group.id);
   assert.ok(seats.every(s => s.status === 'confirmed'), JSON.stringify(seats));
   const stored = await one('SELECT status FROM booking_groups WHERE id=$1', [group.id]);
@@ -180,7 +180,7 @@ test('the party settles as a whole: the payment covers every seat, not one fare'
   const member = await one('SELECT * FROM bookings WHERE group_id=$1 ORDER BY seat_number LIMIT 1', [group.id]);
   const payment = await pay.initiate(passenger, group.id, {}, randomUUID());
   await pay.applyEvent({ kind: 'payment', paymentId: payment.id, eventId: 'evt-1', reference: await referenceOf(payment.id),
-    amountMinor: group.amount_minor, currency: 'XOF', status: 'succeeded' });
+    amountMinor: group.amount_minor+group.service_fee_minor, currency: 'XOF', status: 'succeeded' });
 
   // This is the assertion the whole grouped design turns on. One seat's own fare
   // is three times smaller than the payment that settled it, so a rule that
@@ -188,7 +188,7 @@ test('the party settles as a whole: the payment covers every seat, not one fare'
   // unconfirmable and every ticket unboardable at the door.
   const money = await db.transaction(tx => bookingMoney(tx, member));
   assert.notEqual(member.amount_minor, group.amount_minor, 'the seat fare really is smaller than the party total');
-  assert.equal(money.dueMinor, group.amount_minor, 'the seat is covered by the purchase total');
+  assert.equal(money.dueMinor, group.amount_minor+group.service_fee_minor, 'the seat is covered by the purchase total');
   assert.equal(money.settled, true);
 
   const issued = await ticket.issue(passenger, member.id);
@@ -206,13 +206,13 @@ test('the settlement is credited once for the party total, and a replayed event 
   const group = await hold(2);
   const payment = await pay.initiate(passenger, group.id, {}, randomUUID());
   const event = { kind: 'payment', paymentId: payment.id, eventId: 'evt-1', reference: await referenceOf(payment.id),
-    amountMinor: group.amount_minor, currency: 'XOF', status: 'succeeded' };
+    amountMinor: group.amount_minor+group.service_fee_minor, currency: 'XOF', status: 'succeeded' };
   await pay.applyEvent(event);
   const credited = await all('SELECT gross_minor,deduction_minor FROM operator_settlements');
   assert.equal(credited.length, 1, 'one credit for the party');
   assert.equal(credited[0].gross_minor, group.amount_minor);
-  assert.equal(credited[0].deduction_minor + credited[0].gross_minor - credited[0].deduction_minor,
-    group.amount_minor, 'the commission comes out of the money actually collected');
+  assert.equal(credited[0].deduction_minor,0,'the service fee is added on top of the operator fare');
+  assert.equal(credited[0].gross_minor,group.amount_minor);
 
   // The same event again, and the same collection under a different event id —
   // FedaPay reports one collection as both approved and transferred.
@@ -226,7 +226,7 @@ test('market evidence records one fare per traveller, never the party total as o
   const group = await hold(3);
   const payment = await pay.initiate(passenger, group.id, {}, randomUUID());
   await pay.applyEvent({ kind: 'payment', paymentId: payment.id, eventId: 'evt-1', reference: await referenceOf(payment.id),
-    amountMinor: group.amount_minor, currency: 'XOF', status: 'succeeded' });
+    amountMinor: group.amount_minor+group.service_fee_minor, currency: 'XOF', status: 'succeeded' });
   const observed = await all('SELECT price_minor FROM fare_observations ORDER BY source_reference');
   assert.equal(observed.length, 3, 'three travellers are three observations');
   assert.ok(observed.every(o => o.price_minor === group.perPassengerMinor),
@@ -237,10 +237,12 @@ test('a refund releases the whole party', async () => {
   const group = await hold(2);
   const payment = await pay.initiate(passenger, group.id, {}, randomUUID());
   await pay.applyEvent({ kind: 'payment', paymentId: payment.id, eventId: 'evt-1', reference: await referenceOf(payment.id),
-    amountMinor: group.amount_minor, currency: 'XOF', status: 'succeeded' });
+    amountMinor: group.amount_minor+group.service_fee_minor, currency: 'XOF', status: 'succeeded' });
   await pay.applyEvent({ kind: 'payment', paymentId: payment.id, eventId: 'evt-2', reference: await referenceOf(payment.id),
-    amountMinor: group.amount_minor, currency: 'XOF', status: 'refunded' });
+    amountMinor: group.amount_minor+group.service_fee_minor, currency: 'XOF', status: 'refunded' });
   assert.ok((await groupSeats(group.id)).every(s => s.status === 'cancelled'), 'every seat is released');
+  assert.equal((await one('SELECT refunded_minor FROM payments WHERE id=$1',[payment.id])).refunded_minor,group.amount_minor,
+    'the operator fare is refunded while the service fee stays retained');
   assert.equal((await one('SELECT count(*)::integer AS n FROM booking_segments')).n, 0, 'and every segment with it');
 });
 
@@ -252,7 +254,7 @@ test('a party whose seats lapsed is held for review rather than half-confirmed',
   await db.transaction(tx => tx.query('SELECT id FROM services WHERE id=$1 FOR UPDATE', [demo.service]));
   await domain.expireHolds();
   const result = await pay.applyEvent({ kind: 'payment', paymentId: payment.id, eventId: 'evt-1', reference: await referenceOf(payment.id),
-    amountMinor: group.amount_minor, currency: 'XOF', status: 'succeeded' });
+    amountMinor: group.amount_minor+group.service_fee_minor, currency: 'XOF', status: 'succeeded' });
   assert.equal(result.reconciliation, 'review', 'a human looks at money taken for seats that are gone');
   assert.ok((await groupSeats(group.id)).every(s => s.status === 'expired'));
 });
@@ -273,7 +275,7 @@ test('each traveller gets their own usable ticket', async () => {
   const group = await hold(3);
   const payment = await pay.initiate(passenger, group.id, {}, randomUUID());
   await pay.applyEvent({ kind: 'payment', paymentId: payment.id, eventId: 'evt-1', reference: await referenceOf(payment.id),
-    amountMinor: group.amount_minor, currency: 'XOF', status: 'succeeded' });
+    amountMinor: group.amount_minor+group.service_fee_minor, currency: 'XOF', status: 'succeeded' });
   const members = await all('SELECT id,seat_number FROM bookings WHERE group_id=$1 ORDER BY seat_number', [group.id]);
   const issued = [];
   for (const member of members) issued.push(await ticket.issue(passenger, member.id));

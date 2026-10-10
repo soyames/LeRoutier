@@ -51,9 +51,9 @@ const hold=()=>d.hold(passenger,{serviceId:demo.service,origin:0,destination:1},
 async function intent(){const b=await hold();return {b,p:await pay.initiate(passenger,b.id,{},randomUUID())};}
 const sign=(raw,timestamp=Math.floor(Date.now()/1000))=>`t=${timestamp},s=${createHmac('sha256',webhookSecret).update(`${timestamp}.${raw}`).digest('hex')}`;
 const headers=raw=>new Headers({'x-fedapay-signature':sign(raw)});
-function txEvent(type,paymentId,status,amount=2500,currency='XOF'){
+function txEvent(type,paymentId,status,amount=undefined,currency='XOF'){
   const tx=currentTx ?? {id:40,reference:'T-40',amount:2500};
-  return {id:randomUUID().slice(0,8),type,entity:{id:tx.id,reference:tx.reference,status,amount,currency:{iso:currency},custom_metadata:{app:'leroutier',payment_id:paymentId}}};
+  return {id:randomUUID().slice(0,8),type,entity:{id:tx.id,reference:tx.reference,status,amount:amount??tx.amount,currency:{iso:currency},custom_metadata:{app:'leroutier',payment_id:paymentId}}};
 }
 async function webhook(event){const raw=JSON.stringify(event);return pay.webhook('fedapay',raw,headers(raw));}
 async function paid(){const {b,p}=await intent();await webhook(txEvent('transaction.approved',p.id,'approved'));return {b,p};}
@@ -66,6 +66,7 @@ before(async()=>{await migrate(db);await seed(db);await db.transaction(async tx 
 });api=createApi(db,config,undefined,adapter);});
 beforeEach(async()=>{failPayouts=false;transactions.clear();payoutsStore.clear();currentTx=null;nextTx=39;nextPayout=70;
   await db.transaction(async tx=>{await tx.query('DELETE FROM booking_segments');await tx.query("UPDATE bookings SET status='cancelled'");await tx.query('DELETE FROM payment_events');await tx.query('DELETE FROM payments');await tx.query('DELETE FROM payout_events');await tx.query('DELETE FROM driver_earnings');await tx.query('DELETE FROM payout_requests');await tx.query('DELETE FROM payout_destinations');
+    await tx.query('DELETE FROM operator_reversal_allocations');await tx.query('DELETE FROM operator_settlement_reversals');await tx.query('DELETE FROM operator_settlements');await tx.query('DELETE FROM operator_payout_events');await tx.query('DELETE FROM operator_payout_schedules');await tx.query('DELETE FROM operator_payout_requests');
     // notifications.source_event_id references outbox, and dispatching an
     // event pins the row it came from. Deliveries first, then notifications,
     // then the events they were built from.
@@ -217,7 +218,7 @@ test('unpaid bookings never produce a boarding QR; paid ones do',async()=>{
 // The six ownership rules, asserted against the running domain rather than
 // inferred from where a button is drawn. A UI that hides a control is not a
 // control: every one of these has to fail at the server.
-test('revenue belongs to the operator, and only an independent owner may withdraw it',async()=>{
+test('operator revenue is isolated; independent owner and company administrator may request it',async()=>{
   const {operatorSettlements}=await import('../src/operator-settlements.js');
   const settle=operatorSettlements(db,adapter);
   const company=await db.transaction(async tx=>(await tx.query(
@@ -246,9 +247,10 @@ test('revenue belongs to the operator, and only an independent owner may withdra
   // A company driver is paid by their employer. The company revenue is not
   // theirs to move, however senior they are.
   await assert.rejects(settle.request(companyDriver,withdrawal,randomUUID()),{code:'FORBIDDEN'});
-  // Neither is it the administrator's: a company settles on its own terms, and
-  // the platform does not hand its balance to whoever holds the admin seat.
-  await assert.rejects(settle.request(companyOps,withdrawal,randomUUID()),{code:'FORBIDDEN'});
+  // The registered company administrator can request a payout; the platform
+  // still separately approves and sends it.
+  const companyRequest=await settle.request(companyOps,withdrawal,randomUUID());
+  assert.equal(companyRequest.amountMinor,withdrawal.amountMinor);
   // A convoyeur collects cash and never owns revenue. This is the cash
   // collector / revenue owner separation, stated as a refusal.
   await assert.rejects(settle.request(convoyeur,withdrawal,randomUUID()),{code:'FORBIDDEN'});
@@ -256,7 +258,7 @@ test('revenue belongs to the operator, and only an independent owner may withdra
   // And the company balance is still intact after all of that.
   const balance=await db.transaction(async tx=>(await tx.query(
     `SELECT sum(net_minor)::integer AS total FROM operator_settlements WHERE operator_id=$1 AND payout_state='available'`,[company.id])).rows[0]);
-  assert.equal(balance.total,90000,'nothing was reserved or moved by a refused request');
+  assert.equal(balance.total,89000,'only the company administrator reserved the requested amount');
 });
 
 test('one operator can never approve, read or reconcile another operator payout',async()=>{
@@ -271,7 +273,7 @@ test('one operator can never approve, read or reconcile another operator payout'
     await tx.query(`UPDATE operators SET owner_user_id=$2,type='independent',verification_status='verified' WHERE id=$1`,[demo.operator,id]);
     return {id,role:'driver',operator_id:demo.operator};
   });
-  await db.transaction(tx=>settle.credit(tx,{operatorId:demo.operator,source:'walk_up',
+  await db.transaction(tx=>settle.credit(tx,{operatorId:demo.operator,source:'ticket_online',
     reference:'cash:'+randomUUID(),grossMinor:50000,deductionMinor:5000}));
   const request=await settle.request(owner,{amountMinor:2000,phoneNumber:'97000222',country:'BJ',network:null},randomUUID());
 
@@ -283,6 +285,29 @@ test('one operator can never approve, read or reconcile another operator payout'
   await assert.rejects(settle.approve(owner,request.id),{code:'FORBIDDEN'});
   // A passenger is nowhere near any of it.
   await assert.rejects(settle.approve({id:demo.passenger,role:'passenger'},request.id),{code:'FORBIDDEN'});
+});
+
+test('monthly operator payouts require opt-in and transfer online ticket revenue only',async()=>{
+  const {operatorSettlements}=await import('../src/operator-settlements.js');
+  const settle=operatorSettlements(db,adapter),ownerId=randomUUID(),operatorId=randomUUID();
+  await db.transaction(async tx=>{
+    await tx.query("INSERT INTO users(id,display_name,role,profile_completed_at) VALUES($1,'Monthly Owner','driver',now())",[ownerId]);
+    await tx.query("INSERT INTO operators(id,name,type,verification_status,owner_user_id) VALUES($1,'Monthly Operator','independent','verified',$2)",[operatorId,ownerId]);
+    await tx.query('UPDATE users SET operator_id=$2 WHERE id=$1',[ownerId,operatorId]);
+    await tx.query("INSERT INTO driver_profiles(user_id,operator_id,license_reference,active) VALUES($1,$2,'MONTHLY-1',true)",[ownerId,operatorId]);
+    await tx.query(`INSERT INTO operator_payout_schedules(operator_id,enabled,phone_number,country,network,consented_by)
+      VALUES($1,true,'97000123','BJ','mtn',$2)`,[operatorId,ownerId]);
+    await settle.credit(tx,{operatorId,source:'ticket_online',reference:'month-online-'+operatorId,grossMinor:12000,deductionMinor:0});
+    await settle.credit(tx,{operatorId,source:'walk_up',reference:'month-cash-'+operatorId,grossMinor:5000,deductionMinor:0,payoutState:'direct'});
+  });
+  const result=await settle.runMonthly('2026-11-01');
+  assert.equal(result.processed,1);
+  assert.equal(result.failed,0);
+  const request=await db.transaction(async tx=>(await tx.query("SELECT * FROM operator_payout_requests WHERE operator_id=$1 AND payout_kind='monthly'",[operatorId])).rows[0]);
+  assert.equal(request.amount_minor,12000);
+  assert.equal(request.debt_offset_minor,0);
+  const rows=await db.transaction(async tx=>(await tx.query('SELECT source,payout_state FROM operator_settlements WHERE operator_id=$1 ORDER BY source',[operatorId])).rows);
+  assert.deepEqual(rows.map(row=>[row.source,row.payout_state]),[['ticket_online','reserved'],['walk_up','direct']]);
 });
 
 test('a withdrawal is reserved once: approving twice cannot pay twice',async()=>{
@@ -297,7 +322,7 @@ test('a withdrawal is reserved once: approving twice cannot pay twice',async()=>
     await tx.query(`UPDATE operators SET owner_user_id=$2,type='independent',verification_status='verified' WHERE id=$1`,[demo.operator,id]);
     return {id,role:'driver',operator_id:demo.operator};
   });
-  await db.transaction(tx=>settle.credit(tx,{operatorId:demo.operator,source:'walk_up',
+  await db.transaction(tx=>settle.credit(tx,{operatorId:demo.operator,source:'ticket_online',
     reference:'cash:'+randomUUID(),grossMinor:20000,deductionMinor:0}));
   const key=randomUUID();
   const first=await settle.request(owner,{amountMinor:5000,phoneNumber:'97000444',country:'BJ',network:null},key);
@@ -384,7 +409,7 @@ test('a passenger cannot influence what they are charged',async()=>{
   }
   const intent=await pay.initiate(passenger,b.id,{},randomUUID());
   const stored=await db.transaction(async tx=>(await tx.query('SELECT amount_minor,currency FROM payments WHERE id=$1',[intent.id])).rows[0]);
-  assert.equal(stored.amount_minor,b.amount_minor,'the amount is the booking’s, server-side');
+  assert.equal(stored.amount_minor,b.amount_minor+Math.round(b.amount_minor*0.02),'the amount includes the server-calculated service fee');
   assert.equal(stored.currency,'XOF');
 
   // And a provider event claiming a different amount never confirms anything.

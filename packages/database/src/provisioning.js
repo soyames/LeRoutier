@@ -80,6 +80,8 @@ async function provisionUser(tx,actor,input,role,issuer){
     ON CONFLICT(user_id) DO UPDATE SET license_reference=EXCLUDED.license_reference`,[user.id,operatorId,input.licenseReference.trim()]);
   if(role==='convoyeur')await tx.query(`INSERT INTO convoyeur_profiles(user_id,operator_id,active) VALUES($1,$2,true)
     ON CONFLICT(user_id) DO UPDATE SET active=true`,[user.id,operatorId]);
+  if(role==='cashier')await tx.query(`INSERT INTO operator_cashier_audit(operator_id,user_id,assigned_by,action)
+    VALUES($1,$2,$3,'assigned')`,[operatorId,user.id,actor.id]);
   await audit(tx,actor.id,'identity.role_assigned',user.id,operatorId,{role});
   return user;
 }
@@ -144,7 +146,7 @@ export function provisioning(db,{issuer}={issuer:undefined}) {
         operators:(await tx.query('SELECT id,name,active FROM operators WHERE ($1::uuid IS NULL OR id=$1) ORDER BY name',scope)).rows,
         users:(await tx.query(`SELECT u.id,u.display_name,u.role,u.operator_id,u.active,d.license_reference,d.active AS driver_active,c.active AS convoyeur_active FROM users u
           LEFT JOIN driver_profiles d ON d.user_id=u.id LEFT JOIN convoyeur_profiles c ON c.user_id=u.id
-          WHERE u.role IN ('ops','driver','convoyeur') AND ($1::uuid IS NULL OR u.operator_id=$1) ORDER BY u.display_name`,scope)).rows,
+          WHERE u.role IN ('ops','driver','convoyeur','cashier') AND ($1::uuid IS NULL OR u.operator_id=$1) ORDER BY u.display_name`,scope)).rows,
         routes:(await tx.query('SELECT id,name,operator_id FROM routes WHERE ($1::uuid IS NULL OR operator_id=$1) ORDER BY name',scope)).rows,
         vehicles:(await tx.query('SELECT * FROM vehicles WHERE ($1::uuid IS NULL OR operator_id=$1) ORDER BY registration',scope)).rows,
         places:(await tx.query('SELECT id,name FROM places ORDER BY name LIMIT 500')).rows,
@@ -162,6 +164,12 @@ export function provisioning(db,{issuer}={issuer:undefined}) {
     });},
     driver:(actor,input,key)=>mutate(actor,'driver',input,key,(tx,current)=>provisionUser(tx,current,input,'driver',issuer)),
     convoyeur:(actor,input,key)=>mutate(actor,'convoyeur',input,key,(tx,current)=>provisionUser(tx,current,input,'convoyeur',issuer)),
+    cashier:(actor,input,key)=>mutate(actor,'cashier',input,key,async(tx,current)=>{
+      const operatorId=await operatorScope(tx,current,input.operatorId);
+      invariant((await row(tx,'SELECT type FROM operators WHERE id=$1',[operatorId]))?.type==='company',
+        'CASHIER_COMPANY_ONLY','Les comptes caissiers sont réservés aux compagnies de transport.',403);
+      return provisionUser(tx,current,input,'cashier',issuer);
+    }),
     opsUser:(actor,input,key)=>mutate(actor,'ops-user',input,key,(tx,current)=>provisionUser(tx,current,input,'ops',issuer)),
 
     /**

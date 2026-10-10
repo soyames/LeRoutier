@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { useApi, useSession } from '@leroutier/config/client';
 import { Card, Badge, StatCard, SectionTitle, ApiState, ErrorState, SkeletonCards } from '@leroutier/ui';
 import { status, fcfa } from '@leroutier/ui';
-import { splitCommission } from '@leroutier/domain';
+import { priceWithServiceFee,splitCommission } from '@leroutier/domain';
 import { Provisioning } from './provisioning.jsx';
 import { ParcelDocuments } from './documents.jsx';
 import { ParcelPickup } from './parcel-pickup.jsx';
@@ -410,7 +410,7 @@ export function Payments(){
       {bookings.loading || bookings.error ? <ApiState resource={bookings}/> : <>
         <label>Référence du reçu<input className="control" value={reference} onChange={e=>setReference(e.target.value)} maxLength={100}/></label>
         <p className="small muted">Enregistrer uniquement un paiement réellement reçu. Le passager ne paie jamais en espèces dans l’application : ce guichet est le canal espèces de la compagnie.</p>
-        {(bookings.data||[]).filter(b=>b.status==='held').map(b=><div className="between wrap" key={b.id}><span className="small">{b.passenger_name} · {b.amount_minor} FCFA</span><button className="btn btn-primary" disabled={!online || !reference.trim()} onClick={()=>act(`/bookings/${b.id}/payments`,{provider:'cash',reference:reference.trim(),amountMinor:b.amount_minor,currency:'XOF'},'POST','cash-'+b.id,()=>bookings.reload())}>Enregistrer le paiement</button></div>)}
+        {(bookings.data||[]).filter(b=>b.status==='held').map(b=>{const price=priceWithServiceFee(b.amount_minor);return <div className="between wrap" key={b.id}><span className="small">{b.passenger_name} · tarif {fcfa(price.fareMinor)} + service 2 % {fcfa(price.serviceFeeMinor)} = {fcfa(price.totalMinor)}</span><button className="btn btn-primary" disabled={!online || !reference.trim()} onClick={()=>act(`/bookings/${b.id}/payments`,{provider:'cash',reference:reference.trim(),amountMinor:price.totalMinor,currency:'XOF'},'POST','cash-'+b.id,()=>bookings.reload())}>Enregistrer le paiement</button></div>;})}
       </>}
     </Card>
     <SectionTitle title="Paiements en ligne (FedaPay)" trailing={<select className="control" value={paymentStatus} onChange={e=>setPaymentStatus(e.target.value)}>{['pending','failed','refunded'].map(s=><option key={s} value={s}>{status('payment',s).label}</option>)}</select>}/>

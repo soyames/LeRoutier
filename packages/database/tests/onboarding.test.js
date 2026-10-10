@@ -205,14 +205,15 @@ test('walk-up cash sales confirm the booking, record cash and credit the operato
   assert.equal(payment.status,'succeeded');
   const credit=await one("SELECT * FROM operator_settlements WHERE source='walk_up' AND reference=$1",['walkup:'+booking.id]);
   assert.equal(credit.gross_minor,2500);
-  assert.equal(credit.deduction_minor,125,'the 5% commission comes out of the final cash price');
-  assert.equal(credit.net_minor,2375);
+  assert.equal(credit.deduction_minor,0,'the service fee is collected on top of the fare');
+  assert.equal(credit.net_minor,2500);
   assert.equal(credit.operator_id,demo.operator);
   // Amount tampering is rejected; passengers can never sell cash seats.
   await assert.rejects(walkUp(driver,{serviceId:demo.service,origin:0,destination:1,passengerName:'X',passengerPhone:'+229 61999998',amountMinor:1,cashReference:'R-2'},randomUUID()),{code:'INVALID_WALKUP'});
   await assert.rejects(walkUp(passenger,{serviceId:demo.service,origin:0,destination:1,passengerName:'X',passengerPhone:'+229 61999998',amountMinor:2500,cashReference:'R-3'},randomUUID()),{code:'FORBIDDEN'});
   const summary=await settle.summary(ops);
-  assert.equal(summary.available,2375,'available balance is the operator net, commission already deducted');
+  assert.equal(summary.available,0,'walk-up cash is never included in a platform payout');
+  assert.equal(summary.direct,2500,'walk-up fare is reported as already received by the operator');
 });
 
 test('only independent owner-drivers can withdraw operator revenue',async()=>{
@@ -221,7 +222,7 @@ test('only independent owner-drivers can withdraw operator revenue',async()=>{
     independentDossier({licenseReference:'LIC-IND-2',vehicleRegistration:'IND-BUS-02'}),randomUUID());
   const operator=await one('SELECT * FROM operators WHERE owner_user_id=$1',[independentUser]);
   await verifyOperator(operator.id);
-  await db.transaction(async tx=>{await tx.query(`INSERT INTO operator_settlements(operator_id,source,reference,gross_minor) VALUES($1,'walk_up','fixture',5000)`,[operator.id]);});
+  await db.transaction(async tx=>{await tx.query(`INSERT INTO operator_settlements(operator_id,source,reference,gross_minor) VALUES($1,'ticket_online','fixture',5000)`,[operator.id]);});
   const owner={id:independentUser,role:'driver',operator_id:operator.id};
   const companyDriverId=await newUser('driver');
   await db.transaction(async tx=>{await tx.query('INSERT INTO driver_profiles(user_id,operator_id,license_reference) VALUES($1,$2,$3)',[companyDriverId,demo.operator,'LIC-C']);});
@@ -286,7 +287,7 @@ test('tickets state the exact boarding and arrival points',async()=>{
   await loc.moderate(platformOps,arrival.id,'verified');
   await db.transaction(async tx=>{await tx.query('UPDATE services SET departure_point_id=$1,arrival_point_id=$2 WHERE id=$3',[point.id,arrival.id,demo.service]);});
   const b=await domain.hold(passenger,{serviceId:demo.service,origin:0,destination:1},randomUUID());
-  await domain.recordPayment(ops,b.id,{provider:'cash',reference:'CASH-T',amountMinor:2500,currency:'XOF'},randomUUID());
+  await domain.recordPayment(ops,b.id,{provider:'cash',reference:'CASH-T',amountMinor:2550,currency:'XOF'},randomUUID());
   await domain.transition(passenger,b.id,'confirm');
   const issued=await ticket.issue(passenger,b.id);
   assert.equal(issued.departure.name,'Jonquet Carrefour');
