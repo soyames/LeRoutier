@@ -54,7 +54,7 @@ async function snapshot(database) {
 try {
  report.migrations=await migrate(db);await seed(db,{capacity:100});
  const booking=await d.hold(passenger,{serviceId:demo.service,origin:0,destination:1},randomUUID());
- await d.recordPayment(ops,booking.id,{amountMinor:booking.amount_minor,currency:'XOF',reference:'DRILL-SYNTHETIC',provider:'demo'},randomUUID());
+ await d.recordPayment(ops,booking.id,{amountMinor:booking.amount_minor+booking.service_fee_minor,currency:'XOF',reference:'DRILL-SYNTHETIC',provider:'demo'},randomUUID());
  await d.transition(passenger,booking.id,'confirm');
  const ticket=await tickets(db).issue(passenger,booking.id);
  const p=await parcel.create(passenger,{senderName:'Synthetic sender',senderPhone:'+22961000001',receiverName:'Synthetic receiver',receiverPhone:'+22961000002',originStopId:demoId(200),destinationStopId:demoId(201),category:'documents'},randomUUID());
