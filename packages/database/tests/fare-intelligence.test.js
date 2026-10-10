@@ -54,7 +54,7 @@ const call=(path,token,opts={})=>{const {method='GET',body,key}=opts;
     ...(body===undefined?{}:{body:JSON.stringify(body)})}));};
 const OD={originStopId:demoId(200),destinationStopId:demoId(201)}; // Cotonou → Bohicon
 
-test('2% ticket service fee is added to the transporter's published fare',async()=>{
+test('2% ticket service fee is added on top of the published operator fare',async()=>{
   const {commissionMinor,netMinor,grossMinor}=await import('@leroutier/domain').then(m=>m.splitCommission(7500));
   assert.equal(commissionMinor,375);assert.equal(netMinor,7125);assert.equal(grossMinor,7500);
   // The fare the passenger pays is the published segment sum, unchanged.
